@@ -1,0 +1,6 @@
+{
+  "anomaly_threshold": 0.5579928209396503,
+  "percentile": 95.0,
+  "metric": "Mean Squared Error (MSE)",
+  "calibration": "95.0th percentile of benign validation reconstruction error"
+}
