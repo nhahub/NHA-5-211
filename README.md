@@ -2,7 +2,7 @@
 
 **An Intelligent, Multi-Modal Hybrid Ensemble Architecture for Network Intrusion Detection and Zero-Day Anomaly Tracking**
 
-Academic Graduation Project — Built strictly to the specification in `Smart_IDS_v3_Technical_Report.pdf` (Chapters 1–10) with zero-leakage preprocessing, GPU/CPU adaptive acceleration, Optuna optimization, SHAP explainability, dry-run active mitigation, automated testing, and a Security Operations Center (SOC) dashboard.
+Academic Graduation Project — Built strictly to the specification in `Smart_IDS_v3_Technical_Report.pdf` (Chapters 1–10) with split-isolated preprocessing (post-clipping cross-split deduplication and `strict_leakage_check` enforcement), GPU/CPU adaptive acceleration, Optuna optimization, SHAP explainability, dry-run active mitigation, automated testing, and a Security Operations Center (SOC) dashboard.
 
 ---
 
@@ -25,7 +25,7 @@ Traditional signature-based Intrusion Detection Systems (e.g., Snort, Suricata) 
 
 ## 3. Objectives
 
-1. **Zero-Leakage Cyber-Data Engineering:** Ingest raw CICFlowMeter CSVs, eliminate `±Inf`, `NaN`, duplicate rows, and structural identifiers (`Flow ID`, `Source IP`, `Destination IP`, `Source Port`, `Timestamp`), split **before** fitting imputers/clippers/scalers, and experimentally validate SMOTE vs. class weighting strictly on the training split.
+1. **Zero-Leakage Cyber-Data Engineering:** Ingest raw CICFlowMeter CSVs, eliminate `±Inf`, `NaN`, duplicate rows, and structural identifiers (`Flow ID`, `Source IP`, `Destination IP`, `Source Port`, `Timestamp`), split **before** fitting imputers/clippers/scalers, deduplicate again after imputation and outlier clipping so cross-split feature collisions cannot enter validation/test or SMOTE, enforce disjointness via `strict_leakage_check`, and experimentally validate SMOTE vs. class weighting strictly on the training split.
 2. **Multi-Paradigm Benchmarking:** Implement, train, tune, and rigorously evaluate MLP, 1D-CNN, Autoencoder, XGBoost, and hybrid ensemble decision logic across accuracy, Macro/Weighted F1, ROC-AUC, PR-AUC, calibration (ECE/Brier), and single-flow latency.
 3. **Orthogonal Zero-Day Novelty Tracking:** Separate closed-set multi-class classification from open-set benign-only reconstruction error, evaluating threshold percentile trade-offs (`90, 95, 97, 99`) and a Leave-One-Attack-Out unseen-attack protocol.
 4. **Explainability & Safe Mitigation:** Provide game-theoretic SHAP attributions (`TreeExplainer` + `GradientExplainer`/`KernelExplainer` comparison) and a canonical 4-tier Active Response Engine operating in safe **DRY-RUN** simulation mode with strict `ipaddress` validation and append-only audit logging.

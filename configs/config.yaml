@@ -65,6 +65,7 @@ data:
     - "source port"
   preserve_features:
     - "Destination Port"
+  strict_leakage_check: true
   split:
     # Matches report: 15% held-out test, then 15% of remainder validation (12.75% val, 72.25% train)
     test_size: 0.15

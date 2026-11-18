@@ -55,6 +55,136 @@ class PreparedDataset:
         return self.audit_report
 
 
+class DataLeakageError(RuntimeError):
+    """Raised when strict split-isolation or zero-leakage checks fail."""
+
+
+def _row_hash_list(arr: np.ndarray, decimals: int | None = None) -> list[bytes]:
+    """Compute canonical per-row byte signatures for exact or rounded duplicate checks."""
+    if len(arr) == 0:
+        return []
+    sub = np.asarray(arr)
+    if decimals is not None:
+        sub = np.round(sub, decimals)
+    # Normalize IEEE -0.0 to +0.0 so byte signatures match mathematically equal floats.
+    sub = np.ascontiguousarray(sub + sub.dtype.type(0.0))
+    return [row.tobytes() for row in sub]
+
+
+def _deduplicate_post_clip_splits(
+    X_train_clip: pd.DataFrame,
+    y_train: np.ndarray,
+    X_val_clip: pd.DataFrame,
+    y_val: np.ndarray,
+    val_metadata: pd.DataFrame,
+    X_test_clip: pd.DataFrame,
+    y_test: np.ndarray,
+    test_metadata: pd.DataFrame,
+) -> tuple[
+    pd.DataFrame,
+    np.ndarray,
+    pd.DataFrame,
+    np.ndarray,
+    pd.DataFrame,
+    pd.DataFrame,
+    np.ndarray,
+    pd.DataFrame,
+    dict[str, int],
+]:
+    """Deduplicate clipped splits and remove val/test feature vectors that exist in train."""
+    train_hashes = _row_hash_list(X_train_clip.to_numpy(dtype=np.float64, copy=False))
+    seen_train_pairs: set[tuple[bytes, int]] = set()
+    train_feature_set: set[bytes] = set()
+    train_keep = np.zeros(len(X_train_clip), dtype=bool)
+    for i, (h, label) in enumerate(zip(train_hashes, y_train, strict=True)):
+        pair = (h, int(label))
+        if pair not in seen_train_pairs:
+            seen_train_pairs.add(pair)
+            train_feature_set.add(h)
+            train_keep[i] = True
+
+    val_hashes = _row_hash_list(X_val_clip.to_numpy(dtype=np.float64, copy=False))
+    seen_val_pairs: set[tuple[bytes, int]] = set()
+    val_feature_set: set[bytes] = set()
+    val_keep = np.zeros(len(X_val_clip), dtype=bool)
+    for i, (h, label) in enumerate(zip(val_hashes, y_val, strict=True)):
+        pair = (h, int(label))
+        if h not in train_feature_set and pair not in seen_val_pairs:
+            seen_val_pairs.add(pair)
+            val_feature_set.add(h)
+            val_keep[i] = True
+
+    test_hashes = _row_hash_list(X_test_clip.to_numpy(dtype=np.float64, copy=False))
+    seen_test_pairs: set[tuple[bytes, int]] = set()
+    test_keep = np.zeros(len(X_test_clip), dtype=bool)
+    for i, (h, label) in enumerate(zip(test_hashes, y_test, strict=True)):
+        pair = (h, int(label))
+        if h not in train_feature_set and h not in val_feature_set and pair not in seen_test_pairs:
+            seen_test_pairs.add(pair)
+            test_keep[i] = True
+
+    stats = {
+        "train_within_split_removed": int((~train_keep).sum()),
+        "val_cross_or_dup_removed": int((~val_keep).sum()),
+        "test_cross_or_dup_removed": int((~test_keep).sum()),
+    }
+
+    return (
+        X_train_clip.loc[train_keep].reset_index(drop=True),
+        y_train[train_keep],
+        X_val_clip.loc[val_keep].reset_index(drop=True),
+        y_val[val_keep],
+        val_metadata.loc[val_keep].reset_index(drop=True),
+        X_test_clip.loc[test_keep].reset_index(drop=True),
+        y_test[test_keep],
+        test_metadata.loc[test_keep].reset_index(drop=True),
+        stats,
+    )
+
+
+def _drop_scaled_cross_split_collisions(
+    X_train_scaled: np.ndarray,
+    X_val_scaled: np.ndarray,
+    y_val: np.ndarray,
+    val_metadata: pd.DataFrame,
+    X_test_scaled: np.ndarray,
+    y_test: np.ndarray,
+    test_metadata: pd.DataFrame,
+    decimals: int = 6,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    pd.DataFrame,
+    np.ndarray,
+    np.ndarray,
+    pd.DataFrame,
+    dict[str, int],
+]:
+    """Remove any residual float32/rounding collisions in val/test against earlier splits."""
+    train_set = set(_row_hash_list(X_train_scaled, decimals=decimals))
+
+    val_hashes = _row_hash_list(X_val_scaled, decimals=decimals)
+    val_keep = np.array([h not in train_set for h in val_hashes], dtype=bool)
+    val_set = {h for h, keep in zip(val_hashes, val_keep, strict=True) if keep}
+
+    test_hashes = _row_hash_list(X_test_scaled, decimals=decimals)
+    test_keep = np.array([h not in train_set and h not in val_set for h in test_hashes], dtype=bool)
+
+    stats = {
+        "val_scaled_collision_removed": int((~val_keep).sum()),
+        "test_scaled_collision_removed": int((~test_keep).sum()),
+    }
+    return (
+        X_val_scaled[val_keep],
+        y_val[val_keep],
+        val_metadata.loc[val_keep].reset_index(drop=True),
+        X_test_scaled[test_keep],
+        y_test[test_keep],
+        test_metadata.loc[test_keep].reset_index(drop=True),
+        stats,
+    )
+
+
 def verify_no_leakage(
     X_train_scaled: np.ndarray,
     X_val_scaled: np.ndarray,
@@ -63,28 +193,25 @@ def verify_no_leakage(
     y_train: np.ndarray,
     y_val: np.ndarray,
     y_test: np.ndarray,
+    strict: bool = True,
 ) -> dict[str, Any]:
     """Run automated verification assertions confirming zero train/eval leakage."""
     train_means = np.abs(X_train_scaled.mean(axis=0))
     max_train_mean = float(np.max(train_means))
-    val_mean_shift = float(np.max(np.abs(X_val_scaled.mean(axis=0))))
+    val_mean_shift = float(np.max(np.abs(X_val_scaled.mean(axis=0)))) if len(X_val_scaled) else 0.0
 
-    # Check that train is standardized near 0 mean, and verify unique row hashes don't leak across splits
-    # after deduplication
-    def _row_hashes(arr: np.ndarray, limit: int = 50000) -> set[bytes]:
-        sub = np.round(arr[:limit], 6)
-        return {row.tobytes() for row in sub}
-
-    train_hashes = _row_hashes(X_train_scaled)
-    val_hashes = _row_hashes(X_val_scaled)
-    test_hashes = _row_hashes(X_test_scaled)
+    # Hash every row across all splits (no truncation limit) to detect any cross-split feature overlap.
+    train_hashes = set(_row_hash_list(X_train_scaled, decimals=6))
+    val_hashes = set(_row_hash_list(X_val_scaled, decimals=6))
+    test_hashes = set(_row_hash_list(X_test_scaled, decimals=6))
 
     train_test_overlap = len(train_hashes & test_hashes)
     train_val_overlap = len(train_hashes & val_hashes)
+    val_test_overlap = len(val_hashes & test_hashes)
 
     # Confirm val and test remain imbalanced (non-uniform counts)
-    val_counts = np.bincount(y_val)
-    test_counts = np.bincount(y_test)
+    val_counts = np.bincount(y_val) if len(y_val) else np.array([1])
+    test_counts = np.bincount(y_test) if len(y_test) else np.array([1])
     val_imbalance_ratio = float(val_counts.max() / max(1, val_counts.min()))
     test_imbalance_ratio = float(test_counts.max() / max(1, test_counts.min()))
 
@@ -93,6 +220,12 @@ def verify_no_leakage(
         "val_mean_shift_observed": round(val_mean_shift, 6),
         "train_test_exact_overlap_sample": train_test_overlap,
         "train_val_exact_overlap_sample": train_val_overlap,
+        "val_test_exact_overlap_sample": val_test_overlap,
+        "train_test_exact_overlap": train_test_overlap,
+        "train_val_exact_overlap": train_val_overlap,
+        "val_test_exact_overlap": val_test_overlap,
+        "checked_full_splits": True,
+        "strict_mode": bool(strict),
         "val_max_min_class_ratio": round(val_imbalance_ratio, 2),
         "test_max_min_class_ratio": round(test_imbalance_ratio, 2),
         "scaler_n_samples_seen": int(getattr(scaler, "n_samples_seen_", len(X_train_scaled))),
@@ -101,13 +234,25 @@ def verify_no_leakage(
             max_train_mean < 1e-4
             and int(getattr(scaler, "n_samples_seen_", 0)) == len(X_train_scaled)
             and train_test_overlap == 0
+            and train_val_overlap == 0
+            and val_test_overlap == 0
         ),
     }
     if not checks["passed"]:
-        logger.warning("Leakage verification flagged an anomaly: %s", checks)
+        logger.error("Leakage verification failed: %s", checks)
+        if strict:
+            raise DataLeakageError(
+                "Zero-leakage verification failed: "
+                f"train_test_overlap={train_test_overlap}, "
+                f"train_val_overlap={train_val_overlap}, "
+                f"val_test_overlap={val_test_overlap}, "
+                f"max_train_mean={max_train_mean:.6f}, "
+                f"scaler_fit_strictly_on_train={checks['scaler_fit_strictly_on_train']}."
+            )
     else:
         logger.info(
-            "Leakage verification passed: scaler fit exclusively on %d train rows, 0 train/test overlap.",
+            "Leakage verification passed across full splits: scaler fit exclusively on %d train rows, "
+            "0 train/val/test feature overlap.",
             len(X_train_scaled),
         )
     return checks
@@ -271,10 +416,59 @@ def run_preprocessing_pipeline(
     X_test_clip = clipper.transform(X_test_imp)
     clipped_test = clipper.last_clipped_count_
 
+    # Deduplicate again after imputation/clipping so rows collapsing onto identical values
+    # cannot cross train/val/test boundaries, BEFORE fitting StandardScaler or applying SMOTE.
+    (
+        X_train_clip,
+        y_train,
+        X_val_clip,
+        y_val,
+        val_metadata,
+        X_test_clip,
+        y_test,
+        test_metadata,
+        post_clip_stats,
+    ) = _deduplicate_post_clip_splits(
+        X_train_clip,
+        y_train,
+        X_val_clip,
+        y_val,
+        val_metadata,
+        X_test_clip,
+        y_test,
+        test_metadata,
+    )
+
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train_clip).astype(np.float32)
     X_val_scaled = scaler.transform(X_val_clip).astype(np.float32)
     X_test_scaled = scaler.transform(X_test_clip).astype(np.float32)
+
+    (
+        X_val_scaled,
+        y_val,
+        val_metadata,
+        X_test_scaled,
+        y_test,
+        test_metadata,
+        scaled_collision_stats,
+    ) = _drop_scaled_cross_split_collisions(
+        X_train_scaled,
+        X_val_scaled,
+        y_val,
+        val_metadata,
+        X_test_scaled,
+        y_test,
+        test_metadata,
+        decimals=6,
+    )
+    post_clip_dedup_removed = {
+        **post_clip_stats,
+        **scaled_collision_stats,
+        "total_removed": int(sum(post_clip_stats.values()) + sum(scaled_collision_stats.values())),
+    }
+    if post_clip_dedup_removed["total_removed"] > 0:
+        logger.info("Post-clipping deduplication removed %s", post_clip_dedup_removed)
 
     feature_names = list(X_train_clip.columns)
 
@@ -296,7 +490,14 @@ def run_preprocessing_pipeline(
     class_weights = {int(c): float(w) for c, w in zip(unique_train_cls, cw_values, strict=False)}
 
     leakage_checks = verify_no_leakage(
-        X_train_scaled, X_val_scaled, X_test_scaled, scaler, y_train, y_val, y_test
+        X_train_scaled,
+        X_val_scaled,
+        X_test_scaled,
+        scaler,
+        y_train,
+        y_val,
+        y_test,
+        strict=cfg.data.strict_leakage_check,
     )
 
     audit_report: dict[str, Any] = {
@@ -313,6 +514,7 @@ def run_preprocessing_pipeline(
         "outlier_values_clipped_train": clipped_train,
         "outlier_values_clipped_val": clipped_val,
         "outlier_values_clipped_test": clipped_test,
+        "post_clip_dedup_removed": post_clip_dedup_removed,
         "removed_columns": (
             clean_report.id_columns_removed
             + clean_report.duplicate_columns_removed

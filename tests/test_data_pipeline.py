@@ -11,8 +11,13 @@ import pytest
 from src.config import AppConfig
 from src.data.cleaner import clean_cicids_dataframe, normalize_label_text
 from src.data.feature_engineering import SchemaValidationError, align_feature_schema
-from src.data.loader import CICIDS2017_FEATURES, discover_csv_files
-from src.data.preprocessing import apply_smote_safely, run_preprocessing_pipeline
+from src.data.loader import CICIDS2017_FEATURES, discover_csv_files, generate_synthetic_cicids2017
+from src.data.preprocessing import (
+    DataLeakageError,
+    apply_smote_safely,
+    run_preprocessing_pipeline,
+    verify_no_leakage,
+)
 
 
 def test_discover_csv_files_and_whitespace_stripping(
@@ -98,3 +103,86 @@ def test_leakage_free_preprocessing_and_dynamic_smote_k(tmp_app_config: AppConfi
     assert info["k_neighbors"] == 2
     assert len(X_res) == 60
     assert int((y_res == 1).sum()) == 30
+
+
+def test_post_clip_near_duplicate_removal_and_strict_leakage_error(tmp_app_config: AppConfig) -> None:
+    """Deliberate near-duplicates differing only pre-imputation/pre-clipping must yield 0 overlap."""
+    assert tmp_app_config.data.strict_leakage_check is True
+
+    base_df = generate_synthetic_cicids2017(
+        n_samples=1200,
+        seed=99,
+        duplicate_fraction=0.0,
+        inf_fraction=0.0,
+        nan_fraction=0.0,
+        save_path=None,
+    )
+    # Remove any accidental large outlier on Flow Bytes/s in baseline rows so 1e13 cleanly exceeds 5-sigma.
+    base_df["Flow Bytes/s"] = np.clip(base_df["Flow Bytes/s"].to_numpy(dtype=np.float64), 0.0, 1e6)
+    base_df["Flow Packets/s"] = np.clip(base_df["Flow Packets/s"].to_numpy(dtype=np.float64), 0.0, 1e5)
+
+    # Inject raw-distinct near-duplicates that collapse onto identical vectors after 5-sigma clipping & imputation.
+    template_clip = base_df.iloc[[0]].copy()
+    clip_clones = []
+    for k in range(10):
+        row = template_clip.copy()
+        row["Flow Bytes/s"] = 1e13 + k * 1e8
+        clip_clones.append(row)
+
+    template_inf = base_df.iloc[[1]].copy()
+    inf_clones = []
+    for k, val in enumerate([np.inf, -np.inf, np.nan, np.inf, -np.inf, np.nan]):
+        row = template_inf.copy()
+        row["Flow Packets/s"] = val
+        row["Flow ID"] = f"inf-clone-{k}"
+        inf_clones.append(row)
+
+    combined = pd.concat([base_df, *clip_clones, *inf_clones], ignore_index=True)
+    raw_csv = tmp_app_config.paths.resolve("raw_data_dir") / "near_dup_sample.csv"
+    combined.to_csv(raw_csv, index=False)
+
+    dataset = run_preprocessing_pipeline(tmp_app_config, force_synthetic=False, save_outputs=True)
+
+    checks = dataset.audit_report["leakage_checks"]
+    assert dataset.audit_report["source"]["source_type"] == "cicids2017_raw"
+    assert dataset.audit_report["post_clip_dedup_removed"]["total_removed"] > 0
+    assert checks["passed"] is True
+    assert checks["checked_full_splits"] is True
+    assert checks["train_test_exact_overlap"] == 0
+    assert checks["train_val_exact_overlap"] == 0
+    assert checks["val_test_exact_overlap"] == 0
+    assert checks["train_test_exact_overlap_sample"] == 0
+    assert checks["train_val_exact_overlap_sample"] == 0
+    assert checks["val_test_exact_overlap_sample"] == 0
+
+    # Inject cross-split overlap manually and confirm strict vs non-strict verification behavior.
+    X_val_leaked = np.vstack([dataset.X_val_scaled, dataset.X_train_scaled[:2]])
+    y_val_leaked = np.concatenate([dataset.y_val, dataset.y_train[:2]])
+    X_test_leaked = np.vstack([dataset.X_test_scaled, dataset.X_train_scaled[2:4]])
+    y_test_leaked = np.concatenate([dataset.y_test, dataset.y_train[2:4]])
+
+    with pytest.raises(DataLeakageError, match="Zero-leakage verification failed"):
+        verify_no_leakage(
+            dataset.X_train_scaled,
+            X_val_leaked,
+            X_test_leaked,
+            dataset.scaler,
+            dataset.y_train,
+            y_val_leaked,
+            y_test_leaked,
+            strict=True,
+        )
+
+    non_strict_checks = verify_no_leakage(
+        dataset.X_train_scaled,
+        X_val_leaked,
+        X_test_leaked,
+        dataset.scaler,
+        dataset.y_train,
+        y_val_leaked,
+        y_test_leaked,
+        strict=False,
+    )
+    assert non_strict_checks["passed"] is False
+    assert non_strict_checks["train_val_exact_overlap"] >= 2
+    assert non_strict_checks["train_test_exact_overlap"] >= 2

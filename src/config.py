@@ -101,6 +101,7 @@ class DataConfig(BaseModel):
         default_factory=lambda: ["ip", "timestamp", "flow id", "src", "dst", "source port"]
     )
     preserve_features: list[str] = Field(default_factory=lambda: ["Destination Port"])
+    strict_leakage_check: bool = True
     split: SplitConfig = Field(default_factory=SplitConfig)
     imbalance: ImbalanceConfig = Field(default_factory=ImbalanceConfig)
 
