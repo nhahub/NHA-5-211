@@ -29,6 +29,7 @@ class LoadedArtifacts:
     anomaly_threshold_meta: dict[str, Any]
     manifest: dict[str, Any]
     calibrators: dict[str, Any] | None = None
+    stacker: Any | None = None
 
 
 class ModelRegistry:
@@ -131,6 +132,7 @@ class ModelRegistry:
         outlier_clipper = _maybe_joblib("outlier_clipper.pkl")
         label_encoder = _maybe_joblib("label_encoder.pkl")
         calibrators = _maybe_joblib("calibrators.pkl")
+        stacker = _maybe_joblib("stacking_meta.pkl")
 
         feat_path = self.models_dir / "feature_names.json"
         feature_names: list[str] = []
@@ -163,4 +165,5 @@ class ModelRegistry:
             anomaly_threshold_meta=anomaly_threshold_meta,
             manifest=manifest,
             calibrators=calibrators,
+            stacker=stacker,
         )

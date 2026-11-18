@@ -44,7 +44,7 @@ from src.models.autoencoder import (
     extract_benign_subset,
     find_benign_class_index,
 )
-from src.models.ensemble import HybridEnsembleEngine
+from src.models.ensemble import HybridEnsembleEngine, StackingMetaLearner
 from src.models.xgboost_model import expand_xgboost_probas
 from src.utils.logging import get_logger
 from src.utils.model_registry import ModelRegistry
@@ -176,23 +176,65 @@ def run_evaluation_suite(
             batch_size=app_c.evaluation.batch_benchmark_size,
         )
 
-    # 2. Evaluate Ensemble Strategies on Test Set (comparing best_single, soft_voting, confidence_weighted)
+    # 2. Evaluate Ensemble Strategies on Test Set (trained/calibrated strictly on validation predictions)
     best_single = max(
         supervised_evals.keys(),
         key=lambda k: supervised_evals[k]["f1_macro"],
         default="XGBoost",
     )
+    stacker = artifacts.stacker
+    if stacker is None and len(supervised_probas) >= 2:
+        val_probas: dict[str, np.ndarray] = {}
+        if "MLP" in artifacts.models:
+            val_probas["MLP"] = np.asarray(
+                artifacts.models["MLP"].predict(X_val_scaled, batch_size=1024, verbose=0)
+            )
+        if "CNN" in artifacts.models:
+            val_probas["CNN"] = np.asarray(
+                artifacts.models["CNN"].predict(
+                    X_val_scaled.reshape(-1, num_features, 1), batch_size=1024, verbose=0
+                )
+            )
+        if "XGBoost" in artifacts.models:
+            raw_v = np.asarray(artifacts.models["XGBoost"].predict_proba(X_val_scaled))
+            val_probas["XGBoost"] = expand_xgboost_probas(
+                raw_v, np.unique(y_train).astype(np.int64), len(class_names)
+            )
+        if len(val_probas) >= 2:
+            stacker = StackingMetaLearner().fit(
+                val_probas=val_probas,
+                y_val=y_val,
+                n_classes=len(class_names),
+                calibrators=artifacts.calibrators or {},
+                seed=eval_seed,
+            )
+
     ensemble_engine = HybridEnsembleEngine(
         class_names=class_names,
         cfg=model_c.ensemble,
         best_model_name=best_single,
         benign_index=benign_idx,
         calibrators=artifacts.calibrators or {},
+        stacker=stacker,
     )
     ensemble_comparison: dict[str, dict[str, Any]] = {}
-    for strat in ("best_single", "soft_voting", "confidence_weighted"):
+    for strat in (
+        "best_single",
+        "soft_voting",
+        "confidence_weighted",
+        "val_weighted_voting",
+        "stacking",
+    ):
         ens_probs, eff_name = ensemble_engine.combine_probabilities(supervised_probas, strategy=strat)
-        ens_eval = evaluate_supervised_model(y_test, ens_probs, class_names, f"Ensemble ({eff_name})")
+        ens_eval = evaluate_supervised_model(
+            y_test,
+            ens_probs,
+            class_names,
+            f"Ensemble ({eff_name})",
+            bootstrap_n=0,
+            low_support_threshold=low_sup,
+            seed=eval_seed,
+        )
         ensemble_comparison[strat] = {
             "accuracy": ens_eval["accuracy"],
             "f1_macro": ens_eval["f1_macro"],
@@ -200,6 +242,34 @@ def run_evaluation_suite(
             "roc_auc_macro_ovr": ens_eval["roc_auc_macro_ovr"],
             "ece": ens_eval["ece"],
         }
+
+    best_single_f1 = float(ensemble_comparison.get("best_single", {}).get("f1_macro", 0.0))
+    fusion_keys = [k for k in ensemble_comparison if k != "best_single"]
+    best_fusion = max(fusion_keys, key=lambda k: ensemble_comparison[k]["f1_macro"], default="soft_voting")
+    best_fusion_f1 = float(ensemble_comparison.get(best_fusion, {}).get("f1_macro", 0.0))
+    ens_beats = best_fusion_f1 > best_single_f1
+    delta_ens = best_fusion_f1 - best_single_f1
+    if ens_beats:
+        honest_verdict = (
+            f"Ensemble fusion '{best_fusion}' achieved Test Macro-F1={best_fusion_f1:.4f}, "
+            f"outperforming best_single ({best_single}={best_single_f1:.4f}) by {delta_ens:+.4f}."
+        )
+    else:
+        honest_verdict = (
+            f"No ensemble fusion strategy beat standalone {best_single} (Macro-F1={best_single_f1:.4f}): "
+            f"best fusion was '{best_fusion}' ({best_fusion_f1:.4f}, delta={delta_ens:+.4f}). "
+            f"Retaining {best_single} for supervised attribution while keeping the Autoencoder orthogonal."
+        )
+    ensemble_analysis = {
+        "best_single_model": best_single,
+        "best_single_f1_macro": round(best_single_f1, 6),
+        "best_ensemble_strategy": best_fusion,
+        "best_ensemble_f1_macro": round(best_fusion_f1, 6),
+        "ensemble_beats_best_single": bool(ens_beats),
+        "delta_vs_best_single": round(delta_ens, 6),
+        "val_weights": stacker.val_weights if stacker else {},
+        "honest_verdict": honest_verdict,
+    }
 
     # 3. Evaluate Autoencoder Binary Anomaly & Unseen-Attack Protocol
     ae_eval: dict[str, Any] = {}
@@ -463,6 +533,7 @@ def run_evaluation_suite(
         "training_diagnostics": train_diag,
         "supervised_evaluations": supervised_evals,
         "ensemble_comparison": ensemble_comparison,
+        "ensemble_analysis": ensemble_analysis,
         "autoencoder_evaluation": ae_eval,
         "unseen_attack_protocol": unseen_res,
         "by_day_protocol": by_day_res,

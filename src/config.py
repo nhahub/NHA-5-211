@@ -273,11 +273,13 @@ class EnsembleConfig(BaseModel):
     """Hybrid ensemble decision strategy configuration."""
 
     strategy: str = "hybrid_anomaly_override"
+    base_supervised_strategy: str = "best_single"
     supervised_weights: dict[str, float] = Field(
         default_factory=lambda: {"XGBoost": 0.45, "MLP": 0.35, "CNN": 0.20}
     )
     anomaly_override_min_confidence: float = 0.65
     calibrate_probabilities: bool = True
+    stacker_file: str = "stacking_meta.pkl"
 
 
 class ModelConfig(BaseModel):

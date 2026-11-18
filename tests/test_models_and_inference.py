@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.config import AppConfig, ModelConfig
+from src.config import AppConfig, EnsembleConfig, ModelConfig, XGBoostConfig, XGBoostOptunaConfig
 from src.data.loader import generate_synthetic_cicids2017
 from src.data.preprocessing import run_preprocessing_pipeline
 from src.detection.anomaly_detection import AnomalyDetector
@@ -26,11 +26,16 @@ from src.models.autoencoder import (
     extract_benign_subset,
 )
 from src.models.cnn import build_cnn1d
-from src.models.ensemble import HybridEnsembleEngine
+from src.models.ensemble import (
+    HybridEnsembleEngine,
+    StackingMetaLearner,
+    TemperatureScaler,
+    compute_ece,
+)
 from src.models.mlp import build_mlp
 from src.models.xgboost_model import build_xgboost_classifier
 from src.response.response_engine import ActiveResponseEngine
-from src.training.optimization import compare_smote_vs_class_weight
+from src.training.optimization import compare_smote_vs_class_weight, optimize_xgboost_with_optuna
 from src.utils.model_registry import ModelRegistry
 
 
@@ -324,3 +329,95 @@ def test_imbalance_selection_bootstrap_ci_per_class_and_xgb_cv(tmp_app_config: A
     assert f"XGBoost {cv_res['n_splits']}-Fold Stratified Cross-Validation" in cmp_txt
     assert "Unweighted ('none')" in exp_txt
     assert "Class Weighting ('class_weight')" in exp_txt
+
+
+def test_temperature_scaler_handles_float32_overconfidence() -> None:
+    """Float32 overconfident probabilities must calibrate away from T=1.0 and lower ECE/NLL."""
+    rng = np.random.default_rng(7)
+    n = 600
+    true_logits = rng.normal(scale=1.2, size=(n, 4))
+    exp_true = np.exp(true_logits - np.max(true_logits, axis=1, keepdims=True))
+    p_true = exp_true / np.sum(exp_true, axis=1, keepdims=True)
+    y_val = np.array([rng.choice(4, p=row) for row in p_true], dtype=np.int64)
+
+    # Sharpen predictions (overconfident float32 inputs reproducing old L-BFGS-B flat step bug)
+    sharp_logits = true_logits * 2.5
+    exp_sharp = np.exp(sharp_logits - np.max(sharp_logits, axis=1, keepdims=True))
+    probs_f32 = (exp_sharp / np.sum(exp_sharp, axis=1, keepdims=True)).astype(np.float32)
+
+    ece_before = compute_ece(y_val, probs_f32)
+    cal = TemperatureScaler().fit(probs_f32, y_val)
+    calibrated = cal.transform(probs_f32)
+    ece_after = compute_ece(y_val, calibrated)
+
+    assert cal.temperature > 1.5
+    assert cal.nll_after < cal.nll_before
+    assert ece_after < ece_before
+
+
+def test_optuna_cv_std_gating_and_stacking_meta_learner() -> None:
+    """Optuna requires > CV std improvement; stacking & val_weighted_voting train on val only."""
+    rng = np.random.default_rng(42)
+    X_tr = rng.normal(size=(150, 6)).astype(np.float32)
+    y_tr = np.array([0] * 100 + [1] * 30 + [2] * 20, dtype=np.int64)
+    X_tr[y_tr == 1] += 2.2
+    X_tr[y_tr == 2] -= 2.2
+
+    X_va = rng.normal(size=(60, 6)).astype(np.float32)
+    y_va = np.array([0] * 40 + [1] * 12 + [2] * 8, dtype=np.int64)
+    X_va[y_va == 1] += 2.2
+    X_va[y_va == 2] -= 2.2
+
+    xgb_cfg = XGBoostConfig(
+        baseline={"n_estimators": 20, "max_depth": 4, "learning_rate": 0.1},
+        optuna=XGBoostOptunaConfig(enabled=True, n_trials=2, timeout_seconds=30),
+    )
+    opt_res = optimize_xgboost_with_optuna(
+        X_train=X_tr,
+        y_train=y_tr,
+        X_val=X_va,
+        y_val=y_va,
+        num_classes=3,
+        cfg=xgb_cfg,
+        xgb_device="cpu",
+        seed=42,
+        cv_macro_f1_std=0.25,  # Larger than plausible 2-trial fluctuation
+    )
+    assert opt_res.selected_variant == "baseline"
+    assert opt_res.meaningful_improvement is False
+    assert "No meaningful improvement" in opt_res.selection_note
+    assert opt_res.to_summary_dict()["cv_macro_f1_std"] == 0.25
+
+    # Stacking meta-learner trained strictly on validation probabilities learns to downweight noisy model
+    val_probas = {
+        "XGBoost": np.where(
+            np.eye(3, dtype=bool)[y_va],
+            0.92,
+            0.04,
+        ),
+        "CNN": np.full((len(y_va), 3), 1.0 / 3.0),
+    }
+    stacker = StackingMetaLearner().fit(val_probas=val_probas, y_val=y_va, n_classes=3, seed=42)
+    assert stacker.is_fitted is True
+    assert stacker.val_weights["XGBoost"] > stacker.val_weights["CNN"]
+
+    test_y = np.array([0, 1, 2], dtype=np.int64)
+    test_probas = {
+        "XGBoost": np.array([[0.90, 0.05, 0.05], [0.05, 0.90, 0.05], [0.05, 0.05, 0.90]]),
+        "CNN": np.array([[0.10, 0.80, 0.10], [0.80, 0.10, 0.10], [0.10, 0.80, 0.10]]),
+    }
+    ens = HybridEnsembleEngine(
+        class_names=["BENIGN", "DDoS", "PortScan"],
+        cfg=EnsembleConfig(strategy="hybrid_anomaly_override", base_supervised_strategy="best_single"),
+        best_model_name="XGBoost",
+        benign_index=0,
+        stacker=stacker,
+    )
+    p_stack, strat_s = ens.combine_probabilities(test_probas, strategy="stacking")
+    p_valw, strat_v = ens.combine_probabilities(test_probas, strategy="val_weighted_voting")
+    dec_ov = ens.decide(test_probas, anomaly_scores=np.array([3.0, 0.1, 0.1]), anomaly_threshold=1.0)
+    assert strat_s == "stacking" and np.array_equal(np.argmax(p_stack, axis=1), test_y)
+    assert strat_v == "val_weighted_voting" and np.array_equal(np.argmax(p_valw, axis=1), test_y)
+    assert dec_ov.predicted_labels[0] == "Zero-Day Anomaly (Novel)"
+    assert dec_ov.predicted_labels[1] == "DDoS"
+    assert dec_ov.predicted_labels[2] == "PortScan"

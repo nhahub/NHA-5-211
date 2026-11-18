@@ -78,10 +78,12 @@ xgboost:
   baseline_model_name: "xgb_baseline.json"
 
 ensemble:
-  strategy: "hybrid_anomaly_override" # best_single, soft_voting, confidence_weighted, hybrid_anomaly_override
+  strategy: "hybrid_anomaly_override" # best_single, soft_voting, confidence_weighted, val_weighted_voting, stacking, hybrid_anomaly_override
+  base_supervised_strategy: "best_single" # Used for supervised predictions under hybrid_anomaly_override
   supervised_weights:
     XGBoost: 0.45
     MLP: 0.35
     CNN: 0.20
   anomaly_override_min_confidence: 0.65
   calibrate_probabilities: true
+  stacker_file: "stacking_meta.pkl"

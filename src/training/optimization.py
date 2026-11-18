@@ -8,6 +8,8 @@ from typing import Any
 import numpy as np
 import optuna
 from sklearn.metrics import f1_score, log_loss, recall_score
+from sklearn.model_selection import StratifiedKFold
+from sklearn.utils.class_weight import compute_class_weight
 
 from src.config import XGBoostConfig
 from src.models.xgboost_model import (
@@ -44,6 +46,11 @@ class XGBoostOptimizationResult:
     n_trials_completed: int
     selected_variant: str  # "tuned" or "baseline"
     best_model: Any
+    cv_macro_f1_mean: float = 0.0
+    cv_macro_f1_std: float = 0.0
+    macro_f1_improvement: float = 0.0
+    meaningful_improvement: bool = False
+    selection_note: str = ""
 
     def to_summary_dict(self) -> dict[str, Any]:
         return {
@@ -52,6 +59,11 @@ class XGBoostOptimizationResult:
             "best_params": self.best_params,
             "n_trials_completed": self.n_trials_completed,
             "selected_variant": self.selected_variant,
+            "cv_macro_f1_mean": round(float(self.cv_macro_f1_mean), 6),
+            "cv_macro_f1_std": round(float(self.cv_macro_f1_std), 6),
+            "macro_f1_improvement": round(float(self.macro_f1_improvement), 6),
+            "meaningful_improvement": bool(self.meaningful_improvement),
+            "selection_note": self.selection_note,
         }
 
 
@@ -185,6 +197,52 @@ def compare_smote_vs_class_weight(
     )
 
 
+def _estimate_baseline_cv_macro_f1(
+    X_raw: np.ndarray,
+    y_raw: np.ndarray,
+    num_classes: int,
+    cfg: XGBoostConfig,
+    xgb_device: str,
+    seed: int,
+    n_splits: int = 5,
+    use_class_weight: bool = False,
+) -> tuple[float, float]:
+    """Estimate baseline XGBoost fold mean and std Macro-F1 via stratified K-fold CV."""
+    counts = np.bincount(y_raw)
+    nz = counts[counts > 0]
+    eff_splits = min(int(n_splits), int(nz.min())) if len(nz) else 0
+    if eff_splits < 2:
+        return 0.0, 0.0
+
+    skf = StratifiedKFold(n_splits=eff_splits, shuffle=True, random_state=seed)
+    fold_f1s: list[float] = []
+    for tr_i, va_i in skf.split(X_raw, y_raw):
+        X_tr_f, y_tr_f = X_raw[tr_i], y_raw[tr_i]
+        X_va_f, y_va_f = X_raw[va_i], y_raw[va_i]
+        sw_f = None
+        if use_class_weight:
+            uniq = np.unique(y_tr_f)
+            cw = compute_class_weight("balanced", classes=uniq, y=y_tr_f)
+            cw_map = {int(c): float(w) for c, w in zip(uniq, cw, strict=False)}
+            sw_f = np.array([cw_map[int(c)] for c in y_tr_f], dtype=np.float32)
+
+        clf_f, cls_f = fit_xgboost_safe_multiclass(
+            X_train=X_tr_f,
+            y_train=y_tr_f,
+            X_val=X_va_f,
+            y_val=y_va_f,
+            total_classes=num_classes,
+            cfg=cfg,
+            device=xgb_device,
+            seed=seed,
+            sample_weight=sw_f,
+            early_stopping_rounds=20,
+        )
+        probs_f = expand_xgboost_probas(clf_f.predict_proba(X_va_f), cls_f, num_classes)
+        fold_f1s.append(float(f1_score(y_va_f, np.argmax(probs_f, axis=1), average="macro", zero_division=0)))
+    return float(np.mean(fold_f1s)), float(np.std(fold_f1s, ddof=1))
+
+
 def optimize_xgboost_with_optuna(
     X_train: np.ndarray,
     y_train: np.ndarray,
@@ -195,6 +253,11 @@ def optimize_xgboost_with_optuna(
     xgb_device: str = "cpu",
     seed: int = 42,
     sample_weight: np.ndarray | None = None,
+    cv_macro_f1_std: float | None = None,
+    cv_raw_X: np.ndarray | None = None,
+    cv_raw_y: np.ndarray | None = None,
+    cv_n_splits: int = 5,
+    use_cv_class_weight: bool = False,
 ) -> XGBoostOptimizationResult:
     """Compare baseline XGBoost (report spec) against Optuna-tuned XGBoost on validation set."""
     logger.info("Training report baseline XGBoost (300 estimators, depth=6, lr=0.1)...")
@@ -213,6 +276,23 @@ def optimize_xgboost_with_optuna(
     baseline_metrics = _eval_val_scores(y_val, baseline_probs, num_classes)
     logger.info("Baseline XGBoost validation metrics: %s", baseline_metrics)
 
+    if cv_macro_f1_std is not None:
+        cv_mean = float(baseline_metrics["val_macro_f1"])
+        cv_std = float(cv_macro_f1_std)
+    else:
+        src_X = cv_raw_X if cv_raw_X is not None else X_train
+        src_y = cv_raw_y if cv_raw_y is not None else y_train
+        cv_mean, cv_std = _estimate_baseline_cv_macro_f1(
+            X_raw=src_X,
+            y_raw=src_y,
+            num_classes=num_classes,
+            cfg=cfg,
+            xgb_device=xgb_device,
+            seed=seed,
+            n_splits=cv_n_splits,
+            use_class_weight=use_cv_class_weight,
+        )
+
     if not cfg.optuna.enabled or cfg.optuna.n_trials <= 0:
         return XGBoostOptimizationResult(
             baseline_val_metrics=baseline_metrics,
@@ -221,6 +301,11 @@ def optimize_xgboost_with_optuna(
             n_trials_completed=0,
             selected_variant="baseline",
             best_model=baseline_model,
+            cv_macro_f1_mean=cv_mean,
+            cv_macro_f1_std=cv_std,
+            macro_f1_improvement=0.0,
+            meaningful_improvement=False,
+            selection_note="Optuna optimization disabled (n_trials=0); retaining baseline.",
         )
 
     # Subsample training rows during Optuna search if very large, keeping stratification
@@ -294,18 +379,27 @@ def optimize_xgboost_with_optuna(
     tuned_metrics = _eval_val_scores(y_val, tuned_probs, num_classes)
     logger.info("Optuna-tuned XGBoost validation metrics: %s", tuned_metrics)
 
-    # Choose tuned only if it beats or matches baseline on validation Macro-F1 or logloss
-    if tuned_metrics["val_macro_f1"] > baseline_metrics["val_macro_f1"] or (
-        abs(tuned_metrics["val_macro_f1"] - baseline_metrics["val_macro_f1"]) < 1e-4
-        and tuned_metrics["val_mlogloss"] < baseline_metrics["val_mlogloss"]
-    ):
+    # Select tuned model ONLY if it improves validation Macro-F1 by more than the baseline CV std
+    improvement = float(tuned_metrics["val_macro_f1"] - baseline_metrics["val_macro_f1"])
+    threshold = max(float(cv_std), 1e-6)
+    meaningful_improvement = improvement > threshold
+    if meaningful_improvement:
         selected_variant = "tuned"
         best_model = tuned_model
+        selection_note = (
+            f"Meaningful improvement: tuned val Macro-F1 ({tuned_metrics['val_macro_f1']:.4f}) beat "
+            f"baseline ({baseline_metrics['val_macro_f1']:.4f}) by {improvement:+.4f} (> CV std={cv_std:.4f})."
+        )
     else:
         selected_variant = "baseline"
         best_model = baseline_model
+        selection_note = (
+            f"No meaningful improvement: Optuna tuned val Macro-F1 ({tuned_metrics['val_macro_f1']:.4f}) "
+            f"changed by {improvement:+.4f} vs baseline ({baseline_metrics['val_macro_f1']:.4f}), within "
+            f"baseline CV std={cv_std:.4f}; retaining baseline."
+        )
 
-    logger.info("Selected XGBoost variant: %s", selected_variant)
+    logger.info("Selected XGBoost variant: %s | %s", selected_variant, selection_note)
     return XGBoostOptimizationResult(
         baseline_val_metrics=baseline_metrics,
         tuned_val_metrics=tuned_metrics,
@@ -313,4 +407,9 @@ def optimize_xgboost_with_optuna(
         n_trials_completed=len(study.trials),
         selected_variant=selected_variant,
         best_model=best_model,
+        cv_macro_f1_mean=cv_mean,
+        cv_macro_f1_std=cv_std,
+        macro_f1_improvement=improvement,
+        meaningful_improvement=meaningful_improvement,
+        selection_note=selection_note,
     )

@@ -37,7 +37,7 @@ Traditional signature-based Intrusion Detection Systems (e.g., Snort, Suricata) 
 
 See [`docs/architecture.md`](docs/architecture.md) for full Mermaid system and data-pipeline diagrams.
 
-- **Supervised Attribution:** XGBoost + MLP + 1D-CNN compared individually and via `best_single`, `soft_voting`, `confidence_weighted` (with validation Temperature Scaling), and `hybrid_anomaly_override`.
+- **Supervised Attribution & Honest Ensembling:** XGBoost, MLP, and 1D-CNN are benchmarked individually and combined via `best_single`, `soft_voting`, `confidence_weighted`, `val_weighted_voting`, `stacking` (validation-only `LogisticRegression` meta-learner in log-probability space), and `hybrid_anomaly_override` (which delegates supervised attribution to `best_single` by default unless multi-model fusion outperforms it). Multi-model probability blending does **not** automatically improve over standalone `XGBoost` on tabular flows and is evaluated strictly on held-out test Macro-F1.
 - **Unsupervised Anomaly Signal:** The Autoencoder anomaly score (`MSE > threshold`) remains an independent orthogonal signal rather than being diluted into supervised class probabilities; if a flow is classified as `BENIGN` (or low-confidence) yet breaches the calibrated MSE threshold, the hybrid engine surfaces a `Zero-Day Anomaly (Novel)` flag.
 - **Canonical Response Layer:** Shared across CLI, notebooks, and dashboard via [`src/response/response_engine.py`](src/response/response_engine.py).
 

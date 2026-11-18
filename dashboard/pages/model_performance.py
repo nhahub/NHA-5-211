@@ -115,6 +115,9 @@ def render_model_performance_page() -> None:
                 use_container_width=True,
                 hide_index=True,
             )
+            ens_note = eval_summary.get("ensemble_analysis", {}).get("honest_verdict", "")
+            if ens_note:
+                st.caption(ens_note)
 
         train_diag = eval_summary.get("training_diagnostics", {})
         imb_exp = train_diag.get("imbalance_experiment", {})
@@ -144,7 +147,10 @@ def render_model_performance_page() -> None:
                 },
             ]
             st.dataframe(pd.DataFrame(opt_rows), use_container_width=True, hide_index=True)
-            st.caption(f"Selected variant: `{xgb_opt.get('selected_variant', 'baseline')}`")
+            st.caption(
+                f"Selected variant: `{xgb_opt.get('selected_variant', 'baseline')}`"
+                + (f" — {xgb_opt['selection_note']}" if xgb_opt.get("selection_note") else "")
+            )
 
         cal_rep = eval_summary.get("training_diagnostics", {}).get("calibration_report", {})
         if cal_rep:

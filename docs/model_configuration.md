@@ -45,9 +45,10 @@ All system parameters are centralized in two Pydantic-validated YAML files:
 
 ### D. XGBoost & Optuna HPO (`xgboost`)
 - Report Baseline: `n_estimators=300`, `max_depth=6`, `learning_rate=0.1`, `subsample=0.8`, `colsample_bytree=0.8`, `min_child_weight=5`, `gamma=0.1`, `reg_alpha=0.01`, `reg_lambda=1.0`, `tree_method="hist"`, `early_stopping_rounds=20`
-- Optuna Search: `n_trials=12`, `timeout_seconds=180`, TPE sampler minimizing validation `mlogloss`
+- Optuna Search: `n_trials=12`, `timeout_seconds=180`, TPE sampler minimizing validation `mlogloss`; `tuned` is selected only when validation Macro-F1 beats baseline by more than the 5-fold CV standard deviation (`> cv_macro_f1_std`), otherwise retaining `baseline`.
 
 ### E. Hybrid Ensemble (`ensemble`)
-- `strategy: "hybrid_anomaly_override"` (supports `best_single`, `soft_voting`, `confidence_weighted`, `hybrid_anomaly_override`)
-- `supervised_weights`: `XGBoost: 0.45`, `MLP: 0.35`, `CNN: 0.20`
-- `calibrate_probabilities: true` (post-hoc validation Temperature Scaling)
+- `strategy: "hybrid_anomaly_override"` (supports `best_single`, `soft_voting`, `confidence_weighted`, `val_weighted_voting`, `stacking`, `hybrid_anomaly_override`)
+- `base_supervised_strategy: "best_single"` (prevents weak neural voters from diluting `best_single` XGBoost accuracy while retaining orthogonal Autoencoder novelty alerts)
+- `supervised_weights`: fallback weights (`XGBoost: 0.45`, `MLP: 0.35`, `CNN: 0.20`), superseded by validation log-loss weighting (`val_weighted_voting`) or `LogisticRegression` meta-learning (`stacking`, trained strictly on validation log-probabilities)
+- `calibrate_probabilities: true` (float64 bounded Brent Temperature Scaling fit strictly on validation probabilities)

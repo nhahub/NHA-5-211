@@ -19,7 +19,12 @@ from src.models.autoencoder import (
     extract_benign_subset,
 )
 from src.models.cnn import build_cnn1d
-from src.models.ensemble import TemperatureScaler, compute_ece, compute_multiclass_brier
+from src.models.ensemble import (
+    StackingMetaLearner,
+    TemperatureScaler,
+    compute_ece,
+    compute_multiclass_brier,
+)
 from src.models.mlp import build_mlp
 from src.models.xgboost_model import expand_xgboost_probas
 from src.training.callbacks import build_keras_callbacks
@@ -48,9 +53,11 @@ class TrainingOutputs:
     anomaly_stats: dict[str, float]
     imbalance_experiment: ImbalanceExperimentResult
     xgb_optimization: XGBoostOptimizationResult
-    calibration_report: dict[str, dict[str, float]]
+    calibration_report: dict[str, dict[str, Any]]
     calibrators: dict[str, TemperatureScaler]
     hardware_profile: HardwareProfile
+    stacker: StackingMetaLearner | None = None
+    best_supervised_model: str = "XGBoost"
 
 
 def _extract_history_dict(history_obj: Any) -> dict[str, list[float]]:
@@ -283,6 +290,10 @@ def train_all_models(
         xgb_device=hardware.xgb_device,
         seed=seed,
         sample_weight=xgb_sample_weight,
+        cv_raw_X=dataset.X_train_scaled,
+        cv_raw_y=dataset.y_train,
+        cv_n_splits=app_cfg.evaluation.cv_n_splits,
+        use_cv_class_weight=(chosen_imb == "class_weight"),
     )
     durations["XGBoost"] = float(time.perf_counter() - t0)
     xgb_model = xgb_opt.best_model
@@ -298,7 +309,7 @@ def train_all_models(
             xgb_model.predict_proba(dataset.X_val_scaled), xgb_present_cls, num_classes
         ),
     }
-    calibration_report: dict[str, dict[str, float]] = {}
+    calibration_report: dict[str, dict[str, Any]] = {}
     calibrators: dict[str, TemperatureScaler] = {}
     for m_name, p_val in val_probas.items():
         ece_before = compute_ece(dataset.y_val, p_val)
@@ -307,18 +318,43 @@ def train_all_models(
         p_cal = scaler_t.transform(p_val)
         ece_after = compute_ece(dataset.y_val, p_cal)
         brier_after = compute_multiclass_brier(dataset.y_val, p_cal)
-        if ece_after <= ece_before:
+        if ece_after <= ece_before or brier_after < brier_before:
             calibrators[m_name] = scaler_t
+        if abs(scaler_t.temperature - 1.0) <= 0.12 and (ece_before - ece_after) < 5e-4:
+            cal_status = "Already well-calibrated near T=1.0"
+        else:
+            cal_status = (
+                f"Recalibrated (T={scaler_t.temperature:.4f}, ECE delta={ece_after - ece_before:+.6f})"
+            )
         calibration_report[m_name] = {
             "temperature": round(scaler_t.temperature, 4),
             "ece_before": round(ece_before, 6),
             "ece_after": round(ece_after, 6),
+            "ece_delta": round(ece_after - ece_before, 6),
             "brier_before": round(brier_before, 6),
             "brier_after": round(brier_after, 6),
+            "nll_before": round(scaler_t.nll_before, 6),
+            "nll_after": round(scaler_t.nll_after, 6),
+            "status": cal_status,
         }
 
-    # Save training histories, calibrators & optimization summary
+    # Fit validation-only LogisticRegression stacking & logloss weights meta-learner
+    stacker = StackingMetaLearner().fit(
+        val_probas=val_probas,
+        y_val=dataset.y_val,
+        n_classes=num_classes,
+        calibrators=calibrators,
+        seed=seed,
+    )
+    best_sup_model = max(
+        stacker.val_macro_f1.keys(),
+        key=lambda k: stacker.val_macro_f1[k],
+        default="XGBoost",
+    )
+
+    # Save training histories, calibrators, stacker & optimization summary
     joblib.dump(calibrators, models_dir / "calibrators.pkl")
+    joblib.dump(stacker, models_dir / model_cfg.ensemble.stacker_file)
     with (models_dir / "training_histories.json").open("w", encoding="utf-8") as fh:
         json.dump(histories, fh, indent=2)
 
@@ -330,6 +366,8 @@ def train_all_models(
                 "imbalance_experiment": imb_result.to_dict(),
                 "xgboost_optimization": xgb_opt.to_summary_dict(),
                 "calibration_report": calibration_report,
+                "stacking_summary": stacker.to_summary_dict(),
+                "best_supervised_model": best_sup_model,
                 "hardware": {
                     "tf_device": hardware.tf_device,
                     "xgb_device": hardware.xgb_device,
@@ -353,4 +391,6 @@ def train_all_models(
         calibration_report=calibration_report,
         calibrators=calibrators,
         hardware_profile=hardware,
+        stacker=stacker,
+        best_supervised_model=best_sup_model,
     )

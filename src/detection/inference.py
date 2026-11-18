@@ -71,12 +71,17 @@ class UnifiedDetectionEngine:
             autoencoder_model=artifacts.models.get("Autoencoder"),
             threshold=artifacts.anomaly_threshold,
         )
+        best_sup = str(
+            artifacts.manifest.get("best_supervised_model")
+            or ("XGBoost" if "XGBoost" in artifacts.models else "MLP")
+        )
         self.ensemble = HybridEnsembleEngine(
             class_names=self.class_names,
             cfg=self.ensemble_cfg,
-            best_model_name="XGBoost" if "XGBoost" in artifacts.models else "MLP",
+            best_model_name=best_sup,
             benign_index=self.benign_index,
             calibrators=calibrators or {},
+            stacker=artifacts.stacker,
         )
 
     def preprocess_dataframe(self, df_raw: pd.DataFrame) -> np.ndarray:

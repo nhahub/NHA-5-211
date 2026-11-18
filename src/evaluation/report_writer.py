@@ -39,6 +39,7 @@ def write_academic_reports(
     ablation = summary.get("feature_ablation", {})
     xgb_cv = summary.get("xgboost_cross_validation", {})
     sup_evals = summary.get("supervised_evaluations", {})
+    ens_analysis = summary.get("ensemble_analysis", {})
     prep_lat = summary.get("preprocessing_latency", {})
     shap_sum = summary.get("shap_summary", {})
     split_strat = summary.get("split_strategy") or audit.get("split_strategy", "random")
@@ -240,6 +241,8 @@ def write_academic_reports(
     if ens:
         ens_df = pd.DataFrame(ens).T.reset_index(names="Strategy")
         comp_lines.append(_df_to_markdown(ens_df) + "\n\n")
+    if ens_analysis.get("honest_verdict"):
+        comp_lines.append(f"- **Empirical Conclusion:** {ens_analysis['honest_verdict']}\n\n")
 
     sec_num += 1
     comp_lines.append(f"## {sec_num}. XGBoost Baseline vs. Optuna Hyperparameter Optimization\n")
@@ -258,7 +261,15 @@ def write_academic_reports(
             ]
         )
         comp_lines.append(_df_to_markdown(opt_df) + "\n")
-        comp_lines.append(f"\n- **Selected Variant:** `{xgb_opt.get('selected_variant', 'baseline')}`\n\n")
+        comp_lines.append(
+            f"\n- **Selected Variant:** `{xgb_opt.get('selected_variant', 'baseline')}` "
+            f"(Baseline CV Macro-F1 std=`{xgb_opt.get('cv_macro_f1_std', 0.0):.4f}`, "
+            f"Val Macro-F1 delta=`{xgb_opt.get('macro_f1_improvement', 0.0):+.4f}`, "
+            f"Meaningful Improvement=`{xgb_opt.get('meaningful_improvement', False)}`)\n"
+        )
+        if xgb_opt.get("selection_note"):
+            comp_lines.append(f"- **Decision Basis:** {xgb_opt['selection_note']}\n")
+        comp_lines.append("\n")
 
     sec_num += 1
     comp_lines.append(f"## {sec_num}. Architectural Notes on 1D-CNN vs. MLP & XGBoost\n")
@@ -327,6 +338,21 @@ def write_academic_reports(
         exp_lines.append("## 3. Probability Calibration (Validation Temperature Scaling)\n")
         cal_df = pd.DataFrame(cal_rep).T.reset_index(names="Model")
         exp_lines.append(_df_to_markdown(cal_df) + "\n\n")
+        recal_models = [
+            f"`{m}` (T={v.get('temperature', 1.0):.4f}, ECE {v.get('ece_before', 0):.6f} -> {v.get('ece_after', 0):.6f})"
+            for m, v in cal_rep.items()
+            if abs(float(v.get("temperature", 1.0)) - 1.0) > 0.12
+        ]
+        if recal_models:
+            exp_lines.append(
+                "- **Calibration Evidence:** Bounded float64 Brent optimization recalibrated overconfident probabilities on "
+                + ", ".join(recal_models)
+                + ".\n\n"
+            )
+        else:
+            exp_lines.append(
+                "- **Calibration Evidence:** Models were already well-calibrated near `T = 1.0` with minimal NLL/ECE change.\n\n"
+            )
 
     if ae:
         exp_lines.append("## 4. Autoencoder Zero-Day Novelty Detection & Percentile Sweep\n")
