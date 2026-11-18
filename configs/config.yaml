@@ -76,6 +76,7 @@ data:
     stratify: true
   imbalance:
     strategy: "auto_compare" # Compares None, Class-Weight, and SMOTE on validation Macro-F1; options: smote, class_weight, none, auto_compare
+    imbalance_tie_tolerance: 0.002 # Within tolerance, prefer simplest: none > class_weight > smote
     smote_sampling_strategy: "auto"
     smote_max_k_neighbors: 5
     smote_cap_per_class: 5000 # Caps minority oversampling at 5,000 samples (or smote_max_multiplier x real size)

@@ -1,33 +1,33 @@
 {
   "training_durations_sec": {
-    "MLP": 59.631930299976375,
-    "CNN": 889.3796746000298,
-    "Autoencoder": 35.855250099964906,
-    "Isolation Forest": 0.4930301000131294,
-    "One-Class SVM": 1.468471500033047,
-    "LOF": 0.5137803999823518,
-    "XGBoost": 114.41612850001547
+    "MLP": 33.55214129999513,
+    "CNN": 858.3628122000373,
+    "Autoencoder": 36.101583199983,
+    "Isolation Forest": 0.5023608999908902,
+    "One-Class SVM": 1.4779989999951795,
+    "LOF": 0.5306445999885909,
+    "XGBoost": 119.31328629999189
   },
   "overfitting_analysis": {
     "MLP": {
-      "best_epoch": 20.0,
-      "total_epochs_run": 28.0,
-      "best_train_loss": 0.20974361896514893,
-      "best_val_loss": 0.09738368541002274,
-      "loss_generalization_gap": -0.11235993355512619,
-      "best_train_acc": 0.9683215022087097,
-      "best_val_acc": 0.9774801135063171,
-      "acc_generalization_gap": -0.009158611297607422
+      "best_epoch": 8.0,
+      "total_epochs_run": 16.0,
+      "best_train_loss": 0.11819467693567276,
+      "best_val_loss": 0.10006469488143921,
+      "loss_generalization_gap": -0.01812998205423355,
+      "best_train_acc": 0.9715536832809448,
+      "best_val_acc": 0.977645993232727,
+      "acc_generalization_gap": -0.0060923099517822266
     },
     "CNN": {
-      "best_epoch": 49.0,
+      "best_epoch": 48.0,
       "total_epochs_run": 50.0,
-      "best_train_loss": 0.06238274276256561,
-      "best_val_loss": 0.03374629467725754,
-      "loss_generalization_gap": -0.028636448085308075,
-      "best_train_acc": 0.984387218952179,
-      "best_val_acc": 0.9924933910369873,
-      "acc_generalization_gap": -0.00810617208480835
+      "best_train_loss": 0.03252016007900238,
+      "best_val_loss": 0.024143798276782036,
+      "loss_generalization_gap": -0.008376361802220345,
+      "best_train_acc": 0.9920833706855774,
+      "best_val_acc": 0.9953964948654175,
+      "acc_generalization_gap": -0.003313124179840088
     },
     "Autoencoder": {
       "best_epoch": 18.0,
@@ -56,74 +56,74 @@
       "val_macro_recall": 0.9322891059260157,
       "val_mlogloss": 0.004600005391938414
     },
-    "selected_strategy": "smote",
-    "justification": "Data-driven selection chose 'smote' with highest validation Macro-F1=0.9518 (Weighted-F1=0.9989, Macro-Recall=0.9439, mlogloss=0.0044), beating runner-up 'none' by +0.0000 Macro-F1 (Unweighted ('none') Macro-F1=0.9518 (Weighted-F1=0.9989, mlogloss=0.0046); Class-Weight ('class_weight') Macro-F1=0.9446 (Weighted-F1=0.9981, mlogloss=0.0092))."
+    "selected_strategy": "none",
+    "justification": "Tie within tolerance (tol=0.0020): Unweighted ('none') Macro-F1=0.9518, Hybrid SMOTE ('smote') Macro-F1=0.9518 fall within 0.0020 of peak validation Macro-F1=0.9518 (gap=0.0000 vs 'smote'); tie within tolerance, simplest strategy selected -> 'none' (Weighted-F1=0.9989, Macro-Recall=0.9323, mlogloss=0.0046; Hybrid SMOTE ('smote') Macro-F1=0.9518 (Weighted-F1=0.9989, mlogloss=0.0044); Class-Weight ('class_weight') Macro-F1=0.9446 (Weighted-F1=0.9981, mlogloss=0.0092))."
   },
   "xgboost_optimization": {
     "baseline_val_metrics": {
-      "val_macro_f1": 0.9504509660988781,
-      "val_weighted_f1": 0.9988614393771201,
-      "val_macro_recall": 0.9439249968674726,
-      "val_mlogloss": 0.004092151052096094
+      "val_macro_f1": 0.9504297083024043,
+      "val_weighted_f1": 0.9988157461324261,
+      "val_macro_recall": 0.9330643698633472,
+      "val_mlogloss": 0.004170339658721196
     },
     "tuned_val_metrics": {
-      "val_macro_f1": 0.9624631992048669,
-      "val_weighted_f1": 0.9989783602080583,
-      "val_macro_recall": 0.9577514802140391,
-      "val_mlogloss": 0.0038552066515305946
+      "val_macro_f1": 0.9563279624175097,
+      "val_weighted_f1": 0.9989375694722029,
+      "val_macro_recall": 0.9381472440055,
+      "val_mlogloss": 0.0038349802671946037
     },
     "best_params": {
-      "n_estimators": 400,
-      "max_depth": 4,
-      "learning_rate": 0.20719803528806874,
-      "subsample": 0.9413549242801476,
-      "colsample_bytree": 0.7243186887373967,
-      "min_child_weight": 2,
-      "gamma": 0.09170225492671691,
-      "reg_alpha": 0.008179499475211672,
-      "reg_lambda": 2.86140394234507
+      "n_estimators": 250,
+      "max_depth": 9,
+      "learning_rate": 0.16509374430131643,
+      "subsample": 0.7454404070203796,
+      "colsample_bytree": 0.6743552524164498,
+      "min_child_weight": 1,
+      "gamma": 0.04707107273372477,
+      "reg_alpha": 0.11296128986827052,
+      "reg_lambda": 3.3653939041707224
     },
     "n_trials_completed": 12,
-    "selected_variant": "tuned",
-    "cv_macro_f1_mean": 0.966975,
-    "cv_macro_f1_std": 0.007582,
-    "macro_f1_improvement": 0.012012,
-    "meaningful_improvement": true,
-    "selection_note": "Meaningful improvement: tuned val Macro-F1 (0.9625) beat baseline (0.9505) by +0.0120 (> CV std=0.0076).",
-    "cv_method_note": "Unified 5-fold StratifiedKFold on the development pool (162,577 rows = train+val, held-out test excluded) with per-fold preprocessing and 'smote' imbalance handling (sample ddof=1 std across folds)."
+    "selected_variant": "baseline",
+    "cv_macro_f1_mean": 0.953464,
+    "cv_macro_f1_std": 0.012051,
+    "macro_f1_improvement": 0.005898,
+    "meaningful_improvement": false,
+    "selection_note": "No meaningful improvement: Optuna tuned val Macro-F1 (0.9563) changed by +0.0059 vs baseline (0.9504), within baseline CV std=0.0121; retaining baseline.",
+    "cv_method_note": "Unified 5-fold StratifiedKFold on the development pool (162,577 rows = train+val, held-out test excluded) with per-fold preprocessing and 'none' imbalance handling (sample ddof=1 std across folds)."
   },
   "calibration_report": {
     "MLP": {
-      "temperature": 0.7948,
-      "ece_before": 0.008277,
-      "ece_after": 0.005742,
-      "ece_delta": -0.002535,
-      "brier_before": 0.029947,
-      "brier_after": 0.029742,
-      "nll_before": 0.049822,
-      "nll_after": 0.048329,
-      "status": "Recalibrated (T=0.7948, ECE delta=-0.002535)"
+      "temperature": 1.0142,
+      "ece_before": 0.008125,
+      "ece_after": 0.008348,
+      "ece_delta": 0.000223,
+      "brier_before": 0.035087,
+      "brier_after": 0.035132,
+      "nll_before": 0.062586,
+      "nll_after": 0.062578,
+      "status": "Already well-calibrated near T=1.0"
     },
     "CNN": {
-      "temperature": 0.8749,
-      "ece_before": 0.004522,
-      "ece_after": 0.003263,
-      "ece_delta": -0.001259,
-      "brier_before": 0.011284,
-      "brier_after": 0.011141,
-      "nll_before": 0.022045,
-      "nll_after": 0.021755,
-      "status": "Recalibrated (T=0.8749, ECE delta=-0.001259)"
+      "temperature": 0.921,
+      "ece_before": 0.002372,
+      "ece_after": 0.001602,
+      "ece_delta": -0.00077,
+      "brier_before": 0.007808,
+      "brier_after": 0.007704,
+      "nll_before": 0.017454,
+      "nll_after": 0.017348,
+      "status": "Recalibrated (T=0.9210, ECE delta=-0.000770)"
     },
     "XGBoost": {
-      "temperature": 0.9505,
-      "ece_before": 0.000386,
-      "ece_after": 0.000248,
-      "ece_delta": -0.000138,
-      "brier_before": 0.001733,
-      "brier_after": 0.001737,
-      "nll_before": 0.003855,
-      "nll_after": 0.003836,
+      "temperature": 0.9095,
+      "ece_before": 0.000522,
+      "ece_after": 0.000269,
+      "ece_delta": -0.000253,
+      "brier_before": 0.001663,
+      "brier_after": 0.001661,
+      "nll_before": 0.00417,
+      "nll_after": 0.004091,
       "status": "Already well-calibrated near T=1.0"
     }
   },
@@ -134,19 +134,19 @@
       "XGBoost"
     ],
     "val_weights": {
-      "CNN": 0.335728,
-      "MLP": 0.310002,
-      "XGBoost": 0.35427
+      "CNN": 0.34321,
+      "MLP": 0.299655,
+      "XGBoost": 0.357135
     },
     "val_logloss": {
-      "CNN": 0.021755,
-      "MLP": 0.048329,
-      "XGBoost": 0.003836
+      "CNN": 0.017348,
+      "MLP": 0.062586,
+      "XGBoost": 0.004091
     },
     "val_macro_f1": {
-      "CNN": 0.870063,
-      "MLP": 0.813398,
-      "XGBoost": 0.962463
+      "CNN": 0.798505,
+      "MLP": 0.692449,
+      "XGBoost": 0.95043
     },
     "meta_learner": "LogisticRegression(log_probs)"
   },

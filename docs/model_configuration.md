@@ -16,7 +16,7 @@ All system parameters are centralized in two Pydantic-validated YAML files:
 | `data` | `nan_column_drop_threshold` | `0.50` | Drops columns exceeding 50% missingness (computed strictly on training split) |
 | `data` | `outlier_clip_sigma` | `5.0` | Clips rate/duration artifacts to $\mu \pm 5\sigma$ using training statistics only |
 | `data.split` | `test_size`, `val_size_of_remainder` | `0.15`, `0.15` | Stratified `72.25%` Train / `12.75%` Validation / `15.0%` Test split |
-| `data.imbalance` | `strategy` | `auto_compare` | Empirically compares Unweighted, Class-Weighting, and SMOTE on validation Macro-F1 |
+| `data.imbalance` | `strategy`, `imbalance_tie_tolerance` | `auto_compare`, `0.002` | Compares Unweighted, Class-Weighting, and SMOTE on validation Macro-F1; prefers `none > class_weight > smote` when tied within tolerance |
 | `evaluation` | `latency_warmup_runs`, `latency_timed_runs` | `5`, `100` | Warm-up runs before repeated `time.perf_counter()` single-flow latency measurement |
 | `evaluation` | `autoencoder_percentiles` | `[90, 95, 97, 99]` | Percentile thresholds evaluated for precision/recall/FPR trade-off analysis |
 | `response` | `dry_run`, `rate_limit_pps` | `true`, `100` | Safety lock ensuring all `iptables` actions remain simulated |

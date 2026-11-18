@@ -39,21 +39,21 @@
 | Hybrid SMOTE ('smote') | 0.9518 | 0.9989 | 0.9439 | 0.0044 |
 
 
-- **Selected Strategy:** `smote`
+- **Selected Strategy:** `none`
 
-- **Justification:** Data-driven selection chose 'smote' with highest validation Macro-F1=0.9518 (Weighted-F1=0.9989, Macro-Recall=0.9439, mlogloss=0.0044), beating runner-up 'none' by +0.0000 Macro-F1 (Unweighted ('none') Macro-F1=0.9518 (Weighted-F1=0.9989, mlogloss=0.0046); Class-Weight ('class_weight') Macro-F1=0.9446 (Weighted-F1=0.9981, mlogloss=0.0092)).
+- **Justification:** Tie within tolerance (tol=0.0020): Unweighted ('none') Macro-F1=0.9518, Hybrid SMOTE ('smote') Macro-F1=0.9518 fall within 0.0020 of peak validation Macro-F1=0.9518 (gap=0.0000 vs 'smote'); tie within tolerance, simplest strategy selected -> 'none' (Weighted-F1=0.9989, Macro-Recall=0.9323, mlogloss=0.0046; Hybrid SMOTE ('smote') Macro-F1=0.9518 (Weighted-F1=0.9989, mlogloss=0.0044); Class-Weight ('class_weight') Macro-F1=0.9446 (Weighted-F1=0.9981, mlogloss=0.0092)).
 
 
 ## 3. Probability Calibration (Validation Temperature Scaling)
 
 | Model | temperature | ece_before | ece_after | ece_delta | brier_before | brier_after | nll_before | nll_after | status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MLP | 0.7948 | 0.0083 | 0.0057 | -0.0025 | 0.0299 | 0.0297 | 0.0498 | 0.0483 | Recalibrated (T=0.7948, ECE delta=-0.002535) |
-| CNN | 0.8749 | 0.0045 | 0.0033 | -0.0013 | 0.0113 | 0.0111 | 0.0220 | 0.0218 | Recalibrated (T=0.8749, ECE delta=-0.001259) |
-| XGBoost | 0.9505 | 0.0004 | 0.0002 | -0.0001 | 0.0017 | 0.0017 | 0.0039 | 0.0038 | Already well-calibrated near T=1.0 |
+| MLP | 1.0142 | 0.0081 | 0.0083 | 0.0002 | 0.0351 | 0.0351 | 0.0626 | 0.0626 | Already well-calibrated near T=1.0 |
+| CNN | 0.9210 | 0.0024 | 0.0016 | -0.0008 | 0.0078 | 0.0077 | 0.0175 | 0.0173 | Recalibrated (T=0.9210, ECE delta=-0.000770) |
+| XGBoost | 0.9095 | 0.0005 | 0.0003 | -0.0003 | 0.0017 | 0.0017 | 0.0042 | 0.0041 | Already well-calibrated near T=1.0 |
 
 
-- **Calibration Evidence:** Bounded float64 Brent optimization recalibrated overconfident probabilities on `MLP` (T=0.7948, ECE 0.008277 -> 0.005742), `CNN` (T=0.8749, ECE 0.004522 -> 0.003263).
+- **Calibration Evidence:** Models were already well-calibrated near `T = 1.0` with minimal NLL/ECE change.
 
 
 ## 4. Unsupervised Anomaly Detection & Classical Baselines
@@ -102,8 +102,8 @@
 
 ## 6. SHAP Explainability Summary
 
-- **XGBoost Top-5 (`TreeExplainer`, 0.23s):** `Destination Port` (1.2302), `Init_Win_bytes_forward` (0.3940), `min_seg_size_forward` (0.3899), `Init_Win_bytes_backward` (0.3120), `Bwd Packets/s` (0.2478)
+- **XGBoost Top-5 (`TreeExplainer`, 0.29s):** `Destination Port` (0.8597), `Init_Win_bytes_backward` (0.3706), `Init_Win_bytes_forward` (0.2930), `min_seg_size_forward` (0.2793), `Bwd Packets/s` (0.2136)
 
-- **MLP Top-5 (`GradientExplainer`, 2.39s):** `Min Packet Length` (0.0074), `ACK Flag Count` (0.0065), `PSH Flag Count` (0.0063), `Init_Win_bytes_forward` (0.0043), `Packet Length Std` (0.0040)
+- **MLP Top-5 (`GradientExplainer`, 2.38s):** `ACK Flag Count` (0.0066), `PSH Flag Count` (0.0063), `Min Packet Length` (0.0062), `Flow IAT Std` (0.0049), `Bwd Packets/s` (0.0040)
 
-- **MLP Explainer Trade-Off:** `GradientExplainer` speedup vs `KernelExplainer` = `2.85x`, Spearman rank correlation = `0.719`.
+- **MLP Explainer Trade-Off:** `GradientExplainer` speedup vs `KernelExplainer` = `2.86x`, Spearman rank correlation = `0.699`.

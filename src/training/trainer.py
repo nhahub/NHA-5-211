@@ -29,7 +29,7 @@ from src.models.ensemble import (
 )
 from src.models.mlp import build_mlp
 from src.models.xgboost_model import expand_xgboost_probas
-from src.training.callbacks import build_keras_callbacks
+from src.training.callbacks import build_keras_callbacks, safe_save_keras_model
 from src.training.optimization import (
     ImbalanceExperimentResult,
     XGBoostOptimizationResult,
@@ -122,6 +122,7 @@ def train_all_models(
             smote_class_weights=dataset.smote_class_weights,
             xgb_device=hardware.xgb_device,
             seed=seed,
+            tie_tolerance=app_cfg.data.imbalance.imbalance_tie_tolerance,
         )
         chosen_imb = imb_result.selected_strategy
     else:
@@ -183,7 +184,7 @@ def train_all_models(
         verbose=2,
     )
     durations["MLP"] = float(time.perf_counter() - t0)
-    mlp.save(mlp_ckpt)
+    safe_save_keras_model(mlp, mlp_ckpt)
     trained_models["MLP"] = mlp
     histories["MLP"] = _extract_history_dict(mlp_hist)
     overfit_stats["MLP"] = _compute_overfitting_gap(histories["MLP"])
@@ -215,7 +216,7 @@ def train_all_models(
         verbose=2,
     )
     durations["CNN"] = float(time.perf_counter() - t0)
-    cnn.save(cnn_ckpt)
+    safe_save_keras_model(cnn, cnn_ckpt)
     trained_models["CNN"] = cnn
     histories["CNN"] = _extract_history_dict(cnn_hist)
     overfit_stats["CNN"] = _compute_overfitting_gap(histories["CNN"])
@@ -254,7 +255,7 @@ def train_all_models(
         verbose=2,
     )
     durations["Autoencoder"] = float(time.perf_counter() - t0)
-    autoencoder.save(ae_ckpt)
+    safe_save_keras_model(autoencoder, ae_ckpt)
     trained_models["Autoencoder"] = autoencoder
     histories["Autoencoder"] = _extract_history_dict(ae_hist)
     overfit_stats["Autoencoder"] = _compute_overfitting_gap(histories["Autoencoder"])

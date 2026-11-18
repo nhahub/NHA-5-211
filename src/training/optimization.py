@@ -80,6 +80,102 @@ def _eval_val_scores(y_val: np.ndarray, probs: np.ndarray, num_classes: int) -> 
     }
 
 
+SIMPLICITY_ORDER: tuple[str, ...] = ("none", "class_weight", "smote")
+
+
+def select_imbalance_strategy(
+    metrics_by_strategy: dict[str, dict[str, float]],
+    tie_tolerance: float = 0.002,
+) -> tuple[str, str]:
+    """Select the best imbalance strategy on validation Macro-F1 with simplicity tie-breaking.
+
+    If multiple candidates fall within ``tie_tolerance`` of the highest validation Macro-F1,
+    prefer the simplest strategy strictly in the order ``none > class_weight > smote`` and never
+    phrase the margin as "beating" another candidate.
+    """
+    if not metrics_by_strategy:
+        raise ValueError("metrics_by_strategy must not be empty.")
+
+    simplicity_rank = {name: rank for rank, name in enumerate(SIMPLICITY_ORDER)}
+    ordered_by_score = sorted(
+        metrics_by_strategy.items(),
+        key=lambda item: (
+            float(item[1].get("val_macro_f1", 0.0)),
+            float(item[1].get("val_weighted_f1", 0.0)),
+            -float(item[1].get("val_mlogloss", 0.0)),
+            -simplicity_rank.get(item[0], 99),
+        ),
+        reverse=True,
+    )
+    top_name, top_m = ordered_by_score[0]
+    best_f1 = float(top_m.get("val_macro_f1", 0.0))
+    tol = max(0.0, float(tie_tolerance))
+
+    contenders = [
+        (name, m)
+        for name, m in ordered_by_score
+        if (best_f1 - float(m.get("val_macro_f1", 0.0))) <= tol + 1e-12
+    ]
+
+    display_labels = {
+        "none": "Unweighted ('none')",
+        "class_weight": "Class-Weight ('class_weight')",
+        "smote": "Hybrid SMOTE ('smote')",
+    }
+
+    if len(contenders) > 1:
+        contenders_by_simplicity = sorted(
+            contenders,
+            key=lambda item: (
+                simplicity_rank.get(item[0], 99),
+                -float(item[1].get("val_macro_f1", 0.0)),
+            ),
+        )
+        selected, win_m = contenders_by_simplicity[0]
+        tied_str = ", ".join(
+            f"{display_labels.get(name, name)} Macro-F1={float(m.get('val_macro_f1', 0.0)):.4f}"
+            for name, m in contenders_by_simplicity
+        )
+        others = "; ".join(
+            f"{display_labels.get(name, name)} Macro-F1={float(m.get('val_macro_f1', 0.0)):.4f} "
+            f"(Weighted-F1={float(m.get('val_weighted_f1', 0.0)):.4f}, "
+            f"mlogloss={float(m.get('val_mlogloss', 0.0)):.4f})"
+            for name, m in ordered_by_score
+            if name != selected
+        )
+        gap_to_top = best_f1 - float(win_m.get("val_macro_f1", 0.0))
+        justification = (
+            f"Tie within tolerance (tol={tol:.4f}): {tied_str} fall within {tol:.4f} of peak "
+            f"validation Macro-F1={best_f1:.4f} (gap={gap_to_top:.4f} vs '{top_name}'); "
+            f"tie within tolerance, simplest strategy selected -> '{selected}' "
+            f"(Weighted-F1={float(win_m.get('val_weighted_f1', 0.0)):.4f}, "
+            f"Macro-Recall={float(win_m.get('val_macro_recall', 0.0)):.4f}, "
+            f"mlogloss={float(win_m.get('val_mlogloss', 0.0)):.4f}" + (f"; {others})." if others else ").")
+        )
+        return selected, justification
+
+    selected, win_m = top_name, top_m
+    if len(ordered_by_score) > 1:
+        runner_name, runner_m = ordered_by_score[1]
+        margin = best_f1 - float(runner_m.get("val_macro_f1", 0.0))
+        others = "; ".join(
+            f"{display_labels.get(name, name)} Macro-F1={float(m.get('val_macro_f1', 0.0)):.4f} "
+            f"(Weighted-F1={float(m.get('val_weighted_f1', 0.0)):.4f}, "
+            f"mlogloss={float(m.get('val_mlogloss', 0.0)):.4f})"
+            for name, m in ordered_by_score[1:]
+        )
+        justification = (
+            f"Data-driven selection chose '{selected}' with highest validation Macro-F1={best_f1:.4f} "
+            f"(Weighted-F1={float(win_m.get('val_weighted_f1', 0.0)):.4f}, "
+            f"Macro-Recall={float(win_m.get('val_macro_recall', 0.0)):.4f}, "
+            f"mlogloss={float(win_m.get('val_mlogloss', 0.0)):.4f}), beating runner-up '{runner_name}' "
+            f"by {margin:+.4f} Macro-F1 (> tolerance={tol:.4f}; {others})."
+        )
+    else:
+        justification = f"Data-driven selection chose '{selected}' (validation Macro-F1={best_f1:.4f})."
+    return selected, justification
+
+
 def compare_smote_vs_class_weight(
     X_train_scaled: np.ndarray,
     y_train: np.ndarray,
@@ -92,6 +188,7 @@ def compare_smote_vs_class_weight(
     smote_class_weights: dict[int, float] | None = None,
     xgb_device: str = "cpu",
     seed: int = 42,
+    tie_tolerance: float = 0.002,
 ) -> ImbalanceExperimentResult:
     """Experimentally evaluate Unweighted vs Class-Weight vs SMOTE and pick best Val Macro-F1."""
     logger.info("Running imbalance handling experiment (Unweighted vs Class-Weight vs SMOTE)...")
@@ -155,39 +252,14 @@ def compare_smote_vs_class_weight(
         y_val, expand_xgboost_probas(clf_sm.predict_proba(X_val_scaled), cls_sm, num_classes), num_classes
     )
 
-    # Strictly data-driven selection: maximize validation Macro-F1 across all three candidates
-    candidates = [
-        ("none", raw_metrics),
-        ("class_weight", cw_metrics),
-        ("smote", sm_metrics),
-    ]
-    ordered = sorted(
-        candidates,
-        key=lambda item: (
-            item[1]["val_macro_f1"],
-            item[1]["val_weighted_f1"],
-            -item[1]["val_mlogloss"],
-        ),
-        reverse=True,
-    )
-    selected, win_m = ordered[0]
-    runner_name, runner_m = ordered[1]
-    margin = win_m["val_macro_f1"] - runner_m["val_macro_f1"]
-    display_labels = {
-        "none": "Unweighted ('none')",
-        "class_weight": "Class-Weight ('class_weight')",
-        "smote": "Hybrid SMOTE ('smote')",
-    }
-    others = "; ".join(
-        f"{display_labels[name]} Macro-F1={m['val_macro_f1']:.4f} "
-        f"(Weighted-F1={m['val_weighted_f1']:.4f}, mlogloss={m['val_mlogloss']:.4f})"
-        for name, m in ordered[1:]
-    )
-    justification = (
-        f"Data-driven selection chose '{selected}' with highest validation Macro-F1={win_m['val_macro_f1']:.4f} "
-        f"(Weighted-F1={win_m['val_weighted_f1']:.4f}, Macro-Recall={win_m['val_macro_recall']:.4f}, "
-        f"mlogloss={win_m['val_mlogloss']:.4f}), beating runner-up '{runner_name}' by {margin:+.4f} "
-        f"Macro-F1 ({others})."
+    # Simplicity-aware data-driven selection within tolerance (none > class_weight > smote)
+    selected, justification = select_imbalance_strategy(
+        metrics_by_strategy={
+            "none": raw_metrics,
+            "class_weight": cw_metrics,
+            "smote": sm_metrics,
+        },
+        tie_tolerance=tie_tolerance,
     )
 
     logger.info("Imbalance experiment winner: %s | %s", selected, justification)

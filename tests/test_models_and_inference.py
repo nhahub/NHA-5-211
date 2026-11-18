@@ -51,7 +51,11 @@ from src.models.ensemble import (
 from src.models.mlp import build_mlp
 from src.models.xgboost_model import build_xgboost_classifier
 from src.response.response_engine import ActiveResponseEngine
-from src.training.optimization import compare_smote_vs_class_weight, optimize_xgboost_with_optuna
+from src.training.optimization import (
+    compare_smote_vs_class_weight,
+    optimize_xgboost_with_optuna,
+    select_imbalance_strategy,
+)
 from src.training.trainer import train_all_models
 from src.utils.model_registry import ModelRegistry
 
@@ -301,10 +305,15 @@ def test_imbalance_selection_bootstrap_ci_per_class_and_xgb_cv(tmp_app_config: A
         "class_weight": imb_res.class_weight_metrics["val_macro_f1"],
         "smote": imb_res.smote_metrics["val_macro_f1"],
     }
-    expected_best = max(scores, key=lambda k: scores[k])
-    assert imb_res.selected_strategy == expected_best
-    assert expected_best in {"none", "class_weight"}
-    assert "Data-driven selection chose" in imb_res.justification
+    best_score = max(scores.values())
+    within_tol = [k for k, v in scores.items() if (best_score - v) <= 0.002 + 1e-12]
+    assert imb_res.selected_strategy in {"none", "class_weight"}
+    if len(within_tol) > 1:
+        assert "tie within tolerance, simplest strategy selected" in imb_res.justification
+        assert "beating" not in imb_res.justification.lower()
+    else:
+        assert imb_res.selected_strategy == max(scores, key=lambda k: scores[k])
+        assert "Data-driven selection chose" in imb_res.justification
 
     # Bootstrap CI + Per-class low-support reliability flag
     proba = np.array(
@@ -701,3 +710,84 @@ def test_train_all_models_unified_cv_regression(tmp_app_config: AppConfig) -> No
     )
     assert out.xgb_optimization.cv_macro_f1_std >= 0.0
     assert "StratifiedKFold" in out.xgb_optimization.cv_method_note
+
+
+def test_imbalance_tie_breaking_with_synthetic_metric_dicts() -> None:
+    """Tie-breaker prefers none > class_weight > smote within tolerance and never says beating on ties."""
+    # 1. Near-tie between 'smote' and 'none' (real CICIDS2017 pattern) -> picks simplest 'none'
+    tie_smote_none = {
+        "none": {
+            "val_macro_f1": 0.951797,
+            "val_weighted_f1": 0.998852,
+            "val_macro_recall": 0.9323,
+            "val_mlogloss": 0.0046,
+        },
+        "class_weight": {
+            "val_macro_f1": 0.944607,
+            "val_weighted_f1": 0.998069,
+            "val_macro_recall": 0.9583,
+            "val_mlogloss": 0.0092,
+        },
+        "smote": {
+            "val_macro_f1": 0.951808,
+            "val_weighted_f1": 0.998853,
+            "val_macro_recall": 0.9439,
+            "val_mlogloss": 0.0044,
+        },
+    }
+    sel1, just1 = select_imbalance_strategy(tie_smote_none, tie_tolerance=0.002)
+    assert sel1 == "none"
+    assert "tie within tolerance, simplest strategy selected" in just1
+    assert "beating" not in just1.lower()
+
+    # 2. 'smote' & 'class_weight' tied within 0.002 while 'none' trails -> prefers 'class_weight' > 'smote'
+    tie_cw_smote = {
+        "none": {
+            "val_macro_f1": 0.9400,
+            "val_weighted_f1": 0.9970,
+            "val_macro_recall": 0.9200,
+            "val_mlogloss": 0.0060,
+        },
+        "class_weight": {
+            "val_macro_f1": 0.9515,
+            "val_weighted_f1": 0.9985,
+            "val_macro_recall": 0.9500,
+            "val_mlogloss": 0.0050,
+        },
+        "smote": {
+            "val_macro_f1": 0.9530,
+            "val_weighted_f1": 0.9989,
+            "val_macro_recall": 0.9490,
+            "val_mlogloss": 0.0045,
+        },
+    }
+    sel2, just2 = select_imbalance_strategy(tie_cw_smote, tie_tolerance=0.002)
+    assert sel2 == "class_weight"
+    assert "tie within tolerance, simplest strategy selected" in just2
+    assert "beating" not in just2.lower()
+
+    # 3. Clear margin > tolerance -> selects genuine winner
+    clear_smote = {
+        "none": {
+            "val_macro_f1": 0.9400,
+            "val_weighted_f1": 0.9970,
+            "val_macro_recall": 0.9200,
+            "val_mlogloss": 0.0060,
+        },
+        "class_weight": {
+            "val_macro_f1": 0.9480,
+            "val_weighted_f1": 0.9980,
+            "val_macro_recall": 0.9400,
+            "val_mlogloss": 0.0050,
+        },
+        "smote": {
+            "val_macro_f1": 0.9600,
+            "val_weighted_f1": 0.9990,
+            "val_macro_recall": 0.9550,
+            "val_mlogloss": 0.0040,
+        },
+    }
+    sel3, just3 = select_imbalance_strategy(clear_smote, tie_tolerance=0.002)
+    assert sel3 == "smote"
+    assert "beating runner-up" in just3
+    assert "tie within tolerance" not in just3.lower()

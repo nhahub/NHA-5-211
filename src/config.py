@@ -77,6 +77,7 @@ class ImbalanceConfig(BaseModel):
     """Class imbalance remediation configuration."""
 
     strategy: str = "auto_compare"
+    imbalance_tie_tolerance: float = Field(default=0.002, ge=0.0, le=0.2)
     smote_sampling_strategy: str = "auto"
     smote_max_k_neighbors: int = Field(default=5, ge=1)
     smote_cap_per_class: int | None = 5000

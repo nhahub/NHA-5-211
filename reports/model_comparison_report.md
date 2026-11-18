@@ -11,20 +11,20 @@
 
 | Model | Evaluation_Framing | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro | F1_Macro_CI95_Low | F1_Macro_CI95_High | ROC_AUC | PR_AUC | Latency_Mean_us | Latency_Median_us | Latency_P95_us | Samples_Per_Sec | Model_Size_MB | Training_Duration_s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MLP | 13-class supervised | 0.9766 | 0.9790 | 0.9766 | 0.9772 | 0.7934 | 0.7544 | 0.8176 | 0.9962 | 0.8487 | 189.1100 | 179.9500 | 257.2800 | 24425.2000 | 2.5340 | 59.6300 |
-| 1D-CNN | 13-class supervised | 0.9904 | 0.9925 | 0.9904 | 0.9913 | 0.8447 | 0.7649 | 0.8819 | 0.9933 | 0.8752 | 722.0100 | 699.2500 | 925.2500 | 16651.9000 | 1.3100 | 889.3800 |
-| XGBoost | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9989 | 0.9675 | 0.9307 | 0.9843 | 0.9995 | 0.9935 | 399.4300 | 369.9500 | 556.4600 | 370459.7000 | 2.0490 | 114.4200 |
-| Autoencoder | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.5759 | 0.6001 | 0.8384 | 0.6651 | 256.9400 | 228.5000 | 418.7800 | 24771.3000 | 1.5480 | 35.8600 |
-| Isolation Forest | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 7918.2300 | 7842.8000 | 8724.5100 | 74084.4000 | 2.0960 | 0.4900 |
-| One-Class SVM | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 158.8100 | 137.9500 | 264.4700 | 22377.0000 | 0.4780 | 1.4700 |
-| LOF | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1262.7700 | 1188.9500 | 1629.3500 | 40543.4000 | 5.6660 | 0.5100 |
+| MLP | 13-class supervised | 0.9780 | 0.9762 | 0.9780 | 0.9767 | 0.6728 | 0.6236 | 0.7067 | 0.9905 | 0.8117 | 205.2900 | 202.9000 | 273.4500 | 23816.4000 | 2.5340 | 33.5500 |
+| 1D-CNN | 13-class supervised | 0.9946 | 0.9936 | 0.9946 | 0.9940 | 0.8499 | 0.7942 | 0.8827 | 0.9853 | 0.8735 | 718.6600 | 693.4000 | 943.2700 | 16872.9000 | 1.3100 | 858.3600 |
+| XGBoost | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9603 | 0.9013 | 0.9849 | 0.9995 | 0.9773 | 592.8600 | 535.0500 | 744.7400 | 237598.0000 | 2.9540 | 119.3100 |
+| Autoencoder | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.5759 | 0.6001 | 0.8384 | 0.6651 | 269.3200 | 249.1000 | 416.9000 | 24332.6000 | 1.5480 | 36.1000 |
+| Isolation Forest | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 8052.4800 | 7982.1000 | 8787.9100 | 72477.6000 | 2.0960 | 0.5000 |
+| One-Class SVM | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 145.2300 | 134.8500 | 176.2300 | 22546.5000 | 0.4780 | 1.4800 |
+| LOF | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1299.0700 | 1265.5000 | 1705.4500 | 40917.4000 | 5.6660 | 0.5300 |
 
 
-- **XGBoost Macro-F1 (95% Bootstrap CI, n=1000):** `0.9675` (`[0.9307, 0.9843]`, bootstrap std=`0.0139`)
+- **XGBoost Macro-F1 (95% Bootstrap CI, n=1000):** `0.9603` (`[0.9013, 0.9849]`, bootstrap std=`0.0193`)
 
-- **1D-CNN Macro-F1 (95% Bootstrap CI, n=1000):** `0.8447` (`[0.7649, 0.8819]`, bootstrap std=`0.0299`)
+- **1D-CNN Macro-F1 (95% Bootstrap CI, n=1000):** `0.8499` (`[0.7942, 0.8827]`, bootstrap std=`0.0232`)
 
-- **MLP Macro-F1 (95% Bootstrap CI, n=1000):** `0.7934` (`[0.7544, 0.8176]`, bootstrap std=`0.0161`)
+- **MLP Macro-F1 (95% Bootstrap CI, n=1000):** `0.6728` (`[0.6236, 0.7067]`, bootstrap std=`0.0223`)
 
 - **Autoencoder Binary F1 (95% Bootstrap CI, n=1000):** `0.5881` (`[0.5759, 0.6001]`, bootstrap std=`0.0061`)
 
@@ -50,9 +50,9 @@
 
 | Model | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro_All | F1_Macro_Present_Test | ROC_AUC_OVR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| XGBoost | 0.6867 | 0.4944 | 0.6867 | 0.5749 | 0.0697 | 0.1395 | 0.5420 |
-| MLP | 0.6853 | 0.5183 | 0.6853 | 0.5902 | 0.0661 | 0.1432 | 0.5444 |
-| 1D-CNN | 0.6787 | 0.5118 | 0.6787 | 0.5835 | 0.0654 | 0.1416 | 0.6827 |
+| XGBoost | 0.6868 | 0.5185 | 0.6868 | 0.5909 | 0.0860 | 0.1434 | 0.5441 |
+| MLP | 0.6864 | 0.5177 | 0.6864 | 0.5902 | 0.0661 | 0.1432 | 0.4874 |
+| 1D-CNN | 0.6860 | 0.4871 | 0.6860 | 0.5697 | 0.0691 | 0.1382 | 0.6507 |
 
 
 ### Cross-Day Binary Intrusion Detection (`by_day`: Benign vs. Attack)
@@ -60,10 +60,10 @@
 
 | Model | Accuracy | Precision | Recall | F1 | ROC_AUC | PR_AUC | FPR | FNR |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| XGBoost (1 - P_Benign) | 0.7325 | 0.9962 | 0.1464 | 0.2553 | 0.7525 | 0.7287 | 0.0003 | 0.8536 |
-| XGBoost (Binary) | 0.7172 | 0.9918 | 0.0977 | 0.1779 | 0.8456 | 0.7632 | 0.0004 | 0.9023 |
-| MLP (1 - P_Benign) | 0.7756 | 0.9831 | 0.2883 | 0.4458 | 0.8579 | 0.7733 | 0.0023 | 0.7117 |
-| 1D-CNN (1 - P_Benign) | 0.7638 | 0.9124 | 0.2717 | 0.4187 | 0.9272 | 0.8343 | 0.0119 | 0.7283 |
+| XGBoost (1 - P_Benign) | 0.7768 | 0.9991 | 0.2876 | 0.4467 | 0.7656 | 0.7168 | 0.0001 | 0.7124 |
+| XGBoost (Binary) | 0.7709 | 0.9981 | 0.2690 | 0.4238 | 0.7559 | 0.6932 | 0.0002 | 0.7310 |
+| MLP (1 - P_Benign) | 0.7752 | 0.9942 | 0.2839 | 0.4417 | 0.7706 | 0.7136 | 0.0008 | 0.7161 |
+| 1D-CNN (1 - P_Benign) | 0.7239 | 0.9654 | 0.1227 | 0.2177 | 0.9353 | 0.8443 | 0.0020 | 0.8773 |
 | Autoencoder | 0.7562 | 0.7396 | 0.3419 | 0.4676 | 0.8784 | 0.7022 | 0.0549 | 0.6581 |
 
 
@@ -71,15 +71,15 @@
 
 | Variant | Features | Test_Rows | Val_Macro_F1 | Test_Accuracy | Test_F1_Weighted | Test_F1_Macro | Test_ROC_AUC |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| XGBoost (With Destination Port) | 77 | 28324 | 0.9625 | 0.9989 | 0.9989 | 0.9675 | 0.9995 |
-| XGBoost (Without Destination Port) | 76 | 28324 | 0.9495 | 0.9987 | 0.9986 | 0.9537 | 0.9976 |
+| XGBoost (With Destination Port) | 77 | 28324 | 0.9504 | 0.9989 | 0.9988 | 0.9603 | 0.9995 |
+| XGBoost (Without Destination Port) | 76 | 28324 | 0.9563 | 0.9987 | 0.9987 | 0.9540 | 0.9990 |
 
 
 - **Apples-to-Apples Row Parity Verified:** Identical post-deduplication train/val/test rows (`Test_Rows=28,324`, `sha256=85c3896d03d7...`) evaluated after full 77-feature leakage verification.
 
-- **Delta Test Macro-F1 (without - with):** `-0.0138` | **Delta Val Macro-F1:** `-0.0130` | **Delta Test Weighted-F1:** `-0.0002`.
+- **Delta Test Macro-F1 (without - with):** `-0.0063` | **Delta Val Macro-F1:** `+0.0059` | **Delta Test Weighted-F1:** `-0.0002`.
 
-- **Top-5 XGBoost SHAP Features After Removing `Destination Port`:** `Init_Win_bytes_forward` (0.6980), `min_seg_size_forward` (0.5503), `Flow IAT Min` (0.4499), `Init_Win_bytes_backward` (0.4401), `Bwd Packets/s` (0.2968).
+- **Top-5 XGBoost SHAP Features After Removing `Destination Port`:** `Init_Win_bytes_backward` (0.4962), `Init_Win_bytes_forward` (0.4449), `min_seg_size_forward` (0.3634), `Flow IAT Min` (0.3315), `Bwd Packets/s` (0.2949).
 
 
 
@@ -93,18 +93,18 @@
 
 | Class | Precision | Recall | F1_Score | Support | Reliability |
 | --- | --- | --- | --- | --- | --- |
-| BENIGN | 0.9995 | 0.9993 | 0.9994 | 23112 | Adequate |
+| BENIGN | 0.9994 | 0.9992 | 0.9993 | 23112 | Adequate |
 | Bot | 0.9412 | 0.7619 | 0.8421 | 21 | Statistically Unreliable |
 | DDoS | 0.9993 | 0.9993 | 0.9993 | 1357 | Adequate |
 | DoS GoldenEye | 1.0000 | 1.0000 | 1.0000 | 109 | Adequate |
 | DoS Hulk | 0.9974 | 1.0000 | 0.9987 | 1883 | Adequate |
-| DoS Slowhttptest | 0.9655 | 1.0000 | 0.9825 | 56 | Adequate |
-| DoS slowloris | 1.0000 | 0.9508 | 0.9748 | 61 | Adequate |
+| DoS Slowhttptest | 1.0000 | 1.0000 | 1.0000 | 56 | Adequate |
+| DoS slowloris | 1.0000 | 0.9836 | 0.9917 | 61 | Adequate |
 | FTP-Patator | 1.0000 | 1.0000 | 1.0000 | 70 | Adequate |
 | Heartbleed | 1.0000 | 1.0000 | 1.0000 | 2 | Statistically Unreliable |
-| Infiltration | 1.0000 | 0.8000 | 0.8889 | 5 | Statistically Unreliable |
+| Infiltration | 1.0000 | 0.6000 | 0.7500 | 5 | Statistically Unreliable |
 | PortScan | 0.9931 | 1.0000 | 0.9965 | 1576 | Adequate |
-| SSH-Patator | 0.9783 | 0.9783 | 0.9783 | 46 | Adequate |
+| SSH-Patator | 1.0000 | 0.9783 | 0.9890 | 46 | Adequate |
 | Web Attack | 1.0000 | 0.8462 | 0.9167 | 26 | Statistically Unreliable |
 
 
@@ -113,19 +113,19 @@
 
 | Class | Precision | Recall | F1_Score | Support | Reliability |
 | --- | --- | --- | --- | --- | --- |
-| BENIGN | 0.9961 | 0.9925 | 0.9943 | 23112 | Adequate |
-| Bot | 0.7222 | 0.6190 | 0.6667 | 21 | Statistically Unreliable |
-| DDoS | 0.9978 | 0.9985 | 0.9982 | 1357 | Adequate |
-| DoS GoldenEye | 0.9160 | 1.0000 | 0.9561 | 109 | Adequate |
-| DoS Hulk | 0.9778 | 0.9607 | 0.9692 | 1883 | Adequate |
-| DoS Slowhttptest | 0.9032 | 1.0000 | 0.9492 | 56 | Adequate |
-| DoS slowloris | 0.8923 | 0.9508 | 0.9206 | 61 | Adequate |
-| FTP-Patator | 0.8961 | 0.9857 | 0.9388 | 70 | Adequate |
-| Heartbleed | 0.6667 | 1.0000 | 0.8000 | 2 | Statistically Unreliable |
-| Infiltration | 0.6000 | 0.6000 | 0.6000 | 5 | Statistically Unreliable |
-| PortScan | 0.9937 | 1.0000 | 0.9968 | 1576 | Adequate |
-| SSH-Patator | 0.8036 | 0.9783 | 0.8824 | 46 | Adequate |
-| Web Attack | 0.1959 | 0.7308 | 0.3089 | 26 | Statistically Unreliable |
+| BENIGN | 0.9953 | 0.9984 | 0.9968 | 23112 | Adequate |
+| Bot | 0.7647 | 0.6190 | 0.6842 | 21 | Statistically Unreliable |
+| DDoS | 0.9985 | 0.9985 | 0.9985 | 1357 | Adequate |
+| DoS GoldenEye | 0.9811 | 0.9541 | 0.9674 | 109 | Adequate |
+| DoS Hulk | 0.9934 | 0.9649 | 0.9790 | 1883 | Adequate |
+| DoS Slowhttptest | 0.9492 | 1.0000 | 0.9739 | 56 | Adequate |
+| DoS slowloris | 0.9833 | 0.9672 | 0.9752 | 61 | Adequate |
+| FTP-Patator | 0.9714 | 0.9714 | 0.9714 | 70 | Adequate |
+| Heartbleed | 1.0000 | 1.0000 | 1.0000 | 2 | Statistically Unreliable |
+| Infiltration | 1.0000 | 0.4000 | 0.5714 | 5 | Statistically Unreliable |
+| PortScan | 0.9899 | 1.0000 | 0.9949 | 1576 | Adequate |
+| SSH-Patator | 0.9167 | 0.9565 | 0.9362 | 46 | Adequate |
+| Web Attack | 0.0000 | 0.0000 | 0.0000 | 26 | Statistically Unreliable |
 
 
 ### MLP Per-Class Metrics
@@ -133,46 +133,46 @@
 
 | Class | Precision | Recall | F1_Score | Support | Reliability |
 | --- | --- | --- | --- | --- | --- |
-| BENIGN | 0.9808 | 0.9910 | 0.9859 | 23112 | Adequate |
-| Bot | 0.4615 | 0.2857 | 0.3529 | 21 | Statistically Unreliable |
-| DDoS | 0.9971 | 0.9963 | 0.9967 | 1357 | Adequate |
-| DoS GoldenEye | 0.9130 | 0.9633 | 0.9375 | 109 | Adequate |
-| DoS Hulk | 0.9865 | 0.8933 | 0.9376 | 1883 | Adequate |
-| DoS Slowhttptest | 0.9180 | 1.0000 | 0.9573 | 56 | Adequate |
-| DoS slowloris | 0.9206 | 0.9508 | 0.9355 | 61 | Adequate |
-| FTP-Patator | 0.7222 | 0.9286 | 0.8125 | 70 | Adequate |
-| Heartbleed | 1.0000 | 1.0000 | 1.0000 | 2 | Statistically Unreliable |
-| Infiltration | 0.2143 | 0.6000 | 0.3158 | 5 | Statistically Unreliable |
-| PortScan | 0.9743 | 0.8668 | 0.9174 | 1576 | Adequate |
-| SSH-Patator | 0.8269 | 0.9348 | 0.8776 | 46 | Adequate |
-| Web Attack | 0.1818 | 0.6923 | 0.2880 | 26 | Statistically Unreliable |
+| BENIGN | 0.9802 | 0.9934 | 0.9868 | 23112 | Adequate |
+| Bot | 0.0000 | 0.0000 | 0.0000 | 21 | Statistically Unreliable |
+| DDoS | 0.9898 | 0.9978 | 0.9938 | 1357 | Adequate |
+| DoS GoldenEye | 0.9694 | 0.8716 | 0.9179 | 109 | Adequate |
+| DoS Hulk | 0.9917 | 0.8917 | 0.9390 | 1883 | Adequate |
+| DoS Slowhttptest | 0.9434 | 0.8929 | 0.9174 | 56 | Adequate |
+| DoS slowloris | 0.9298 | 0.8689 | 0.8983 | 61 | Adequate |
+| FTP-Patator | 0.9787 | 0.6571 | 0.7863 | 70 | Adequate |
+| Heartbleed | 0.4000 | 1.0000 | 0.5714 | 2 | Statistically Unreliable |
+| Infiltration | 0.0000 | 0.0000 | 0.0000 | 5 | Statistically Unreliable |
+| PortScan | 0.9231 | 0.9067 | 0.9149 | 1576 | Adequate |
+| SSH-Patator | 1.0000 | 0.6957 | 0.8205 | 46 | Adequate |
+| Web Attack | 0.0000 | 0.0000 | 0.0000 | 26 | Statistically Unreliable |
 
 
 ## 5. XGBoost 5-Fold Stratified Cross-Validation
 
-- **Variant Evaluated:** `tuned` | **Development Pool Rows (Held-Out Test Excluded):** `162,577` | **Imbalance Strategy:** `smote`
-- **Macro-F1 (Mean +/- Std):** `0.9641 ± 0.0125`
-- **Weighted-F1 (Mean +/- Std):** `0.9988 ± 0.0003` | **Accuracy:** `0.9988 ± 0.0002`
+- **Variant Evaluated:** `baseline` | **Development Pool Rows (Held-Out Test Excluded):** `162,577` | **Imbalance Strategy:** `none`
+- **Macro-F1 (Mean +/- Std):** `0.9535 ± 0.0121`
+- **Weighted-F1 (Mean +/- Std):** `0.9988 ± 0.0002` | **Accuracy:** `0.9988 ± 0.0002`
 
 
 | Fold | Train_Rows | Val_Rows | Accuracy | F1_Weighted | F1_Macro | ROC_AUC_OVR |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 137137 | 32200 | 0.9991 | 0.9991 | 0.9663 | 0.9994 |
-| 2 | 137137 | 32310 | 0.9989 | 0.9989 | 0.9699 | 0.9987 |
-| 3 | 137142 | 32201 | 0.9989 | 0.9989 | 0.9669 | 0.9995 |
-| 4 | 137142 | 32248 | 0.9987 | 0.9987 | 0.9748 | 0.9991 |
-| 5 | 137142 | 32083 | 0.9985 | 0.9985 | 0.9425 | 0.9994 |
+| 1 | 130061 | 32200 | 0.9991 | 0.9990 | 0.9515 | 0.9993 |
+| 2 | 130061 | 32310 | 0.9987 | 0.9987 | 0.9351 | 0.9991 |
+| 3 | 130062 | 32201 | 0.9989 | 0.9988 | 0.9627 | 0.9995 |
+| 4 | 130062 | 32248 | 0.9989 | 0.9989 | 0.9659 | 0.9993 |
+| 5 | 130062 | 32083 | 0.9985 | 0.9985 | 0.9522 | 0.9993 |
 
 
 ## 6. Ensemble Strategy Comparison (Test Partition)
 
 | Strategy | accuracy | f1_macro | f1_weighted | roc_auc_macro_ovr | ece |
 | --- | --- | --- | --- | --- | --- |
-| best_single | 0.9989 | 0.9675 | 0.9989 | 0.9995 | 0.0003 |
-| soft_voting | 0.9959 | 0.9185 | 0.9958 | 0.9990 | 0.0119 |
-| confidence_weighted | 0.9984 | 0.9454 | 0.9984 | 0.9990 | 0.0111 |
-| val_weighted_voting | 0.9970 | 0.9173 | 0.9969 | 0.9989 | 0.0109 |
-| stacking | 0.9988 | 0.9653 | 0.9988 | 0.9990 | 0.0007 |
+| best_single | 0.9989 | 0.9603 | 0.9988 | 0.9995 | 0.0003 |
+| soft_voting | 0.9970 | 0.8420 | 0.9964 | 0.9992 | 0.0120 |
+| confidence_weighted | 0.9983 | 0.9271 | 0.9982 | 0.9993 | 0.0119 |
+| val_weighted_voting | 0.9972 | 0.8558 | 0.9966 | 0.9992 | 0.0111 |
+| stacking | 0.9988 | 0.9606 | 0.9987 | 0.9994 | 0.0007 |
 
 
 ### Paired Bootstrap Macro-F1 Significance vs. Best Single (`XGBoost`)
@@ -180,10 +180,10 @@
 
 | Strategy_vs_BestSingle | Observed_Diff | Mean_Diff | CI95_Low | CI95_High | Statistically_Significant | N_Bootstrap |
 | --- | --- | --- | --- | --- | --- | --- |
-| soft_voting | -0.0490 | -0.0514 | -0.0959 | -0.0209 | True | 1000 |
-| confidence_weighted | -0.0221 | -0.0239 | -0.0652 | -0.0029 | True | 1000 |
-| val_weighted_voting | -0.0502 | -0.0529 | -0.0966 | -0.0238 | True | 1000 |
-| stacking | -0.0022 | -0.0022 | -0.0139 | 0.0108 | False | 1000 |
+| soft_voting | -0.1183 | -0.1217 | -0.1737 | -0.0908 | True | 1000 |
+| confidence_weighted | -0.0331 | -0.0344 | -0.0532 | -0.0162 | True | 1000 |
+| val_weighted_voting | -0.1044 | -0.1063 | -0.1284 | -0.0864 | True | 1000 |
+| stacking | 0.0003 | 0.0004 | -0.0069 | 0.0086 | False | 1000 |
 
 
 ### Paired Bootstrap Macro-F1 Comparison: Stacking vs. Other Strategies
@@ -191,13 +191,13 @@
 
 | Comparison | Observed_Diff | Mean_Diff | CI95_Low | CI95_High | Statistically_Significant | N_Bootstrap |
 | --- | --- | --- | --- | --- | --- | --- |
-| stacking_vs_best_single | -0.0022 | -0.0022 | -0.0139 | 0.0108 | False | 1000 |
-| stacking_vs_soft_voting | 0.0468 | 0.0492 | 0.0175 | 0.0958 | True | 1000 |
-| stacking_vs_confidence_weighted | 0.0199 | 0.0217 | -0.0028 | 0.0639 | False | 1000 |
-| stacking_vs_val_weighted_voting | 0.0480 | 0.0507 | 0.0194 | 0.0974 | True | 1000 |
+| stacking_vs_best_single | 0.0003 | 0.0004 | -0.0069 | 0.0086 | False | 1000 |
+| stacking_vs_soft_voting | 0.1186 | 0.1222 | 0.0933 | 0.1743 | True | 1000 |
+| stacking_vs_confidence_weighted | 0.0334 | 0.0349 | 0.0162 | 0.0549 | True | 1000 |
+| stacking_vs_val_weighted_voting | 0.1047 | 0.1068 | 0.0883 | 0.1276 | True | 1000 |
 
 
-- **Empirical Conclusion:** Ensemble fusion 'stacking' (Test Macro-F1=0.9653) is comparable to XGBoost, difference not statistically significant (XGBoost=0.9675; observed delta=-0.0022, paired bootstrap n=1000 mean diff=-0.0022, 95% CI=[-0.0139, +0.0108] includes 0; statistically_significant=False). Standalone XGBoost is kept as the supervised default with the Autoencoder orthogonal.
+- **Empirical Conclusion:** Ensemble fusion 'stacking' (Test Macro-F1=0.9606) is comparable to XGBoost, difference not statistically significant (XGBoost=0.9603; observed delta=+0.0003, paired bootstrap n=1000 mean diff=+0.0004, 95% CI=[-0.0069, +0.0086] includes 0; statistically_significant=False). Standalone XGBoost is kept as the supervised default with the Autoencoder orthogonal.
 
 
 ## 7. Unsupervised Anomaly Detector Baselines (Benign-Only Training)
@@ -240,15 +240,15 @@
 
 | Variant | val_macro_f1 | val_weighted_f1 | val_macro_recall | val_mlogloss |
 | --- | --- | --- | --- | --- |
-| Baseline (300 trees, depth=6, lr=0.1) | 0.9505 | 0.9989 | 0.9439 | 0.0041 |
-| Optuna Tuned (12 trials) | 0.9625 | 0.9990 | 0.9578 | 0.0039 |
+| Baseline (300 trees, depth=6, lr=0.1) | 0.9504 | 0.9988 | 0.9331 | 0.0042 |
+| Optuna Tuned (12 trials) | 0.9563 | 0.9989 | 0.9381 | 0.0038 |
 
 
-- **Selected Variant:** `tuned` (Baseline CV Macro-F1 = `0.9670 ± 0.0076`, Val Macro-F1 delta=`+0.0120`, Meaningful Improvement=`True`)
+- **Selected Variant:** `baseline` (Baseline CV Macro-F1 = `0.9535 ± 0.0121`, Val Macro-F1 delta=`+0.0059`, Meaningful Improvement=`False`)
 
-- **Decision Basis:** Meaningful improvement: tuned val Macro-F1 (0.9625) beat baseline (0.9505) by +0.0120 (> CV std=0.0076).
+- **Decision Basis:** No meaningful improvement: Optuna tuned val Macro-F1 (0.9563) changed by +0.0059 vs baseline (0.9504), within baseline CV std=0.0121; retaining baseline.
 
-- **How CV Std is Computed:** Unified 5-fold StratifiedKFold on the development pool (162,577 rows = train+val, held-out test excluded) with per-fold preprocessing and 'smote' imbalance handling (sample ddof=1 std across folds).
+- **How CV Std is Computed:** Unified 5-fold StratifiedKFold on the development pool (162,577 rows = train+val, held-out test excluded) with per-fold preprocessing and 'none' imbalance handling (sample ddof=1 std across folds).
 
 
 
@@ -259,4 +259,4 @@ Tabular CICFlowMeter features do not form a physical time series; 1D convolution
 
 ## 10. Preprocessing vs. Model Inference Latency
 
-- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** mean = `857.17 µs`, median = `801.75 µs`, P95 = `1108.55 µs` (`1166.6` flows/sec).
+- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** mean = `838.22 µs`, median = `827.20 µs`, P95 = `953.77 µs` (`1193.0` flows/sec).
