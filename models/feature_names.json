@@ -1,4 +1,5 @@
 [
+  "Destination Port",
   "Flow Duration",
   "Total Fwd Packets",
   "Total Backward Packets",
@@ -53,7 +54,6 @@
   "Average Packet Size",
   "Avg Fwd Segment Size",
   "Avg Bwd Segment Size",
-  "Fwd Header Length.1",
   "Fwd Avg Bytes/Bulk",
   "Fwd Avg Packets/Bulk",
   "Fwd Avg Bulk Rate",

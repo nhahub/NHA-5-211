@@ -1,36 +1,34 @@
-# Python virtual environments
-.venv/
-venv/
-env/
-ENV/
-
-# Python byte-code and cache
+# Python & Virtual Environments
 __pycache__/
 *.py[cod]
 *$py.class
-*.pyd
-
-# Testing & quality caches
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
 .pytest_cache/
-.coverage
-htmlcov/
-
-# Jupyter Notebook checkpoints
+.ruff_cache/
+.mypy_cache/
 .ipynb_checkpoints/
 
-# IDE configurations
-.idea/
-.vscode/*
-!.vscode/settings.json
+# Environment variables
+.env
 
-# Large data files (to comply with GitHub 100MB limits)
-data/raw/*
-!data/raw/.gitkeep
+# Large raw datasets & generated split binaries (keep audit JSON and .gitkeep)
+data/raw/*.csv
+data/raw/*.zip
+data/raw/*.parquet
 data/processed/*.npy
+data/processed/*.npz
 data/processed/*.parquet
 data/processed/*.csv
-!data/processed/.gitkeep
+data/synthetic/*.csv
+data/synthetic/*.parquet
 
-# Operating system artifacts
+# Logs & OS files
+*.log
+ids_response_log.txt
 .DS_Store
 Thumbs.db

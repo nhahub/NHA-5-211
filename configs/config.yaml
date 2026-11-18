@@ -1,0 +1,113 @@
+project:
+  name: "SMART IDS v3"
+  subtitle: "An Intelligent, Multi-Modal Hybrid Ensemble Architecture for Network Intrusion Detection and Zero-Day Anomaly Tracking"
+  version: "3.0.0"
+  random_seed: 42
+
+paths:
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  synthetic_data_dir: "data/synthetic"
+  models_dir: "models"
+  artifacts_dir: "artifacts"
+  reports_dir: "reports"
+  figures_dir: "reports/figures"
+  response_log_file: "reports/ids_response_log.txt"
+  incident_history_file: "reports/incident_history.json"
+
+data:
+  dataset_name: "CICIDS2017"
+  expected_raw_files:
+    - "Monday-WorkingHours.pcap_ISCX.csv"
+    - "Tuesday-WorkingHours.pcap_ISCX.csv"
+    - "Wednesday-workingHours.pcap_ISCX.csv"
+    - "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv"
+    - "Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv"
+    - "Friday-WorkingHours-Morning.pcap_ISCX.csv"
+    - "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv"
+    - "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv"
+  max_rows_sample: 200000
+  synthetic_fallback:
+    enabled: true
+    n_samples: 60000
+    duplicate_fraction: 0.004
+    inf_fraction: 0.008
+    nan_fraction: 0.003
+    class_weights:
+      BENIGN: 0.83
+      DoS Hulk: 0.06
+      PortScan: 0.04
+      DDoS: 0.03
+      DoS GoldenEye: 0.01
+      FTP-Patator: 0.01
+      SSH-Patator: 0.01
+      Web Attack: 0.01
+  label_column: "Label"
+  canonical_classes:
+    - "BENIGN"
+    - "DoS Hulk"
+    - "PortScan"
+    - "DDoS"
+    - "DoS GoldenEye"
+    - "FTP-Patator"
+    - "SSH-Patator"
+    - "Web Attack"
+  merge_web_attacks: true
+  drop_ultra_rare_classes_below: 10
+  nan_column_drop_threshold: 0.50
+  outlier_clip_sigma: 5.0
+  identifier_keywords:
+    - "ip"
+    - "timestamp"
+    - "flow id"
+    - "src"
+    - "dst"
+    - "source port"
+  preserve_features:
+    - "Destination Port"
+  split:
+    # Matches report: 15% held-out test, then 15% of remainder validation (12.75% val, 72.25% train)
+    test_size: 0.15
+    val_size_of_remainder: 0.15
+    stratify: true
+  imbalance:
+    strategy: "auto_compare" # Compares SMOTE vs class_weight on validation set; options: smote, class_weight, none, auto_compare
+    smote_sampling_strategy: "auto"
+    smote_max_k_neighbors: 5
+    smote_cap_per_class: 25000 # Caps minority oversampling at 25k/class across 13-class CICIDS2017 to prevent overfitting & RAM blowup
+
+evaluation:
+  latency_warmup_runs: 5
+  latency_timed_runs: 100
+  batch_benchmark_size: 1024
+  shap_xgb_max_samples: 500
+  shap_mlp_background_samples: 50
+  shap_mlp_explain_samples: 20
+  autoencoder_percentiles: [90, 95, 97, 99]
+  unseen_attack_holdout_class: "Web Attack"
+
+response:
+  dry_run: true
+  rate_limit_pps: 100
+  threat_thresholds:
+    Low: [0.0, 0.40]
+    Medium: [0.40, 0.70]
+    High: [0.70, 0.90]
+    Critical: [0.90, 1.01]
+  threat_colors:
+    Low: "#22c55e"
+    Medium: "#eab308"
+    High: "#f97316"
+    Critical: "#ef4444"
+  threat_icons:
+    Low: "🟢"
+    Medium: "🟡"
+    High: "🟠"
+    Critical: "🔴"
+
+dashboard:
+  page_title: "SMART IDS v3 — Hybrid SOC Analytics"
+  page_icon: "🛡️"
+  layout: "wide"
+  default_model: "Hybrid Ensemble"
+  default_confidence_threshold: 0.40

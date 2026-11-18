@@ -1,0 +1,87 @@
+hardware:
+  use_gpu: "auto" # auto, true, false
+  mixed_precision: false
+  memory_growth: true
+
+mlp:
+  hidden_units: [512, 256, 128, 64]
+  l2_reg: 0.0001
+  leaky_relu_slope: 0.1
+  dropout_rate: 0.4
+  learning_rate: 0.001
+  clipnorm: 1.0
+  batch_size: 512
+  epochs: 50
+  early_stopping_patience: 8
+  reduce_lr_patience: 4
+  reduce_lr_factor: 0.5
+  min_lr: 0.000001
+  checkpoint_name: "best_mlp.keras"
+
+cnn:
+  block1_filters: 64
+  block2_filters: 128
+  kernel_size: 3
+  pool_size: 2
+  l2_reg: 0.0001
+  dropout_block1: 0.3
+  dropout_block2: 0.4
+  dense_units: 128
+  dropout_head: 0.3
+  learning_rate: 0.001
+  clipnorm: 1.0
+  batch_size: 512
+  epochs: 50
+  early_stopping_patience: 8
+  reduce_lr_patience: 4
+  reduce_lr_factor: 0.5
+  min_lr: 0.000001
+  checkpoint_name: "best_cnn.keras"
+
+autoencoder:
+  encoder_units: [256, 128, 64]
+  latent_dim: 32
+  decoder_units: [64, 128, 256]
+  learning_rate: 0.0005
+  batch_size: 512
+  epochs: 50
+  early_stopping_patience: 10
+  reduce_lr_patience: 5
+  reduce_lr_factor: 0.5
+  min_lr: 0.000001
+  threshold_percentile: 95.0
+  checkpoint_name: "best_autoencoder.keras"
+  threshold_file: "anomaly_threshold.json"
+
+xgboost:
+  baseline:
+    n_estimators: 300
+    max_depth: 6
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    min_child_weight: 5
+    gamma: 0.1
+    reg_alpha: 0.01
+    reg_lambda: 1.0
+    tree_method: "hist"
+    objective: "multi:softprob"
+    eval_metric: "mlogloss"
+    early_stopping_rounds: 20
+    n_jobs: -1
+  optuna:
+    enabled: true
+    n_trials: 12
+    timeout_seconds: 180
+    sample_cap_for_tuning: 100000
+  model_name: "xgb_model.json"
+  baseline_model_name: "xgb_baseline.json"
+
+ensemble:
+  strategy: "hybrid_anomaly_override" # best_single, soft_voting, confidence_weighted, hybrid_anomaly_override
+  supervised_weights:
+    XGBoost: 0.45
+    MLP: 0.35
+    CNN: 0.20
+  anomaly_override_min_confidence: 0.65
+  calibrate_probabilities: true

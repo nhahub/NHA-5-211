@@ -1,0 +1,5 @@
+Model,Evaluation_Framing,Accuracy,Precision_Weighted,Recall_Weighted,F1_Weighted,F1_Macro,ROC_AUC,PR_AUC,Latency_Mean_us,Latency_Median_us,Latency_P95_us,Samples_Per_Sec,Model_Size_MB,Training_Duration_s
+MLP,13-class supervised,0.9633,0.9785,0.9633,0.9692,0.8076,0.9965,0.8919,5054.23,5001.15,5684.65,23584.7,2.534,361.81
+1D-CNN,13-class supervised,0.9849,0.9945,0.9849,0.9892,0.8281,0.9979,0.9089,10128.19,10166.85,11056.85,16945.0,1.31,2604.57
+XGBoost,13-class supervised,0.9989,0.9989,0.9989,0.9989,0.9704,0.9995,0.9908,516.82,501.15,621.49,263650.3,2.727,149.38
+Autoencoder,Binary anomaly (Benign vs Anomalous),0.8688,0.6863,0.5132,0.5873,0.5873,0.8393,0.6642,6335.78,6304.5,6938.95,24713.7,1.548,36.54

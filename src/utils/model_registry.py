@@ -1,0 +1,166 @@
+"""Model and preprocessing artifact persistence registry."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+import json
+from pathlib import Path
+from typing import Any
+
+import joblib
+
+from src.utils.logging import get_logger
+
+logger = get_logger("smart_ids.registry")
+
+
+@dataclass
+class LoadedArtifacts:
+    """Container holding all saved models and preprocessing transformers."""
+
+    models: dict[str, Any]
+    scaler: Any | None
+    imputer: Any | None
+    outlier_clipper: Any | None
+    label_encoder: Any | None
+    feature_names: list[str]
+    anomaly_threshold: float
+    anomaly_threshold_meta: dict[str, Any]
+    manifest: dict[str, Any]
+    calibrators: dict[str, Any] | None = None
+
+
+class ModelRegistry:
+    """Save, load, and inspect SMART IDS v3 models and preprocessing artifacts."""
+
+    def __init__(self, models_dir: Path, artifacts_dir: Path | None = None) -> None:
+        self.models_dir = Path(models_dir)
+        self.artifacts_dir = Path(artifacts_dir) if artifacts_dir else self.models_dir
+        self.models_dir.mkdir(parents=True, exist_ok=True)
+        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    def save_preprocessing_artifacts(
+        self,
+        scaler: Any,
+        label_encoder: Any,
+        feature_names: list[str],
+        imputer: Any | None = None,
+        outlier_clipper: Any | None = None,
+    ) -> None:
+        """Persist fitted preprocessing transformers and schema metadata."""
+        joblib.dump(scaler, self.models_dir / "scaler.pkl")
+        joblib.dump(label_encoder, self.models_dir / "label_encoder.pkl")
+        if imputer is not None:
+            joblib.dump(imputer, self.models_dir / "imputer.pkl")
+        if outlier_clipper is not None:
+            joblib.dump(outlier_clipper, self.models_dir / "outlier_clipper.pkl")
+
+        with (self.models_dir / "feature_names.json").open("w", encoding="utf-8") as fh:
+            json.dump(list(feature_names), fh, indent=2)
+        logger.info("Saved preprocessing artifacts (%d features) to %s", len(feature_names), self.models_dir)
+
+    def save_anomaly_threshold(
+        self,
+        threshold: float,
+        percentile: float,
+        benign_errors_summary: dict[str, float] | None = None,
+    ) -> Path:
+        """Persist calibrated autoencoder reconstruction threshold configuration."""
+        payload: dict[str, Any] = {
+            "threshold": float(threshold),
+            "percentile": float(percentile),
+            "calibration_method": f"{percentile:.1f}th percentile of benign validation MSE",
+            "saved_at_utc": datetime.now(UTC).isoformat(),
+        }
+        if benign_errors_summary:
+            payload["benign_validation_mse_stats"] = benign_errors_summary
+        out_path = self.models_dir / "anomaly_threshold.json"
+        with out_path.open("w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+        logger.info("Saved anomaly threshold (%.6f) to %s", threshold, out_path)
+        return out_path
+
+    def save_manifest(self, metadata: dict[str, Any]) -> Path:
+        """Persist run manifest tracking dataset provenance, versions, and metrics."""
+        payload = {
+            "saved_at_utc": datetime.now(UTC).isoformat(),
+            **metadata,
+        }
+        out_path = self.artifacts_dir / "run_manifest.json"
+        with out_path.open("w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, default=str)
+        return out_path
+
+    def load_all(self, load_keras: bool = True) -> LoadedArtifacts:
+        """Load all available model and preprocessing artifacts defensively."""
+        models: dict[str, Any] = {}
+
+        if load_keras:
+            try:
+                import tensorflow as tf
+
+                keras_targets = {
+                    "MLP": self.models_dir / "best_mlp.keras",
+                    "CNN": self.models_dir / "best_cnn.keras",
+                    "Autoencoder": self.models_dir / "best_autoencoder.keras",
+                }
+                for name, path in keras_targets.items():
+                    if path.exists():
+                        models[name] = tf.keras.models.load_model(path, compile=False)
+            except Exception as exc:
+                logger.warning("Failed loading one or more Keras models: %s", exc)
+
+        xgb_path = self.models_dir / "xgb_model.json"
+        if xgb_path.exists():
+            try:
+                import xgboost as xgb
+
+                clf = xgb.XGBClassifier()
+                clf.load_model(str(xgb_path))
+                models["XGBoost"] = clf
+            except Exception as exc:
+                logger.warning("Failed loading XGBoost model: %s", exc)
+
+        def _maybe_joblib(fname: str) -> Any | None:
+            p = self.models_dir / fname
+            return joblib.load(p) if p.exists() else None
+
+        scaler = _maybe_joblib("scaler.pkl")
+        imputer = _maybe_joblib("imputer.pkl")
+        outlier_clipper = _maybe_joblib("outlier_clipper.pkl")
+        label_encoder = _maybe_joblib("label_encoder.pkl")
+        calibrators = _maybe_joblib("calibrators.pkl")
+
+        feat_path = self.models_dir / "feature_names.json"
+        feature_names: list[str] = []
+        if feat_path.exists():
+            with feat_path.open("r", encoding="utf-8") as fh:
+                feature_names = json.load(fh)
+
+        thresh_path = self.models_dir / "anomaly_threshold.json"
+        anomaly_threshold = 1.0
+        anomaly_threshold_meta: dict[str, Any] = {}
+        if thresh_path.exists():
+            with thresh_path.open("r", encoding="utf-8") as fh:
+                anomaly_threshold_meta = json.load(fh)
+                anomaly_threshold = float(anomaly_threshold_meta.get("threshold", 1.0))
+
+        manifest_path = self.artifacts_dir / "run_manifest.json"
+        manifest: dict[str, Any] = {}
+        if manifest_path.exists():
+            with manifest_path.open("r", encoding="utf-8") as fh:
+                manifest = json.load(fh)
+
+        return LoadedArtifacts(
+            models=models,
+            scaler=scaler,
+            imputer=imputer,
+            outlier_clipper=outlier_clipper,
+            label_encoder=label_encoder,
+            feature_names=feature_names,
+            anomaly_threshold=anomaly_threshold,
+            anomaly_threshold_meta=anomaly_threshold_meta,
+            manifest=manifest,
+            calibrators=calibrators,
+        )

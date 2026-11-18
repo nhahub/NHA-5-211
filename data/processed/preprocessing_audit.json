@@ -1,0 +1,172 @@
+{
+  "source": {
+    "source_type": "cicids2017_raw",
+    "is_synthetic": false,
+    "files_loaded": [
+      "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv",
+      "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv",
+      "Friday-WorkingHours-Morning.pcap_ISCX.csv",
+      "Monday-WorkingHours.pcap_ISCX.csv",
+      "Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv",
+      "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv",
+      "Tuesday-WorkingHours.pcap_ISCX.csv",
+      "Wednesday-workingHours.pcap_ISCX.csv"
+    ],
+    "raw_row_count": 2830743,
+    "sampled_row_count": 200000,
+    "warning_message": null
+  },
+  "original_shape": [
+    200000,
+    79
+  ],
+  "rows_after_deduplication": 191268,
+  "duplicates_removed": 8732,
+  "inf_values_converted": 185,
+  "coerced_non_numeric_nans": 0,
+  "nans_before_split": 214,
+  "nan_imputed_train": 130,
+  "nan_imputed_val": 36,
+  "nan_imputed_test": 48,
+  "outlier_values_clipped_train": 37467,
+  "outlier_values_clipped_val": 6337,
+  "outlier_values_clipped_test": 7437,
+  "removed_columns": [
+    "Fwd Header Length.1"
+  ],
+  "id_columns_removed": [],
+  "high_nan_columns_dropped": [],
+  "final_feature_count": 77,
+  "class_names": [
+    "BENIGN",
+    "Bot",
+    "DDoS",
+    "DoS GoldenEye",
+    "DoS Hulk",
+    "DoS Slowhttptest",
+    "DoS slowloris",
+    "FTP-Patator",
+    "Heartbleed",
+    "Infiltration",
+    "PortScan",
+    "SSH-Patator",
+    "Web Attack"
+  ],
+  "original_class_distribution": {
+    "BENIGN": 156481,
+    "Bot": 137,
+    "DDoS": 9045,
+    "DoS GoldenEye": 727,
+    "DoS Hulk": 12587,
+    "DoS Slowhttptest": 383,
+    "DoS slowloris": 404,
+    "FTP-Patator": 466,
+    "Heartbleed": 11,
+    "Infiltration": 36,
+    "PortScan": 10506,
+    "SSH-Patator": 309,
+    "Web Attack": 176
+  },
+  "train_pre_smote_distribution": {
+    "BENIGN": 113056,
+    "Bot": 99,
+    "DDoS": 6535,
+    "DoS GoldenEye": 525,
+    "DoS Hulk": 9094,
+    "DoS Slowhttptest": 277,
+    "DoS slowloris": 292,
+    "FTP-Patator": 337,
+    "Heartbleed": 8,
+    "Infiltration": 26,
+    "PortScan": 7590,
+    "SSH-Patator": 224,
+    "Web Attack": 127
+  },
+  "train_post_smote_distribution": {
+    "BENIGN": 113056,
+    "Bot": 25000,
+    "DDoS": 25000,
+    "DoS GoldenEye": 25000,
+    "DoS Hulk": 25000,
+    "DoS Slowhttptest": 25000,
+    "DoS slowloris": 25000,
+    "FTP-Patator": 25000,
+    "Heartbleed": 25000,
+    "Infiltration": 25000,
+    "PortScan": 25000,
+    "SSH-Patator": 25000,
+    "Web Attack": 25000
+  },
+  "split_sizes": {
+    "train_raw": 138190,
+    "train_smote": 413056,
+    "validation": 24387,
+    "test": 28691
+  },
+  "smote": {
+    "applied": true,
+    "k_neighbors": 5,
+    "pre_counts": {
+      "0": 113056,
+      "1": 99,
+      "2": 6535,
+      "3": 525,
+      "4": 9094,
+      "5": 277,
+      "6": 292,
+      "7": 337,
+      "8": 8,
+      "9": 26,
+      "10": 7590,
+      "11": 224,
+      "12": 127
+    },
+    "post_counts": {
+      "0": 113056,
+      "1": 25000,
+      "2": 25000,
+      "3": 25000,
+      "4": 25000,
+      "5": 25000,
+      "6": 25000,
+      "7": 25000,
+      "8": 25000,
+      "9": 25000,
+      "10": 25000,
+      "11": 25000,
+      "12": 25000
+    },
+    "rows_before": 138190,
+    "rows_after": 413056
+  },
+  "leakage_checks": {
+    "train_standardized_max_abs_mean": 0.0,
+    "val_mean_shift_observed": 0.016238,
+    "train_test_exact_overlap_sample": 123,
+    "train_val_exact_overlap_sample": 112,
+    "val_max_min_class_ratio": 19952.0,
+    "test_max_min_class_ratio": 11736.5,
+    "scaler_n_samples_seen": 138190,
+    "scaler_fit_strictly_on_train": true,
+    "passed": false
+  },
+  "cleaning_details": {
+    "initial_rows": 200000,
+    "initial_cols": 79,
+    "rows_after_dedup": 191268,
+    "duplicates_removed": 8732,
+    "inf_values_converted": 185,
+    "coerced_non_numeric_nans": 0,
+    "nans_before_split": 214,
+    "id_columns_removed": [],
+    "duplicate_columns_removed": [
+      "Fwd Header Length.1"
+    ],
+    "rare_classes_dropped": {},
+    "label_mapping_applied": {
+      "Web Attack - Brute Force": "Web Attack",
+      "Web Attack - XSS": "Web Attack",
+      "Web Attack - Sql Injection": "Web Attack"
+    }
+  }
+}

@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=75.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smart-ids-v3"
+version = "3.0.0"
+description = "SMART IDS v3: Intelligent Multi-Modal Hybrid Ensemble Architecture for Network Intrusion Detection and Zero-Day Anomaly Tracking"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+license = { text = "MIT" }
+dependencies = [
+    "tensorflow>=2.21.0,<2.22.0",
+    "keras>=3.15.0,<4.0.0",
+    "scikit-learn>=1.9.0,<2.0.0",
+    "xgboost>=3.4.0,<4.0.0",
+    "shap>=0.54.0,<1.0.0",
+    "pandas>=3.0.0,<4.0.0",
+    "numpy>=2.4.0,<3.0.0",
+    "imbalanced-learn>=0.14.0,<0.15.0",
+    "streamlit>=1.67.0,<2.0.0",
+    "plotly>=7.0.0,<8.0.0",
+    "matplotlib>=3.11.0,<4.0.0",
+    "seaborn>=0.13.2,<0.14.0",
+    "joblib>=1.6.0,<2.0.0",
+    "optuna>=5.1.0,<6.0.0",
+    "pydantic>=2.14.0,<3.0.0",
+    "pyyaml>=6.0.3,<7.0.0",
+    "pyarrow>=26.0.0,<27.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.2.0,<10.0.0",
+    "ruff>=0.17.5,<1.0.0",
+    "nbformat>=5.11.0",
+    "ipykernel>=7.4.0",
+    "nbconvert>=7.17.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "dashboard*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning:tensorboard.*",
+    "ignore::FutureWarning:sklearn.*",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 110
+src = ["src", "dashboard", "scripts", "tests", "app.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"app.py" = ["E402"]
+"scripts/*.py" = ["E402"]
+"src/evaluation/visualizations.py" = ["E402"]
+"src/explainability/shap_explainer.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "dashboard"]
+force-sort-within-sections = true

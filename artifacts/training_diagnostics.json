@@ -1,0 +1,115 @@
+{
+  "training_durations_sec": {
+    "MLP": 361.81095740001183,
+    "CNN": 2604.56543040002,
+    "Autoencoder": 36.542577899992466,
+    "XGBoost": 149.38213400001405
+  },
+  "overfitting_analysis": {
+    "MLP": {
+      "best_epoch": 47.0,
+      "total_epochs_run": 50.0,
+      "best_train_loss": 0.08450166136026382,
+      "best_val_loss": 0.10374398529529572,
+      "loss_generalization_gap": 0.01924232393503189,
+      "best_train_acc": 0.9758531451225281,
+      "best_val_acc": 0.9650223255157471,
+      "acc_generalization_gap": 0.010830819606781006
+    },
+    "CNN": {
+      "best_epoch": 46.0,
+      "total_epochs_run": 50.0,
+      "best_train_loss": 0.04496597871184349,
+      "best_val_loss": 0.04737142100930214,
+      "loss_generalization_gap": 0.0024054422974586487,
+      "best_train_acc": 0.986735463142395,
+      "best_val_acc": 0.9860171675682068,
+      "acc_generalization_gap": 0.0007182955741882324
+    },
+    "Autoencoder": {
+      "best_epoch": 18.0,
+      "total_epochs_run": 28.0,
+      "best_train_loss": 0.019154507666826248,
+      "best_val_loss": 0.03393660485744476,
+      "loss_generalization_gap": 0.014782097190618515
+    }
+  },
+  "imbalance_experiment": {
+    "smote_metrics": {
+      "val_macro_f1": 0.9431719748816192,
+      "val_weighted_f1": 0.9985528923891167,
+      "val_macro_recall": 0.9517529614725557,
+      "val_mlogloss": 0.0060599809512495995
+    },
+    "class_weight_metrics": {
+      "val_macro_f1": 0.9446087906940815,
+      "val_weighted_f1": 0.998090821402815,
+      "val_macro_recall": 0.9583438772438343,
+      "val_mlogloss": 0.009164693765342236
+    },
+    "baseline_unweighted_metrics": {
+      "val_macro_f1": 0.9517983524459622,
+      "val_weighted_f1": 0.9988653699532762,
+      "val_macro_recall": 0.932289897584035,
+      "val_mlogloss": 0.0045562325976789
+    },
+    "selected_strategy": "smote",
+    "justification": "SMOTE achieved validation Macro-F1=0.9432 (Weighted-F1=0.9986, Macro-Recall=0.9518) vs Class-Weight Macro-F1=0.9446 and Unweighted Macro-F1=0.9518. SMOTE is selected for deep/tree parity and balanced minority gradients."
+  },
+  "xgboost_optimization": {
+    "baseline_val_metrics": {
+      "val_macro_f1": 0.9457992273630176,
+      "val_weighted_f1": 0.9986630382639895,
+      "val_macro_recall": 0.9517645276930232,
+      "val_mlogloss": 0.005245736800134182
+    },
+    "tuned_val_metrics": {
+      "val_macro_f1": 0.9464556761674433,
+      "val_weighted_f1": 0.9985790987718342,
+      "val_macro_recall": 0.9517568168793782,
+      "val_mlogloss": 0.004781664814800024
+    },
+    "best_params": {
+      "n_estimators": 400,
+      "max_depth": 4,
+      "learning_rate": 0.20719803528806874,
+      "subsample": 0.9413549242801476,
+      "colsample_bytree": 0.7243186887373967,
+      "min_child_weight": 2,
+      "gamma": 0.09170225492671691,
+      "reg_alpha": 0.008179499475211672,
+      "reg_lambda": 2.86140394234507
+    },
+    "n_trials_completed": 12,
+    "selected_variant": "tuned"
+  },
+  "calibration_report": {
+    "MLP": {
+      "temperature": 1.0,
+      "ece_before": 0.02077,
+      "ece_after": 0.020769,
+      "brier_before": 0.052021,
+      "brier_after": 0.052021
+    },
+    "CNN": {
+      "temperature": 1.0,
+      "ece_before": 0.009354,
+      "ece_after": 0.009352,
+      "brier_before": 0.021807,
+      "brier_after": 0.021807
+    },
+    "XGBoost": {
+      "temperature": 1.0,
+      "ece_before": 0.000754,
+      "ece_after": 0.000754,
+      "brier_before": 0.002219,
+      "brier_after": 0.002219
+    }
+  },
+  "hardware": {
+    "tf_device": "CPU",
+    "xgb_device": "cuda",
+    "cuda_driver_detected": true,
+    "notes": "TensorFlow GPU not available on native Windows (>=2.11 CPU-only) or no CUDA runtime; using CPU. XGBoost CUDA acceleration verified and enabled."
+  }
+}

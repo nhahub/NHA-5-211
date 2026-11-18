@@ -1,0 +1,35 @@
+{
+  "saved_at_utc": "2026-11-18T09:34:20.577876+00:00",
+  "python_version": "3.13.12",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "dataset_source": {
+    "source_type": "cicids2017_raw",
+    "is_synthetic": false,
+    "files_loaded": [
+      "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv",
+      "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv",
+      "Friday-WorkingHours-Morning.pcap_ISCX.csv",
+      "Monday-WorkingHours.pcap_ISCX.csv",
+      "Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv",
+      "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv",
+      "Tuesday-WorkingHours.pcap_ISCX.csv",
+      "Wednesday-workingHours.pcap_ISCX.csv"
+    ],
+    "raw_row_count": 2830743,
+    "sampled_row_count": 200000,
+    "warning_message": null
+  },
+  "imbalance_strategy_selected": "smote",
+  "xgb_selected_variant": "tuned",
+  "training_durations_sec": {
+    "MLP": 361.81095740001183,
+    "CNN": 2604.56543040002,
+    "Autoencoder": 36.542577899992466,
+    "XGBoost": 149.38213400001405
+  },
+  "anomaly_threshold": 0.06303114332258704,
+  "hardware_profile": {
+    "tf_device": "CPU",
+    "xgb_device": "cuda"
+  }
+}

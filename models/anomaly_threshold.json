@@ -1,6 +1,16 @@
 {
-  "anomaly_threshold": 0.5579928209396503,
+  "threshold": 0.06303114332258704,
   "percentile": 95.0,
-  "metric": "Mean Squared Error (MSE)",
-  "calibration": "95.0th percentile of benign validation reconstruction error"
+  "calibration_method": "95.0th percentile of benign validation MSE",
+  "saved_at_utc": "2026-11-18T09:31:49.503726+00:00",
+  "benign_validation_mse_stats": {
+    "mean": 0.03393659813525346,
+    "std": 1.8139842796840882,
+    "median": 0.0022522584768012166,
+    "p90": 0.027978285029530547,
+    "p95": 0.06303114332258704,
+    "p97": 0.09709809683263308,
+    "p99": 0.1698370599746715,
+    "max": 244.95925903320312
+  }
 }
