@@ -13,6 +13,7 @@ import numpy as np
 from src.config import AppConfig, ModelConfig
 from src.data.preprocessing import PreparedDataset
 from src.detection.anomaly_detection import fit_classical_anomaly_baselines
+from src.evaluation.protocols import run_xgboost_stratified_cv
 from src.models.autoencoder import (
     build_autoencoder,
     calibrate_threshold,
@@ -293,6 +294,40 @@ def train_all_models(
         xgb_cfg.optuna.n_trials = optuna_trials_override
         xgb_cfg.optuna.enabled = optuna_trials_override > 0
 
+    smote_kw = {
+        "smote_max_k_neighbors": app_cfg.data.imbalance.smote_max_k_neighbors,
+        "smote_sampling_strategy": app_cfg.data.imbalance.smote_sampling_strategy,
+        "smote_cap_per_class": app_cfg.data.imbalance.smote_cap_per_class,
+        "smote_max_multiplier": app_cfg.data.imbalance.smote_max_multiplier,
+        "smote_min_real_samples": app_cfg.data.imbalance.smote_min_real_samples,
+    }
+    unified_cv_mean: float | None = None
+    unified_cv_std: float | None = None
+    unified_cv_note = ""
+    if (
+        xgb_cfg.optuna.enabled
+        and xgb_cfg.optuna.n_trials > 0
+        and app_cfg.data.split_strategy == "random"
+        and app_cfg.evaluation.cv_n_splits >= 2
+    ):
+        baseline_cv_res = run_xgboost_stratified_cv(
+            app_cfg=app_cfg,
+            model_cfg=model_cfg,
+            xgb_params=None,
+            imbalance_strategy=chosen_imb,
+            n_splits=app_cfg.evaluation.cv_n_splits,
+            force_synthetic=dataset.source_info.is_synthetic,
+        )
+        set_global_seed(seed)
+        if baseline_cv_res.get("executed"):
+            unified_cv_mean = float(baseline_cv_res["mean_macro_f1"])
+            unified_cv_std = float(baseline_cv_res["std_macro_f1"])
+            unified_cv_note = (
+                f"Unified {baseline_cv_res['n_splits']}-fold StratifiedKFold on the development pool "
+                f"({baseline_cv_res['dev_pool_rows']:,} rows = train+val, held-out test excluded) with "
+                f"per-fold preprocessing and '{chosen_imb}' imbalance handling (sample ddof=1 std across folds)."
+            )
+
     t0 = time.perf_counter()
     xgb_opt = optimize_xgboost_with_optuna(
         X_train=X_sup_train,
@@ -304,10 +339,15 @@ def train_all_models(
         xgb_device=hardware.xgb_device,
         seed=seed,
         sample_weight=xgb_sample_weight,
+        cv_macro_f1_std=unified_cv_std,
+        cv_macro_f1_mean=unified_cv_mean,
+        cv_method_note=unified_cv_note,
         cv_raw_X=dataset.X_train_scaled,
         cv_raw_y=dataset.y_train,
         cv_n_splits=app_cfg.evaluation.cv_n_splits,
         use_cv_class_weight=(chosen_imb == "class_weight"),
+        cv_imbalance_strategy=chosen_imb,
+        smote_kwargs=smote_kw,
     )
     durations["XGBoost"] = float(time.perf_counter() - t0)
     xgb_model = xgb_opt.best_model

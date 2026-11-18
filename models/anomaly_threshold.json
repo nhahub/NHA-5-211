@@ -2,10 +2,10 @@
   "threshold": 0.0637257829308509,
   "percentile": 95.0,
   "calibration_method": "95.0th percentile of benign validation MSE",
-  "saved_at_utc": "2026-11-18T13:19:45.818212+00:00",
+  "saved_at_utc": "2026-11-18T16:37:40.513593+00:00",
   "benign_validation_mse_stats": {
-    "mean": 0.034351776187404724,
-    "std": 1.8265192462276758,
+    "mean": 0.03435177623097099,
+    "std": 1.8265192462365745,
     "median": 0.0023072436451911926,
     "p90": 0.028275972977280652,
     "p95": 0.0637257829308509,

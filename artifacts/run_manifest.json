@@ -1,5 +1,5 @@
 {
-  "saved_at_utc": "2026-11-18T13:23:37.638984+00:00",
+  "saved_at_utc": "2026-11-18T16:40:37.500727+00:00",
   "python_version": "3.13.12",
   "platform": "Windows-11-10.0.26300-SP0",
   "dataset_source": {
@@ -20,16 +20,16 @@
     "warning_message": null
   },
   "imbalance_strategy_selected": "smote",
-  "xgb_selected_variant": "baseline",
+  "xgb_selected_variant": "tuned",
   "best_supervised_model": "XGBoost",
   "training_durations_sec": {
-    "MLP": 121.90305790002458,
-    "CNN": 1031.379216899979,
-    "Autoencoder": 73.85245470004156,
-    "Isolation Forest": 0.8132638000533916,
-    "One-Class SVM": 2.5246203999849968,
-    "LOF": 0.5704136000131257,
-    "XGBoost": 224.92402949999087
+    "MLP": 59.631930299976375,
+    "CNN": 889.3796746000298,
+    "Autoencoder": 35.855250099964906,
+    "Isolation Forest": 0.4930301000131294,
+    "One-Class SVM": 1.468471500033047,
+    "LOF": 0.5137803999823518,
+    "XGBoost": 114.41612850001547
   },
   "anomaly_threshold": 0.0637257829308509,
   "hardware_profile": {

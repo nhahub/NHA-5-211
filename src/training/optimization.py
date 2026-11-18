@@ -12,6 +12,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.utils.class_weight import compute_class_weight
 
 from src.config import XGBoostConfig
+from src.data.preprocessing import apply_smote_safely, compute_hybrid_smote_class_weights
 from src.models.xgboost_model import (
     expand_xgboost_probas,
     fit_xgboost_safe_multiclass,
@@ -51,6 +52,7 @@ class XGBoostOptimizationResult:
     macro_f1_improvement: float = 0.0
     meaningful_improvement: bool = False
     selection_note: str = ""
+    cv_method_note: str = ""
 
     def to_summary_dict(self) -> dict[str, Any]:
         return {
@@ -64,6 +66,7 @@ class XGBoostOptimizationResult:
             "macro_f1_improvement": round(float(self.macro_f1_improvement), 6),
             "meaningful_improvement": bool(self.meaningful_improvement),
             "selection_note": self.selection_note,
+            "cv_method_note": self.cv_method_note,
         }
 
 
@@ -206,6 +209,8 @@ def _estimate_baseline_cv_macro_f1(
     seed: int,
     n_splits: int = 5,
     use_class_weight: bool = False,
+    imbalance_strategy: str | None = None,
+    smote_kwargs: dict[str, Any] | None = None,
 ) -> tuple[float, float]:
     """Estimate baseline XGBoost fold mean and std Macro-F1 via stratified K-fold CV."""
     counts = np.bincount(y_raw)
@@ -214,21 +219,39 @@ def _estimate_baseline_cv_macro_f1(
     if eff_splits < 2:
         return 0.0, 0.0
 
+    eff_strategy = imbalance_strategy or ("class_weight" if use_class_weight else "none")
+    sm_kw = smote_kwargs or {}
     skf = StratifiedKFold(n_splits=eff_splits, shuffle=True, random_state=seed)
     fold_f1s: list[float] = []
-    for tr_i, va_i in skf.split(X_raw, y_raw):
+    for fold_idx, (tr_i, va_i) in enumerate(skf.split(X_raw, y_raw), start=1):
         X_tr_f, y_tr_f = X_raw[tr_i], y_raw[tr_i]
         X_va_f, y_va_f = X_raw[va_i], y_raw[va_i]
+
+        uniq = np.unique(y_tr_f)
+        cw = compute_class_weight("balanced", classes=uniq, y=y_tr_f)
+        cw_map = {int(c): float(w) for c, w in zip(uniq, cw, strict=False)}
+
         sw_f = None
-        if use_class_weight:
-            uniq = np.unique(y_tr_f)
-            cw = compute_class_weight("balanced", classes=uniq, y=y_tr_f)
-            cw_map = {int(c): float(w) for c, w in zip(uniq, cw, strict=False)}
+        X_fit, y_fit = X_tr_f, y_tr_f
+        if eff_strategy == "smote":
+            X_fit, y_fit, sm_info = apply_smote_safely(
+                X_tr_f,
+                y_tr_f,
+                max_k_neighbors=int(sm_kw.get("smote_max_k_neighbors", 5)),
+                sampling_strategy=sm_kw.get("smote_sampling_strategy", "auto"),
+                cap_per_class=sm_kw.get("smote_cap_per_class", 5000),
+                max_multiplier=sm_kw.get("smote_max_multiplier", 5.0),
+                min_real_samples=int(sm_kw.get("smote_min_real_samples", 50)),
+                seed=seed + fold_idx,
+            )
+            hybrid_cw = compute_hybrid_smote_class_weights(sm_info, cw_map)
+            sw_f = np.array([hybrid_cw[int(c)] for c in y_fit], dtype=np.float32) if hybrid_cw else None
+        elif eff_strategy == "class_weight":
             sw_f = np.array([cw_map[int(c)] for c in y_tr_f], dtype=np.float32)
 
         clf_f, cls_f = fit_xgboost_safe_multiclass(
-            X_train=X_tr_f,
-            y_train=y_tr_f,
+            X_train=X_fit,
+            y_train=y_fit,
             X_val=X_va_f,
             y_val=y_va_f,
             total_classes=num_classes,
@@ -258,6 +281,10 @@ def optimize_xgboost_with_optuna(
     cv_raw_y: np.ndarray | None = None,
     cv_n_splits: int = 5,
     use_cv_class_weight: bool = False,
+    cv_macro_f1_mean: float | None = None,
+    cv_method_note: str = "",
+    cv_imbalance_strategy: str | None = None,
+    smote_kwargs: dict[str, Any] | None = None,
 ) -> XGBoostOptimizationResult:
     """Compare baseline XGBoost (report spec) against Optuna-tuned XGBoost on validation set."""
     logger.info("Training report baseline XGBoost (300 estimators, depth=6, lr=0.1)...")
@@ -277,11 +304,19 @@ def optimize_xgboost_with_optuna(
     logger.info("Baseline XGBoost validation metrics: %s", baseline_metrics)
 
     if cv_macro_f1_std is not None:
-        cv_mean = float(baseline_metrics["val_macro_f1"])
+        cv_mean = (
+            float(cv_macro_f1_mean)
+            if cv_macro_f1_mean is not None
+            else float(baseline_metrics["val_macro_f1"])
+        )
         cv_std = float(cv_macro_f1_std)
+        method_desc = cv_method_note or (
+            f"Unified {cv_n_splits}-fold StratifiedKFold baseline Macro-F1 std ({cv_std:.4f}, ddof=1)."
+        )
     else:
         src_X = cv_raw_X if cv_raw_X is not None else X_train
         src_y = cv_raw_y if cv_raw_y is not None else y_train
+        eff_imb = cv_imbalance_strategy or ("class_weight" if use_cv_class_weight else "none")
         cv_mean, cv_std = _estimate_baseline_cv_macro_f1(
             X_raw=src_X,
             y_raw=src_y,
@@ -291,6 +326,12 @@ def optimize_xgboost_with_optuna(
             seed=seed,
             n_splits=cv_n_splits,
             use_class_weight=use_cv_class_weight,
+            imbalance_strategy=eff_imb,
+            smote_kwargs=smote_kwargs,
+        )
+        method_desc = cv_method_note or (
+            f"{cv_n_splits}-fold StratifiedKFold on {len(src_X):,} standardized rows using "
+            f"'{eff_imb}' imbalance handling (sample ddof=1 std across fold Macro-F1 scores)."
         )
 
     if not cfg.optuna.enabled or cfg.optuna.n_trials <= 0:
@@ -306,6 +347,7 @@ def optimize_xgboost_with_optuna(
             macro_f1_improvement=0.0,
             meaningful_improvement=False,
             selection_note="Optuna optimization disabled (n_trials=0); retaining baseline.",
+            cv_method_note=method_desc,
         )
 
     # Subsample training rows during Optuna search if very large, keeping stratification
@@ -412,4 +454,5 @@ def optimize_xgboost_with_optuna(
         macro_f1_improvement=improvement,
         meaningful_improvement=meaningful_improvement,
         selection_note=selection_note,
+        cv_method_note=method_desc,
     )

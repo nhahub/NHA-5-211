@@ -727,6 +727,7 @@ def run_xgboost_stratified_cv(
     )
     return {
         "executed": True,
+        "variant": "tuned" if xgb_params else "baseline",
         "n_splits": int(effective_splits),
         "requested_n_splits": int(n_splits),
         "imbalance_strategy": imbalance_strategy,

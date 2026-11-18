@@ -48,12 +48,12 @@
 
 | Model | temperature | ece_before | ece_after | ece_delta | brier_before | brier_after | nll_before | nll_after | status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MLP | 0.8777 | 0.0076 | 0.0086 | 0.0011 | 0.0308 | 0.0305 | 0.0520 | 0.0515 | Recalibrated (T=0.8777, ECE delta=+0.001057) |
+| MLP | 0.7948 | 0.0083 | 0.0057 | -0.0025 | 0.0299 | 0.0297 | 0.0498 | 0.0483 | Recalibrated (T=0.7948, ECE delta=-0.002535) |
 | CNN | 0.8749 | 0.0045 | 0.0033 | -0.0013 | 0.0113 | 0.0111 | 0.0220 | 0.0218 | Recalibrated (T=0.8749, ECE delta=-0.001259) |
-| XGBoost | 0.9429 | 0.0005 | 0.0004 | -0.0001 | 0.0018 | 0.0018 | 0.0041 | 0.0041 | Already well-calibrated near T=1.0 |
+| XGBoost | 0.9505 | 0.0004 | 0.0002 | -0.0001 | 0.0017 | 0.0017 | 0.0039 | 0.0038 | Already well-calibrated near T=1.0 |
 
 
-- **Calibration Evidence:** Bounded float64 Brent optimization recalibrated overconfident probabilities on `MLP` (T=0.8777, ECE 0.007570 -> 0.008627), `CNN` (T=0.8749, ECE 0.004522 -> 0.003263).
+- **Calibration Evidence:** Bounded float64 Brent optimization recalibrated overconfident probabilities on `MLP` (T=0.7948, ECE 0.008277 -> 0.005742), `CNN` (T=0.8749, ECE 0.004522 -> 0.003263).
 
 
 ## 4. Unsupervised Anomaly Detection & Classical Baselines
@@ -97,13 +97,13 @@
 
 - **Held-Out Attack Class:** `Web Attack` (`26` test flows)
 - **Closed-Set Supervised Unseen-Class Recall:** `0.0000`
-- **Benign-Only Autoencoder Unseen-Attack Recall:** `0.0000` (Benign vs Unseen ROC-AUC = `0.5723`)
+- **Benign-Only Autoencoder Unseen-Attack Recall:** `0.0000` (Benign vs Unseen ROC-AUC = `0.6060`)
 
 
 ## 6. SHAP Explainability Summary
 
-- **XGBoost Top-5 (`TreeExplainer`, 0.58s):** `Destination Port` (1.0796), `min_seg_size_forward` (0.3769), `Init_Win_bytes_forward` (0.2982), `Init_Win_bytes_backward` (0.2867), `Fwd IAT Min` (0.2083)
+- **XGBoost Top-5 (`TreeExplainer`, 0.23s):** `Destination Port` (1.2302), `Init_Win_bytes_forward` (0.3940), `min_seg_size_forward` (0.3899), `Init_Win_bytes_backward` (0.3120), `Bwd Packets/s` (0.2478)
 
-- **MLP Top-5 (`GradientExplainer`, 2.52s):** `Min Packet Length` (0.0070), `PSH Flag Count` (0.0068), `ACK Flag Count` (0.0067), `Flow IAT Std` (0.0060), `Packet Length Std` (0.0054)
+- **MLP Top-5 (`GradientExplainer`, 2.39s):** `Min Packet Length` (0.0074), `ACK Flag Count` (0.0065), `PSH Flag Count` (0.0063), `Init_Win_bytes_forward` (0.0043), `Packet Length Std` (0.0040)
 
-- **MLP Explainer Trade-Off:** `GradientExplainer` speedup vs `KernelExplainer` = `3.01x`, Spearman rank correlation = `0.647`.
+- **MLP Explainer Trade-Off:** `GradientExplainer` speedup vs `KernelExplainer` = `2.85x`, Spearman rank correlation = `0.719`.

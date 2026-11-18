@@ -1,23 +1,23 @@
 {
   "training_durations_sec": {
-    "MLP": 121.90305790002458,
-    "CNN": 1031.379216899979,
-    "Autoencoder": 73.85245470004156,
-    "Isolation Forest": 0.8132638000533916,
-    "One-Class SVM": 2.5246203999849968,
-    "LOF": 0.5704136000131257,
-    "XGBoost": 224.92402949999087
+    "MLP": 59.631930299976375,
+    "CNN": 889.3796746000298,
+    "Autoencoder": 35.855250099964906,
+    "Isolation Forest": 0.4930301000131294,
+    "One-Class SVM": 1.468471500033047,
+    "LOF": 0.5137803999823518,
+    "XGBoost": 114.41612850001547
   },
   "overfitting_analysis": {
     "MLP": {
-      "best_epoch": 18.0,
-      "total_epochs_run": 26.0,
-      "best_train_loss": 0.17949028313159943,
-      "best_val_loss": 0.09841413795948029,
-      "loss_generalization_gap": -0.08107614517211914,
-      "best_train_acc": 0.9671342372894287,
-      "best_val_acc": 0.9788072109222412,
-      "acc_generalization_gap": -0.0116729736328125
+      "best_epoch": 20.0,
+      "total_epochs_run": 28.0,
+      "best_train_loss": 0.20974361896514893,
+      "best_val_loss": 0.09738368541002274,
+      "loss_generalization_gap": -0.11235993355512619,
+      "best_train_acc": 0.9683215022087097,
+      "best_val_acc": 0.9774801135063171,
+      "acc_generalization_gap": -0.009158611297607422
     },
     "CNN": {
       "best_epoch": 49.0,
@@ -84,24 +84,25 @@
       "reg_lambda": 2.86140394234507
     },
     "n_trials_completed": 12,
-    "selected_variant": "baseline",
-    "cv_macro_f1_mean": 0.926909,
-    "cv_macro_f1_std": 0.047013,
+    "selected_variant": "tuned",
+    "cv_macro_f1_mean": 0.966975,
+    "cv_macro_f1_std": 0.007582,
     "macro_f1_improvement": 0.012012,
-    "meaningful_improvement": false,
-    "selection_note": "No meaningful improvement: Optuna tuned val Macro-F1 (0.9625) changed by +0.0120 vs baseline (0.9505), within baseline CV std=0.0470; retaining baseline."
+    "meaningful_improvement": true,
+    "selection_note": "Meaningful improvement: tuned val Macro-F1 (0.9625) beat baseline (0.9505) by +0.0120 (> CV std=0.0076).",
+    "cv_method_note": "Unified 5-fold StratifiedKFold on the development pool (162,577 rows = train+val, held-out test excluded) with per-fold preprocessing and 'smote' imbalance handling (sample ddof=1 std across folds)."
   },
   "calibration_report": {
     "MLP": {
-      "temperature": 0.8777,
-      "ece_before": 0.00757,
-      "ece_after": 0.008627,
-      "ece_delta": 0.001057,
-      "brier_before": 0.030841,
-      "brier_after": 0.030491,
-      "nll_before": 0.051958,
-      "nll_after": 0.051461,
-      "status": "Recalibrated (T=0.8777, ECE delta=+0.001057)"
+      "temperature": 0.7948,
+      "ece_before": 0.008277,
+      "ece_after": 0.005742,
+      "ece_delta": -0.002535,
+      "brier_before": 0.029947,
+      "brier_after": 0.029742,
+      "nll_before": 0.049822,
+      "nll_after": 0.048329,
+      "status": "Recalibrated (T=0.7948, ECE delta=-0.002535)"
     },
     "CNN": {
       "temperature": 0.8749,
@@ -115,14 +116,14 @@
       "status": "Recalibrated (T=0.8749, ECE delta=-0.001259)"
     },
     "XGBoost": {
-      "temperature": 0.9429,
-      "ece_before": 0.000491,
-      "ece_after": 0.000374,
-      "ece_delta": -0.000117,
-      "brier_before": 0.001778,
-      "brier_after": 0.001786,
-      "nll_before": 0.004092,
-      "nll_after": 0.004061,
+      "temperature": 0.9505,
+      "ece_before": 0.000386,
+      "ece_after": 0.000248,
+      "ece_delta": -0.000138,
+      "brier_before": 0.001733,
+      "brier_after": 0.001737,
+      "nll_before": 0.003855,
+      "nll_after": 0.003836,
       "status": "Already well-calibrated near T=1.0"
     }
   },
@@ -133,19 +134,19 @@
       "XGBoost"
     ],
     "val_weights": {
-      "CNN": 0.336785,
-      "MLP": 0.30807,
-      "XGBoost": 0.355145
+      "CNN": 0.335728,
+      "MLP": 0.310002,
+      "XGBoost": 0.35427
     },
     "val_logloss": {
       "CNN": 0.021755,
-      "MLP": 0.051461,
-      "XGBoost": 0.004061
+      "MLP": 0.048329,
+      "XGBoost": 0.003836
     },
     "val_macro_f1": {
       "CNN": 0.870063,
-      "MLP": 0.808541,
-      "XGBoost": 0.950451
+      "MLP": 0.813398,
+      "XGBoost": 0.962463
     },
     "meta_learner": "LogisticRegression(log_probs)"
   },

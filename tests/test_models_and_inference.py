@@ -52,6 +52,7 @@ from src.models.mlp import build_mlp
 from src.models.xgboost_model import build_xgboost_classifier
 from src.response.response_engine import ActiveResponseEngine
 from src.training.optimization import compare_smote_vs_class_weight, optimize_xgboost_with_optuna
+from src.training.trainer import train_all_models
 from src.utils.model_registry import ModelRegistry
 
 
@@ -398,7 +399,7 @@ def test_temperature_scaler_handles_float32_overconfidence() -> None:
     assert ece_after < ece_before
 
 
-def test_optuna_cv_std_gating_and_stacking_meta_learner() -> None:
+def test_optuna_cv_std_gating_and_stacking_meta_learner(tmp_path: Path) -> None:
     """Optuna requires > CV std improvement; stacking & val_weighted_voting train on val only."""
     rng = np.random.default_rng(42)
     X_tr = rng.normal(size=(150, 6)).astype(np.float32)
@@ -424,12 +425,46 @@ def test_optuna_cv_std_gating_and_stacking_meta_learner() -> None:
         cfg=xgb_cfg,
         xgb_device="cpu",
         seed=42,
+        cv_macro_f1_mean=0.9123,
         cv_macro_f1_std=0.25,  # Larger than plausible 2-trial fluctuation
+        cv_method_note="Unified 5-fold CV on dev pool (ddof=1).",
     )
     assert opt_res.selected_variant == "baseline"
     assert opt_res.meaningful_improvement is False
     assert "No meaningful improvement" in opt_res.selection_note
     assert opt_res.to_summary_dict()["cv_macro_f1_std"] == 0.25
+    assert opt_res.to_summary_dict()["cv_macro_f1_mean"] == 0.9123
+    assert "Unified 5-fold CV" in opt_res.to_summary_dict()["cv_method_note"]
+
+    # Fallback CV estimation honors imbalance strategy without crashing
+    opt_fb = optimize_xgboost_with_optuna(
+        X_train=X_tr,
+        y_train=y_tr,
+        X_val=X_va,
+        y_val=y_va,
+        num_classes=3,
+        cfg=XGBoostConfig(
+            baseline={"n_estimators": 10, "max_depth": 3, "learning_rate": 0.1},
+            optuna=XGBoostOptunaConfig(enabled=False, n_trials=0),
+        ),
+        xgb_device="cpu",
+        seed=42,
+        cv_n_splits=3,
+        cv_imbalance_strategy="class_weight",
+    )
+    assert opt_fb.cv_macro_f1_std >= 0.0
+    assert "class_weight" in opt_fb.cv_method_note
+
+    rep_cmp, _ = write_academic_reports(
+        summary={
+            "dataset_source": {"is_synthetic": True},
+            "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+            "training_diagnostics": {"xgboost_optimization": opt_res.to_summary_dict()},
+        },
+        comparison_df=pd.DataFrame([{"Model": "XGBoost", "F1_Macro": 0.95}]),
+        reports_dir=tmp_path / "opt_reports",
+    )
+    assert "How CV Std is Computed:" in rep_cmp.read_text(encoding="utf-8")
 
     # Stacking meta-learner trained strictly on validation probabilities learns to downweight noisy model
     val_probas = {
@@ -643,3 +678,26 @@ def test_paired_bootstrap_significance_and_report_conclusion(tmp_path: Path) -> 
     sig_text = format_ensemble_empirical_conclusion(sig_analysis)
     assert "statistically significant, CI excludes 0" in sig_text
     assert "outperforming" not in sig_text.lower()
+
+
+def test_train_all_models_unified_cv_regression(tmp_app_config: AppConfig) -> None:
+    """train_all_models invokes run_xgboost_stratified_cv with ModelConfig cleanly."""
+    dataset = run_preprocessing_pipeline(tmp_app_config, force_synthetic=True, save_outputs=True)
+    m_cfg = ModelConfig()
+    m_cfg.mlp.epochs = 1
+    m_cfg.cnn.epochs = 1
+    m_cfg.autoencoder.epochs = 1
+    m_cfg.xgboost.optuna.n_trials = 1
+    m_cfg.xgboost.baseline["n_estimators"] = 10
+    m_cfg.anomaly_baselines.enabled = False
+    tmp_app_config.evaluation.cv_n_splits = 2
+
+    out = train_all_models(
+        dataset=dataset,
+        app_cfg=tmp_app_config,
+        model_cfg=m_cfg,
+        epochs_override=1,
+        optuna_trials_override=1,
+    )
+    assert out.xgb_optimization.cv_macro_f1_std >= 0.0
+    assert "StratifiedKFold" in out.xgb_optimization.cv_method_note

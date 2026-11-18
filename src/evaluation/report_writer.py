@@ -278,7 +278,8 @@ def write_academic_reports(
             f"## {sec_num}. XGBoost {xgb_cv.get('n_splits', 5)}-Fold Stratified Cross-Validation\n"
         )
         comp_lines.append(
-            f"- **Development Pool Rows (Held-Out Test Excluded):** `{xgb_cv.get('dev_pool_rows', 0):,}` "
+            f"- **Variant Evaluated:** `{xgb_cv.get('variant', 'baseline')}` "
+            f"| **Development Pool Rows (Held-Out Test Excluded):** `{xgb_cv.get('dev_pool_rows', 0):,}` "
             f"| **Imbalance Strategy:** `{xgb_cv.get('imbalance_strategy')}`\n"
             f"- **Macro-F1 (Mean +/- Std):** `{xgb_cv.get('mean_macro_f1', 0.0):.4f} ± {xgb_cv.get('std_macro_f1', 0.0):.4f}`\n"
             f"- **Weighted-F1 (Mean +/- Std):** `{xgb_cv.get('mean_weighted_f1', 0.0):.4f} ± {xgb_cv.get('std_weighted_f1', 0.0):.4f}` "
@@ -385,12 +386,17 @@ def write_academic_reports(
         comp_lines.append(_df_to_markdown(opt_df) + "\n")
         comp_lines.append(
             f"\n- **Selected Variant:** `{xgb_opt.get('selected_variant', 'baseline')}` "
-            f"(Baseline CV Macro-F1 std=`{xgb_opt.get('cv_macro_f1_std', 0.0):.4f}`, "
+            f"(Baseline CV Macro-F1 = `{xgb_opt.get('cv_macro_f1_mean', 0.0):.4f} ± {xgb_opt.get('cv_macro_f1_std', 0.0):.4f}`, "
             f"Val Macro-F1 delta=`{xgb_opt.get('macro_f1_improvement', 0.0):+.4f}`, "
             f"Meaningful Improvement=`{xgb_opt.get('meaningful_improvement', False)}`)\n"
         )
         if xgb_opt.get("selection_note"):
             comp_lines.append(f"- **Decision Basis:** {xgb_opt['selection_note']}\n")
+        cv_note = xgb_opt.get("cv_method_note") or (
+            "Baseline CV std is computed via stratified K-fold CV across the development pool with "
+            "per-fold preprocessing and the selected imbalance strategy (ddof=1 across fold Macro-F1 scores)."
+        )
+        comp_lines.append(f"- **How CV Std is Computed:** {cv_note}\n")
         comp_lines.append("\n")
 
     sec_num += 1
