@@ -97,13 +97,13 @@
 
 - **Held-Out Attack Class:** `Web Attack` (`26` test flows)
 - **Closed-Set Supervised Unseen-Class Recall:** `0.0000`
-- **Benign-Only Autoencoder Unseen-Attack Recall:** `0.0000` (Benign vs Unseen ROC-AUC = `0.5661`)
+- **Benign-Only Autoencoder Unseen-Attack Recall:** `0.0000` (Benign vs Unseen ROC-AUC = `0.5608`)
 
 
 ## 6. SHAP Explainability Summary
 
-- **XGBoost Top-5 (`TreeExplainer`, 0.50s):** `Destination Port` (0.8597), `Init_Win_bytes_backward` (0.3706), `Init_Win_bytes_forward` (0.2930), `min_seg_size_forward` (0.2793), `Bwd Packets/s` (0.2136)
+- **XGBoost Top-5 (`TreeExplainer`, 0.65s):** `Destination Port` (0.8597), `Init_Win_bytes_backward` (0.3706), `Init_Win_bytes_forward` (0.2930), `min_seg_size_forward` (0.2793), `Bwd Packets/s` (0.2136)
 
-- **MLP Top-5 (`GradientExplainer`, 2.50s):** `ACK Flag Count` (0.0076), `PSH Flag Count` (0.0059), `Min Packet Length` (0.0054), `Flow IAT Std` (0.0046), `Bwd Packets/s` (0.0036)
+- **MLP Top-5 (`GradientExplainer`, 2.81s):** `ACK Flag Count` (0.0073), `Min Packet Length` (0.0054), `PSH Flag Count` (0.0054), `Flow IAT Std` (0.0049), `Packet Length Variance` (0.0043)
 
-- **MLP Explainer Trade-Off:** `GradientExplainer` speedup vs `KernelExplainer` = `2.75x`, Spearman rank correlation = `0.6668`.
+- **MLP Explainer Trade-Off:** `GradientExplainer` speedup vs `KernelExplainer` = `3.21x`, Spearman rank correlation = `0.6026`.

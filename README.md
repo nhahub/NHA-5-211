@@ -84,13 +84,13 @@ git lfs pull
 
 | Model | Framing | Accuracy | Precision (W) | Recall (W) | F1 (W) | F1 (Macro) | ROC-AUC | Median / P95 Latency (µs) | Batch Throughput (flows/s) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| **XGBoost (Baseline)** | 13-class supervised | **0.9989** | **0.9989** | **0.9989** | **0.9988** | **0.9603** | **0.9995** | 444.40 / 743.52 | **257,069.0** |
-| **1D-CNN** | 13-class supervised | 0.9946 | 0.9936 | 0.9946 | 0.9940 | 0.8499 | 0.9853 | 721.15 / 833.39 | 17,997.8 |
-| **MLP** | 13-class supervised | 0.9780 | 0.9762 | 0.9780 | 0.9767 | 0.6728 | 0.9905 | 169.95 / **247.89** | 24,278.1 |
-| **Autoencoder** | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.8384 | 201.60 / 318.80 | 23,245.0 |
-| **One-Class SVM** | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.7467 | **142.25** / 288.95 | 22,511.5 |
-| **LOF** | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.8607 | 1,122.45 / 1,569.15 | 41,648.9 |
-| **Isolation Forest** | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.7710 | 7,671.55 / 8,682.40 | 63,630.7 |
+| **XGBoost (Baseline)** | 13-class supervised | **0.9989** | **0.9989** | **0.9989** | **0.9988** | **0.9603** | **0.9995** | 534.65 / 893.40 | **241,249.6** |
+| **1D-CNN** | 13-class supervised | 0.9946 | 0.9936 | 0.9946 | 0.9940 | 0.8499 | 0.9853 | 710.65 / 937.27 | 14,826.1 |
+| **MLP** | 13-class supervised | 0.9780 | 0.9762 | 0.9780 | 0.9767 | 0.6728 | 0.9905 | 201.35 / **298.32** | 21,257.9 |
+| **Autoencoder** | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.8384 | 246.50 / 397.02 | 19,849.4 |
+| **One-Class SVM** | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.7467 | **163.25** / 313.91 | 17,845.6 |
+| **LOF** | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.8607 | 2,399.80 / 3,838.51 | 33,666.1 |
+| **Isolation Forest** | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.7710 | 8,432.65 / 9,460.15 | 68,301.3 |
 
 - **Imbalance Selection, CV & Stacking Significance:** Because unweighted (`none`) and `smote` tied at `0.9518` validation Macro-F1 (within `imbalance_tie_tolerance=0.002`), tie-breaking selected the simplest strategy **`none`** (`1D-CNN` Test Macro-F1 rose to `0.8499`, while `MLP` fell to `0.6728` without oversampling). Under `none`, unified 5-fold stratified CV on the `162,577`-row dev pool yielded `0.9535 ± 0.0121` Macro-F1 for baseline `XGBoost`; Optuna's `+0.0059` val Macro-F1 delta (`0.9504 -> 0.9563`) fell inside `0.0121`, so gating retained `baseline` (`95%` test bootstrap CI `[0.9013, 0.9849]`). Validation temperature scaling found `T = 1.0142` (`MLP`), `0.9210` (`1D-CNN`), and `0.9095` (`XGBoost`). Validation `stacking` (`0.9606`) is comparable to `XGBoost` (`0.9603`), difference not statistically significant (paired bootstrap `n=1000`: observed delta `+0.0003`, mean diff `+0.0004`, `95%` CI `[-0.0069, +0.0086]` includes `0`), while voting variants (`0.8420–0.9271`) scored significantly lower.
 - **Chronological Drift (`time_block`):** Splitting each class chronologically (earliest ~60% train / middle ~20% val / latest ~20% test so every class remains in training, `leakage_checks.passed = true`) shifted `XGBoost` Test Macro-F1 from `0.9603` (`random`) to `0.7518` (`95%` CI `[0.7098, 0.8250]`, Accuracy `0.9924`), `1D-CNN` to `0.4376` (`[0.4265, 0.4787]`, Accuracy `0.9521`), `MLP` to `0.2767` (`[0.2752, 0.3004]`, Accuracy `0.9502`), and benign-only `Autoencoder` to binary `F1 = 0.5003` (ROC-AUC `0.8263`), revealing temporal drift in low-support and multi-phase classes (`Bot`, `Heartbleed`, `Web Attack`).

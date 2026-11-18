@@ -11,13 +11,13 @@
 
 | Model | Evaluation_Framing | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro | F1_Macro_CI95_Low | F1_Macro_CI95_High | ROC_AUC | PR_AUC | Latency_Median_us | Latency_P95_us | Latency_Mean_us | Samples_Per_Sec | Model_Size_MB | Training_Duration_s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MLP | 13-class supervised | 0.9780 | 0.9762 | 0.9780 | 0.9767 | 0.6728 | 0.6236 | 0.7067 | 0.9905 | 0.8117 | 169.9500 | 247.8900 | 173.4200 | 24278.1000 | 2.5340 | 33.5500 |
-| 1D-CNN | 13-class supervised | 0.9946 | 0.9936 | 0.9946 | 0.9940 | 0.8499 | 0.7942 | 0.8827 | 0.9853 | 0.8735 | 721.1500 | 833.3900 | 731.4100 | 17997.8000 | 1.3100 | 858.3600 |
-| XGBoost | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9603 | 0.9013 | 0.9849 | 0.9995 | 0.9773 | 444.4000 | 743.5200 | 481.1200 | 257069.0000 | 2.9540 | 119.3100 |
-| Autoencoder | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.5759 | 0.6001 | 0.8384 | 0.6651 | 201.6000 | 318.8000 | 227.0200 | 23245.0000 | 1.5480 | 36.1000 |
-| Isolation Forest | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 7671.5500 | 8682.4000 | 7802.7600 | 63630.7000 | 2.0960 | 0.5000 |
-| One-Class SVM | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 142.2500 | 288.9500 | 160.2400 | 22511.5000 | 0.4780 | 1.4800 |
-| LOF | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1122.4500 | 1569.1500 | 1186.9700 | 41648.9000 | 5.6660 | 0.5300 |
+| MLP | 13-class supervised | 0.9780 | 0.9762 | 0.9780 | 0.9767 | 0.6728 | 0.6236 | 0.7067 | 0.9905 | 0.8117 | 201.3500 | 298.3200 | 205.4300 | 21257.9000 | 2.5340 | 37.9400 |
+| 1D-CNN | 13-class supervised | 0.9946 | 0.9936 | 0.9946 | 0.9940 | 0.8499 | 0.7942 | 0.8827 | 0.9853 | 0.8735 | 710.6500 | 937.2700 | 747.6700 | 14826.1000 | 1.3100 | 1115.1200 |
+| XGBoost | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9603 | 0.9013 | 0.9849 | 0.9995 | 0.9773 | 534.6500 | 893.4000 | 595.1900 | 241249.6000 | 2.9540 | 194.6900 |
+| Autoencoder | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.5759 | 0.6001 | 0.8384 | 0.6651 | 246.5000 | 397.0200 | 257.8500 | 19849.4000 | 1.5480 | 68.1600 |
+| Isolation Forest | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 8432.6500 | 9460.1500 | 8502.0700 | 68301.3000 | 2.0960 | 0.7600 |
+| One-Class SVM | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 163.2500 | 313.9100 | 185.5000 | 17845.6000 | 0.4780 | 2.3100 |
+| LOF | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 2399.8000 | 3838.5100 | 2499.7600 | 33666.1000 | 5.6660 | 0.6000 |
 
 
 - **XGBoost Macro-F1 (95% Bootstrap CI, n=1000):** `0.9603` (`[0.9013, 0.9849]`, bootstrap std=`0.0193`)
@@ -306,4 +306,4 @@ Tabular CICFlowMeter features do not form a physical time series; 1D convolution
 
 ## 11. Preprocessing vs. Model Inference Latency
 
-- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** median = `812.20 µs`, P95 = `1081.50 µs` (mean = `867.47 µs`, `50` warm-up calls discarded; `1152.8` flows/sec).
+- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** median = `900.45 µs`, P95 = `1153.96 µs` (mean = `952.32 µs`, `50` warm-up calls discarded; `1050.1` flows/sec).

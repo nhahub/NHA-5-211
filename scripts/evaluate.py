@@ -571,13 +571,15 @@ def run_evaluation_suite(
 
     # 7. SHAP Explainability
     shap_summary: dict[str, Any] = {}
+    xgb_present_cls = np.unique(y_train).astype(np.int64)
+    xgb_class_names = [class_names[int(c)] for c in xgb_present_cls]
     if not skip_shap:
         if "XGBoost" in artifacts.models:
             xgb_shap_res, _, _ = compute_xgboost_global_shap(
                 xgb_model=artifacts.models["XGBoost"],
                 X_test=X_test_scaled,
                 feature_names=artifacts.feature_names,
-                class_names=class_names,
+                class_names=xgb_class_names,
                 max_samples=app_c.evaluation.shap_xgb_max_samples,
                 summary_fig_path=figures_dir / "shap_xgb_summary.png",
             )
@@ -607,28 +609,47 @@ def run_evaluation_suite(
                 "explainer_benchmark": mlp_bench,
             }
 
-            # Local waterfall on a true-positive critical attack sample
+            # Local waterfall on a true-positive critical attack sample (preferring trained classes)
+            xgb_present_set = set(xgb_present_cls.tolist())
             attack_indices = [i for i, c in enumerate(class_names) if i != benign_idx]
             target_sample_idx = 0
-            target_cls_idx = attack_indices[0] if attack_indices else 0
+            target_cls_idx = attack_indices[0] if attack_indices else benign_idx
+            found_match = False
             if "MLP" in supervised_probas:
                 mlp_preds = np.argmax(supervised_probas["MLP"], axis=1)
-                for a_idx in attack_indices:
+                preferred_attacks = [a for a in attack_indices if a in xgb_present_set] or attack_indices
+                for a_idx in preferred_attacks:
                     matches = np.where((y_test == a_idx) & (mlp_preds == a_idx))[0]
                     if len(matches) > 0:
                         target_sample_idx = int(matches[0])
                         target_cls_idx = int(a_idx)
+                        found_match = True
                         break
+            use_xgb_local = "XGBoost" in artifacts.models and (
+                target_cls_idx in xgb_present_set or benign_idx in xgb_present_set
+            )
+            if use_xgb_local:
+                if target_cls_idx not in xgb_present_set:
+                    target_cls_idx = benign_idx
+                    if not found_match:
+                        ben_matches = np.where(y_test == benign_idx)[0]
+                        if len(ben_matches) > 0:
+                            target_sample_idx = int(ben_matches[0])
+                local_cls_idx = int(np.searchsorted(xgb_present_cls, target_cls_idx))
+                local_model_name = "XGBoost"
+                local_model_obj = artifacts.models["XGBoost"]
+            else:
+                local_cls_idx = target_cls_idx
+                local_model_name = "MLP"
+                local_model_obj = artifacts.models["MLP"]
 
             local_exp = explain_single_sample(
-                model_name="XGBoost" if "XGBoost" in artifacts.models else "MLP",
-                model=artifacts.models["XGBoost"]
-                if "XGBoost" in artifacts.models
-                else artifacts.models["MLP"],
+                model_name=local_model_name,
+                model=local_model_obj,
                 x_single=X_test_scaled[target_sample_idx],
                 X_background=X_train_scaled,
                 feature_names=artifacts.feature_names,
-                class_idx=target_cls_idx,
+                class_idx=local_cls_idx,
                 class_name=class_names[target_cls_idx],
                 waterfall_path=figures_dir / "shap_waterfall.png",
             )

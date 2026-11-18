@@ -1,12 +1,12 @@
 {
   "training_durations_sec": {
-    "MLP": 33.55214129999513,
-    "CNN": 858.3628122000373,
-    "Autoencoder": 36.101583199983,
-    "Isolation Forest": 0.5023608999908902,
-    "One-Class SVM": 1.4779989999951795,
-    "LOF": 0.5306445999885909,
-    "XGBoost": 119.31328629999189
+    "MLP": 37.94196509994799,
+    "CNN": 1115.1228030000348,
+    "Autoencoder": 68.15938520000782,
+    "Isolation Forest": 0.7648540000081994,
+    "One-Class SVM": 2.31156960001681,
+    "LOF": 0.600675499998033,
+    "XGBoost": 194.68522339995252
   },
   "overfitting_analysis": {
     "MLP": {
