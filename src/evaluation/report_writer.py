@@ -37,6 +37,8 @@ def write_academic_reports(
     unseen = summary.get("unseen_attack_protocol", {})
     by_day = summary.get("by_day_protocol", {})
     ablation = summary.get("feature_ablation", {})
+    xgb_cv = summary.get("xgboost_cross_validation", {})
+    sup_evals = summary.get("supervised_evaluations", {})
     prep_lat = summary.get("preprocessing_latency", {})
     shap_sum = summary.get("shap_summary", {})
     split_strat = summary.get("split_strategy") or audit.get("split_strategy", "random")
@@ -64,6 +66,25 @@ def write_academic_reports(
         "- **Unsupervised Autoencoder:** Evaluated separately under binary novelty framing (Benign vs. Anomalous).\n\n",
         cmp_md + "\n\n",
     ]
+    ci_lines: list[str] = []
+    for key in ("XGBoost", "CNN", "MLP"):
+        ev = sup_evals.get(key, {})
+        ci = ev.get("f1_macro_ci95", {})
+        if ci.get("n_bootstrap", 0) > 0:
+            ci_lines.append(
+                f"- **{ev.get('model', key)} Macro-F1 (95% Bootstrap CI, n={ci['n_bootstrap']}):** "
+                f"`{ev.get('f1_macro', 0.0):.4f}` (`[{ci['ci95_low']:.4f}, {ci['ci95_high']:.4f}]`, "
+                f"bootstrap std=`{ci['std']:.4f}`)\n"
+            )
+    ae_ci = ae.get("f1_ci95", {})
+    if ae and ae_ci.get("n_bootstrap", 0) > 0:
+        ci_lines.append(
+            f"- **Autoencoder Binary F1 (95% Bootstrap CI, n={ae_ci['n_bootstrap']}):** "
+            f"`{ae.get('f1', 0.0):.4f}` (`[{ae_ci['ci95_low']:.4f}, {ae_ci['ci95_high']:.4f}]`, "
+            f"bootstrap std=`{ae_ci['std']:.4f}`)\n"
+        )
+    if ci_lines:
+        comp_lines.extend([*ci_lines, "\n"])
 
     if by_day.get("executed"):
         sec_num += 1
@@ -158,6 +179,62 @@ def write_academic_reports(
             )
         comp_lines.append("\n")
 
+    if any(sup_evals.get(k, {}).get("per_class_metrics") for k in ("XGBoost", "CNN", "MLP")):
+        sec_num += 1
+        comp_lines.append(f"## {sec_num}. Per-Class Precision, Recall, F1 & Support (Test Partition)\n")
+        comp_lines.append(
+            "> **Statistical Reliability Note:** Classes marked `Statistically Unreliable` have "
+            "low held-out test support (`< 30` flows); one or two misclassified flows swing per-class "
+            "F1 sharply and drive Macro-F1 variance.\n\n"
+        )
+        for key in ("XGBoost", "CNN", "MLP"):
+            ev = sup_evals.get(key, {})
+            per_cls = ev.get("per_class_metrics")
+            if not per_cls:
+                continue
+            comp_lines.append(f"### {ev.get('model', key)} Per-Class Metrics\n\n")
+            pc_rows = [
+                {
+                    "Class": row["class_name"],
+                    "Precision": float(row["precision"]),
+                    "Recall": float(row["recall"]),
+                    "F1_Score": float(row["f1_score"]),
+                    "Support": int(row["support"]),
+                    "Reliability": "Statistically Unreliable"
+                    if row.get("statistically_unreliable")
+                    else "Adequate",
+                }
+                for row in per_cls
+            ]
+            comp_lines.append(_df_to_markdown(pd.DataFrame(pc_rows)) + "\n\n")
+
+    if xgb_cv.get("executed"):
+        sec_num += 1
+        comp_lines.append(
+            f"## {sec_num}. XGBoost {xgb_cv.get('n_splits', 5)}-Fold Stratified Cross-Validation\n"
+        )
+        comp_lines.append(
+            f"- **Development Pool Rows (Held-Out Test Excluded):** `{xgb_cv.get('dev_pool_rows', 0):,}` "
+            f"| **Imbalance Strategy:** `{xgb_cv.get('imbalance_strategy')}`\n"
+            f"- **Macro-F1 (Mean +/- Std):** `{xgb_cv.get('mean_macro_f1', 0.0):.4f} ± {xgb_cv.get('std_macro_f1', 0.0):.4f}`\n"
+            f"- **Weighted-F1 (Mean +/- Std):** `{xgb_cv.get('mean_weighted_f1', 0.0):.4f} ± {xgb_cv.get('std_weighted_f1', 0.0):.4f}` "
+            f"| **Accuracy:** `{xgb_cv.get('mean_accuracy', 0.0):.4f} ± {xgb_cv.get('std_accuracy', 0.0):.4f}`\n\n"
+        )
+        fold_rows = [
+            {
+                "Fold": int(f["fold"]),
+                "Train_Rows": int(f["train_rows"]),
+                "Val_Rows": int(f["val_rows"]),
+                "Accuracy": float(f["accuracy"]),
+                "F1_Weighted": float(f["f1_weighted"]),
+                "F1_Macro": float(f["f1_macro"]),
+                "ROC_AUC_OVR": float(f["roc_auc_macro_ovr"]),
+            }
+            for f in xgb_cv.get("folds", [])
+        ]
+        if fold_rows:
+            comp_lines.append(_df_to_markdown(pd.DataFrame(fold_rows)) + "\n\n")
+
     sec_num += 1
     comp_lines.append(f"## {sec_num}. Ensemble Strategy Comparison (Test Partition)\n")
     if ens:
@@ -230,7 +307,18 @@ def write_academic_reports(
 
     imb_exp = diag.get("imbalance_experiment", {})
     if imb_exp:
-        exp_lines.append("## 2. Class Imbalance Experiment (SMOTE vs. Class Weighting)\n")
+        exp_lines.append("## 2. Class Imbalance Experiment (Unweighted vs. Class Weighting vs. SMOTE)\n")
+        imb_rows = [
+            {"Strategy": label, **imb_exp[key]}
+            for label, key in [
+                ("Unweighted ('none')", "baseline_unweighted_metrics"),
+                ("Class Weighting ('class_weight')", "class_weight_metrics"),
+                ("Hybrid SMOTE ('smote')", "smote_metrics"),
+            ]
+            if imb_exp.get(key)
+        ]
+        if imb_rows:
+            exp_lines.append(_df_to_markdown(pd.DataFrame(imb_rows)) + "\n\n")
         exp_lines.append(f"- **Selected Strategy:** `{imb_exp.get('selected_strategy')}`\n")
         exp_lines.append(f"- **Justification:** {imb_exp.get('justification')}\n\n")
 

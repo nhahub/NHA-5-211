@@ -51,6 +51,7 @@ class PreparedDataset:
     val_metadata: pd.DataFrame
     source_info: DatasetSourceInfo
     audit_report: dict[str, Any]
+    smote_class_weights: dict[int, float] | None = None
 
     def summary_dict(self) -> dict[str, Any]:
         return self.audit_report
@@ -267,35 +268,77 @@ def apply_smote_safely(
     max_k_neighbors: int = 5,
     sampling_strategy: str | dict[int, int] = "auto",
     cap_per_class: int | None = None,
+    max_multiplier: float | None = None,
+    min_real_samples: int = 2,
     seed: int = 42,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
-    """Apply SMOTE strictly on training data with dynamically bounded k_neighbors."""
+    """Apply SMOTE strictly on training data with config caps and a rare-class threshold.
+
+    Classes with real training count below `min_real_samples` are NOT synthetically
+    oversampled; they keep their real samples and rely on fallback class weights instead.
+    """
     unique_cls, counts = np.unique(y_train, return_counts=True)
-    min_count = int(counts.min())
-    k_neighbors = max(1, min(max_k_neighbors, min_count - 1))
+    count_map = {int(c): int(cnt) for c, cnt in zip(unique_cls, counts, strict=False)}
+    max_count = int(counts.max()) if len(counts) else 0
+    skipped_classes = {c: cnt for c, cnt in count_map.items() if cnt < min_real_samples}
 
-    effective_strategy: str | dict[int, int] = sampling_strategy
-    if cap_per_class is not None and sampling_strategy == "auto":
+    if sampling_strategy == "auto":
+        effective_strategy: str | dict[int, int] = {}
+        for c, cnt in count_map.items():
+            if cnt < min_real_samples:
+                effective_strategy[c] = cnt
+                continue
+            target = max_count
+            if cap_per_class is not None:
+                target = min(target, int(cap_per_class))
+            if max_multiplier is not None:
+                target = min(target, int(round(cnt * max_multiplier)))
+            effective_strategy[c] = max(cnt, target)
+    elif isinstance(sampling_strategy, dict):
         effective_strategy = {
-            int(c): max(int(cnt), min(int(counts.max()), int(cap_per_class)))
-            for c, cnt in zip(unique_cls, counts, strict=False)
+            int(c): (count_map[int(c)] if count_map[int(c)] < min_real_samples else int(tgt))
+            for c, tgt in sampling_strategy.items()
+            if int(c) in count_map
         }
+    else:
+        effective_strategy = sampling_strategy
 
-    if min_count <= 1:
-        logger.warning("Smallest training class has <= 1 sample; skipping SMOTE.")
+    if isinstance(effective_strategy, dict):
+        upsampled_cls = [
+            c for c, tgt in effective_strategy.items() if count_map.get(c, 0) >= 2 and tgt > count_map[c]
+        ]
+    else:
+        upsampled_cls = [
+            c for c, cnt in count_map.items() if cnt >= max(2, min_real_samples) and cnt < max_count
+        ]
+
+    if not upsampled_cls:
+        reason = (
+            "all_minority_classes_below_min_real_samples"
+            if skipped_classes
+            else "all_classes_already_at_or_above_target"
+        )
+        logger.info("Skipping SMOTE (%s); skipped_classes=%s.", reason, skipped_classes)
         return (
             X_train_scaled.copy(),
             y_train.copy(),
             {
                 "applied": False,
-                "reason": "minority_class_too_small",
+                "reason": reason,
                 "k_neighbors": 0,
-                "pre_counts": {str(int(c)): int(cnt) for c, cnt in zip(unique_cls, counts, strict=False)},
-                "post_counts": {str(int(c)): int(cnt) for c, cnt in zip(unique_cls, counts, strict=False)},
+                "min_real_samples": int(min_real_samples),
+                "cap_per_class": cap_per_class,
+                "max_multiplier": max_multiplier,
+                "skipped_classes": {str(c): int(cnt) for c, cnt in skipped_classes.items()},
+                "pre_counts": {str(c): int(cnt) for c, cnt in count_map.items()},
+                "post_counts": {str(c): int(cnt) for c, cnt in count_map.items()},
                 "rows_before": int(len(y_train)),
                 "rows_after": int(len(y_train)),
             },
         )
+
+    min_upsampled = min(count_map[c] for c in upsampled_cls)
+    k_neighbors = max(1, min(max_k_neighbors, min_upsampled - 1))
 
     # Note: Modern imbalanced-learn (>=0.12) removed n_jobs from SMOTE().
     smote = SMOTE(
@@ -314,18 +357,46 @@ def apply_smote_safely(
     smote_info = {
         "applied": True,
         "k_neighbors": int(k_neighbors),
-        "pre_counts": {str(int(c)): int(cnt) for c, cnt in zip(unique_cls, counts, strict=False)},
+        "min_real_samples": int(min_real_samples),
+        "cap_per_class": cap_per_class,
+        "max_multiplier": max_multiplier,
+        "skipped_classes": {str(c): int(cnt) for c, cnt in skipped_classes.items()},
+        "pre_counts": {str(c): int(cnt) for c, cnt in count_map.items()},
         "post_counts": {str(int(c)): int(cnt) for c, cnt in zip(post_cls, post_counts, strict=False)},
         "rows_before": int(len(y_train)),
         "rows_after": int(len(y_res)),
     }
     logger.info(
-        "SMOTE applied on training split only (k_neighbors=%d): %d -> %d rows",
+        "SMOTE applied on training split only (k_neighbors=%d, skipped_rare=%s): %d -> %d rows",
         k_neighbors,
+        skipped_classes,
         len(y_train),
         len(y_res),
     )
     return X_res.astype(np.float32), y_res.astype(np.int64), smote_info
+
+
+def compute_hybrid_smote_class_weights(
+    smote_info: dict[str, Any],
+    fallback_class_weights: dict[int, float],
+) -> dict[int, float] | None:
+    """Return class weights compensating for classes skipped by SMOTE (< min_real_samples)."""
+    skipped = {int(k): int(v) for k, v in smote_info.get("skipped_classes", {}).items()}
+    if not skipped:
+        return None
+    if not smote_info.get("applied", False):
+        return {int(k): float(v) for k, v in fallback_class_weights.items()}
+
+    post_counts = {int(k): int(v) for k, v in smote_info.get("post_counts", {}).items()}
+    max_post = max(post_counts.values()) if post_counts else 1
+    non_skipped_minorities = [
+        cnt for cls_id, cnt in post_counts.items() if cls_id not in skipped and cnt < max_post
+    ]
+    ref_count = float(np.median(non_skipped_minorities)) if non_skipped_minorities else float(max_post)
+    return {
+        cls_id: (float(max(1.0, ref_count / max(1, cnt))) if cls_id in skipped else 1.0)
+        for cls_id, cnt in post_counts.items()
+    }
 
 
 def _classify_day_bucket(filename: str) -> str:
@@ -573,15 +644,26 @@ def run_preprocessing_pipeline(
         max_k_neighbors=cfg.data.imbalance.smote_max_k_neighbors,
         sampling_strategy=cfg.data.imbalance.smote_sampling_strategy,
         cap_per_class=cfg.data.imbalance.smote_cap_per_class,
+        max_multiplier=cfg.data.imbalance.smote_max_multiplier,
+        min_real_samples=cfg.data.imbalance.smote_min_real_samples,
         seed=seed,
     )
     post_smote_named = {class_names[int(k)]: int(v) for k, v in smote_info["post_counts"].items()}
     pre_smote_named = {class_names[int(k)]: int(v) for k, v in smote_info["pre_counts"].items()}
+    skipped_named = {class_names[int(k)]: int(v) for k, v in smote_info.get("skipped_classes", {}).items()}
+    smote_info["skipped_classes_named"] = skipped_named
 
-    # Compute balanced class weights as an alternative to SMOTE for empirical comparison
+    # Compute balanced class weights as an alternative to SMOTE and as fallback for skipped rare classes
     unique_train_cls = np.unique(y_train)
     cw_values = compute_class_weight(class_weight="balanced", classes=unique_train_cls, y=y_train)
     class_weights = {int(c): float(w) for c, w in zip(unique_train_cls, cw_values, strict=False)}
+    smote_class_weights = compute_hybrid_smote_class_weights(smote_info, class_weights)
+    if smote_class_weights:
+        smote_info["hybrid_class_weights_named"] = {
+            class_names[int(k)]: round(float(v), 4)
+            for k, v in smote_class_weights.items()
+            if k in map(int, smote_info.get("skipped_classes", {}))
+        }
 
     leakage_checks = verify_no_leakage(
         X_train_scaled,
@@ -689,4 +771,5 @@ def run_preprocessing_pipeline(
         val_metadata=val_metadata,
         source_info=source_info,
         audit_report=audit_report,
+        smote_class_weights=smote_class_weights,
     )

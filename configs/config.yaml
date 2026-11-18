@@ -75,10 +75,12 @@ data:
     thursday_val_fraction: 0.50
     stratify: true
   imbalance:
-    strategy: "auto_compare" # Compares SMOTE vs class_weight on validation set; options: smote, class_weight, none, auto_compare
+    strategy: "auto_compare" # Compares None, Class-Weight, and SMOTE on validation Macro-F1; options: smote, class_weight, none, auto_compare
     smote_sampling_strategy: "auto"
     smote_max_k_neighbors: 5
-    smote_cap_per_class: 25000 # Caps minority oversampling at 25k/class across 13-class CICIDS2017 to prevent overfitting & RAM blowup
+    smote_cap_per_class: 5000 # Caps minority oversampling at 5,000 samples (or smote_max_multiplier x real size)
+    smote_max_multiplier: 5.0 # Bounds synthetic oversampling to at most 5x the real class size
+    smote_min_real_samples: 50 # Classes with fewer real train rows skip SMOTE and receive class weights instead
 
 evaluation:
   latency_warmup_runs: 5
@@ -94,6 +96,10 @@ evaluation:
   run_feature_ablation: true
   ablation_drop_features:
     - "Destination Port"
+  bootstrap_n_resamples: 1000
+  low_support_threshold: 30
+  run_xgboost_cv: true
+  cv_n_splits: 5
 
 response:
   dry_run: true

@@ -12,7 +12,12 @@ from src.data.loader import generate_synthetic_cicids2017
 from src.data.preprocessing import run_preprocessing_pipeline
 from src.detection.anomaly_detection import AnomalyDetector
 from src.detection.inference import UnifiedDetectionEngine
-from src.evaluation.protocols import evaluate_by_day_protocol, evaluate_feature_ablation
+from src.evaluation.metrics import bootstrap_macro_f1_ci, evaluate_supervised_model
+from src.evaluation.protocols import (
+    evaluate_by_day_protocol,
+    evaluate_feature_ablation,
+    run_xgboost_stratified_cv,
+)
 from src.evaluation.report_writer import write_academic_reports
 from src.models.autoencoder import (
     build_autoencoder,
@@ -25,6 +30,7 @@ from src.models.ensemble import HybridEnsembleEngine
 from src.models.mlp import build_mlp
 from src.models.xgboost_model import build_xgboost_classifier
 from src.response.response_engine import ActiveResponseEngine
+from src.training.optimization import compare_smote_vs_class_weight
 from src.utils.model_registry import ModelRegistry
 
 
@@ -210,3 +216,111 @@ def test_by_day_protocol_feature_ablation_and_report_tables(tmp_app_config: AppC
     assert "Cross-Day Binary Intrusion Detection (`by_day`: Benign vs. Attack)" in md_text
     assert "Shortcut Feature Ablation (With vs. Without `Destination Port`)" in md_text
     assert "Delta Test Macro-F1 (without - with):" in md_text
+
+
+def test_imbalance_selection_bootstrap_ci_per_class_and_xgb_cv(tmp_app_config: AppConfig) -> None:
+    """Imbalance selection picks best val Macro-F1, plus bootstrap CI, per-class metrics, and CV."""
+    rng = np.random.default_rng(123)
+    X_tr = rng.normal(size=(180, 6)).astype(np.float32)
+    y_tr = np.array([0] * 140 + [1] * 25 + [2] * 15, dtype=np.int64)
+    X_tr[y_tr == 1] += 2.5
+    X_tr[y_tr == 2] -= 2.5
+
+    X_va = rng.normal(size=(90, 6)).astype(np.float32)
+    y_va = np.array([0] * 70 + [1] * 12 + [2] * 8, dtype=np.int64)
+    X_va[y_va == 1] += 2.5
+    X_va[y_va == 2] -= 2.5
+
+    # Corrupt SMOTE candidate deliberately so unweighted/class_weight cleanly outperform SMOTE
+    X_sm_noisy = rng.normal(scale=4.0, size=(300, 6)).astype(np.float32)
+    y_sm_noisy = np.array([0] * 140 + [1] * 80 + [2] * 80, dtype=np.int64)
+    cw = {0: 0.43, 1: 2.4, 2: 4.0}
+    imb_res = compare_smote_vs_class_weight(
+        X_train_scaled=X_tr,
+        y_train=y_tr,
+        X_train_sm=X_sm_noisy,
+        y_train_sm=y_sm_noisy,
+        X_val_scaled=X_va,
+        y_val=y_va,
+        class_weights=cw,
+        num_classes=3,
+        xgb_device="cpu",
+        seed=42,
+    )
+    scores = {
+        "none": imb_res.baseline_unweighted_metrics["val_macro_f1"],
+        "class_weight": imb_res.class_weight_metrics["val_macro_f1"],
+        "smote": imb_res.smote_metrics["val_macro_f1"],
+    }
+    expected_best = max(scores, key=lambda k: scores[k])
+    assert imb_res.selected_strategy == expected_best
+    assert expected_best in {"none", "class_weight"}
+    assert "Data-driven selection chose" in imb_res.justification
+
+    # Bootstrap CI + Per-class low-support reliability flag
+    proba = np.array(
+        [[0.9, 0.05, 0.05]] * 40 + [[0.1, 0.85, 0.05]] * 20 + [[0.05, 0.05, 0.9]] * 4,
+        dtype=np.float64,
+    )
+    y_eval = np.array([0] * 40 + [1] * 20 + [2] * 4, dtype=np.int64)
+    y_eval[63] = 0  # Flip 1 of 4 minority samples
+    proba[63] = [0.8, 0.1, 0.1]
+    ev = evaluate_supervised_model(
+        y_eval,
+        proba,
+        ["BENIGN", "DDoS", "Heartbleed"],
+        "XGBoost",
+        bootstrap_n=250,
+        low_support_threshold=30,
+        seed=42,
+    )
+    ci = ev["f1_macro_ci95"]
+    direct_ci = bootstrap_macro_f1_ci(y_eval, np.argmax(proba, axis=1), 3, n_bootstrap=250, seed=42)
+    assert direct_ci == ci
+    assert 0.0 <= ci["ci95_low"] <= ev["f1_macro"] <= ci["ci95_high"] <= 1.0
+    assert ci["n_bootstrap"] == 250
+    by_cls = {r["class_name"]: r for r in ev["per_class_metrics"]}
+    assert by_cls["BENIGN"]["support"] == 41 and by_cls["BENIGN"]["statistically_unreliable"] is False
+    assert by_cls["Heartbleed"]["support"] == 3 and by_cls["Heartbleed"]["statistically_unreliable"] is True
+
+    # Leak-free XGBoost Stratified CV + Report formatting
+    tmp_app_config.data.synthetic_fallback.n_samples = 900
+    cv_res = run_xgboost_stratified_cv(
+        app_cfg=tmp_app_config,
+        model_cfg=ModelConfig(),
+        xgb_params={"n_estimators": 8, "max_depth": 3},
+        imbalance_strategy="class_weight",
+        n_splits=3,
+        force_synthetic=True,
+    )
+    assert cv_res["executed"] is True
+    assert cv_res["n_splits"] >= 2
+    assert len(cv_res["folds"]) == cv_res["n_splits"]
+    assert 0.0 <= cv_res["mean_macro_f1"] <= 1.0 and cv_res["std_macro_f1"] >= 0.0
+
+    reports_dir = tmp_app_config.paths.resolve("reports_dir")
+    cmp_df = pd.DataFrame(
+        [
+            {
+                "Model": "XGBoost",
+                "F1_Macro": ev["f1_macro"],
+                "F1_Macro_CI95_Low": ci["ci95_low"],
+                "F1_Macro_CI95_High": ci["ci95_high"],
+            }
+        ]
+    )
+    summary = {
+        "dataset_source": {"is_synthetic": True},
+        "supervised_evaluations": {"XGBoost": ev},
+        "xgboost_cross_validation": cv_res,
+        "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+        "training_diagnostics": {"imbalance_experiment": imb_res.to_dict()},
+    }
+    cmp_path, exp_path = write_academic_reports(summary, cmp_df, reports_dir)
+    cmp_txt = cmp_path.read_text(encoding="utf-8")
+    exp_txt = exp_path.read_text(encoding="utf-8")
+    assert "Bootstrap CI" in cmp_txt
+    assert "Statistically Unreliable" in cmp_txt
+    assert f"XGBoost {cv_res['n_splits']}-Fold Stratified Cross-Validation" in cmp_txt
+    assert "Unweighted ('none')" in exp_txt
+    assert "Class Weighting ('class_weight')" in exp_txt

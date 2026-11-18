@@ -74,16 +74,17 @@ def compare_smote_vs_class_weight(
     y_val: np.ndarray,
     class_weights: dict[int, float],
     num_classes: int,
+    smote_class_weights: dict[int, float] | None = None,
     xgb_device: str = "cpu",
     seed: int = 42,
 ) -> ImbalanceExperimentResult:
-    """Experimentally evaluate Unweighted vs Class-Weighted vs SMOTE training on validation data."""
+    """Experimentally evaluate Unweighted vs Class-Weight vs SMOTE and pick best Val Macro-F1."""
     logger.info("Running imbalance handling experiment (Unweighted vs Class-Weight vs SMOTE)...")
 
     # Fast, controlled probe using shallow regularized XGBoost on identical validation set
     probe_override = {"n_estimators": 120, "max_depth": 6, "learning_rate": 0.1}
 
-    # 1. Unweighted raw imbalanced baseline
+    # 1. Unweighted raw imbalanced baseline ("none")
     clf_raw, cls_raw = fit_xgboost_safe_multiclass(
         X_train=X_train_scaled,
         y_train=y_train,
@@ -117,7 +118,12 @@ def compare_smote_vs_class_weight(
         y_val, expand_xgboost_probas(clf_cw.predict_proba(X_val_scaled), cls_cw, num_classes), num_classes
     )
 
-    # 3. SMOTE on standardized training split
+    # 3. Capped SMOTE on eligible classes + class-weight fallback for skipped rare classes
+    sm_sample_weights = (
+        np.array([smote_class_weights[int(c)] for c in y_train_sm], dtype=np.float32)
+        if smote_class_weights
+        else None
+    )
     clf_sm, cls_sm = fit_xgboost_safe_multiclass(
         X_train=X_train_sm,
         y_train=y_train_sm,
@@ -127,29 +133,47 @@ def compare_smote_vs_class_weight(
         params_override=probe_override,
         device=xgb_device,
         seed=seed,
+        sample_weight=sm_sample_weights,
         early_stopping_rounds=15,
     )
     sm_metrics = _eval_val_scores(
         y_val, expand_xgboost_probas(clf_sm.predict_proba(X_val_scaled), cls_sm, num_classes), num_classes
     )
 
-    # Select based on validation Macro-F1 (minority sensitivity) with tie-breaker on Weighted-F1
-    if sm_metrics["val_macro_f1"] >= cw_metrics["val_macro_f1"] - 0.002:
-        selected = "smote"
-        justification = (
-            f"SMOTE achieved validation Macro-F1={sm_metrics['val_macro_f1']:.4f} "
-            f"(Weighted-F1={sm_metrics['val_weighted_f1']:.4f}, Macro-Recall={sm_metrics['val_macro_recall']:.4f}) "
-            f"vs Class-Weight Macro-F1={cw_metrics['val_macro_f1']:.4f} "
-            f"and Unweighted Macro-F1={raw_metrics['val_macro_f1']:.4f}. "
-            "SMOTE is selected for deep/tree parity and balanced minority gradients."
-        )
-    else:
-        selected = "class_weight"
-        justification = (
-            f"Class weighting outperformed SMOTE on validation Macro-F1 "
-            f"({cw_metrics['val_macro_f1']:.4f} vs {sm_metrics['val_macro_f1']:.4f}) "
-            "with lower synthetic distribution shift and lower memory footprint."
-        )
+    # Strictly data-driven selection: maximize validation Macro-F1 across all three candidates
+    candidates = [
+        ("none", raw_metrics),
+        ("class_weight", cw_metrics),
+        ("smote", sm_metrics),
+    ]
+    ordered = sorted(
+        candidates,
+        key=lambda item: (
+            item[1]["val_macro_f1"],
+            item[1]["val_weighted_f1"],
+            -item[1]["val_mlogloss"],
+        ),
+        reverse=True,
+    )
+    selected, win_m = ordered[0]
+    runner_name, runner_m = ordered[1]
+    margin = win_m["val_macro_f1"] - runner_m["val_macro_f1"]
+    display_labels = {
+        "none": "Unweighted ('none')",
+        "class_weight": "Class-Weight ('class_weight')",
+        "smote": "Hybrid SMOTE ('smote')",
+    }
+    others = "; ".join(
+        f"{display_labels[name]} Macro-F1={m['val_macro_f1']:.4f} "
+        f"(Weighted-F1={m['val_weighted_f1']:.4f}, mlogloss={m['val_mlogloss']:.4f})"
+        for name, m in ordered[1:]
+    )
+    justification = (
+        f"Data-driven selection chose '{selected}' with highest validation Macro-F1={win_m['val_macro_f1']:.4f} "
+        f"(Weighted-F1={win_m['val_weighted_f1']:.4f}, Macro-Recall={win_m['val_macro_recall']:.4f}, "
+        f"mlogloss={win_m['val_mlogloss']:.4f}), beating runner-up '{runner_name}' by {margin:+.4f} "
+        f"Macro-F1 ({others})."
+    )
 
     logger.info("Imbalance experiment winner: %s | %s", selected, justification)
     return ImbalanceExperimentResult(

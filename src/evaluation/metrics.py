@@ -31,11 +31,88 @@ from src.models.ensemble import compute_ece, compute_multiclass_brier
 from src.training.callbacks import build_keras_callbacks
 
 
+def bootstrap_macro_f1_ci(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    num_classes: int,
+    n_bootstrap: int = 1000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Compute nonparametric 95% bootstrap confidence interval for Macro-F1."""
+    y_t = np.asarray(y_true, dtype=np.int64)
+    y_p = np.asarray(y_pred, dtype=np.int64)
+    n = len(y_t)
+    if n == 0 or num_classes <= 0 or n_bootstrap <= 0:
+        return {"mean": 0.0, "std": 0.0, "ci95_low": 0.0, "ci95_high": 0.0, "n_bootstrap": 0}
+
+    rng = np.random.default_rng(seed)
+    codes = y_t * num_classes + y_p
+    k_sq = num_classes * num_classes
+    scores = np.empty(n_bootstrap, dtype=np.float64)
+    for b in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        cm = np.bincount(codes[idx], minlength=k_sq).reshape(num_classes, num_classes)
+        tp = np.diag(cm)
+        denom = cm.sum(axis=0) + cm.sum(axis=1)
+        present = denom > 0
+        if not np.any(present):
+            scores[b] = 0.0
+            continue
+        f1_cls = np.zeros(num_classes, dtype=np.float64)
+        f1_cls[present] = 2.0 * tp[present] / denom[present]
+        scores[b] = float(np.mean(f1_cls[present]))
+
+    return {
+        "mean": float(np.mean(scores)),
+        "std": float(np.std(scores, ddof=1)) if n_bootstrap > 1 else 0.0,
+        "ci95_low": float(np.percentile(scores, 2.5)),
+        "ci95_high": float(np.percentile(scores, 97.5)),
+        "n_bootstrap": int(n_bootstrap),
+    }
+
+
+def bootstrap_binary_f1_ci(
+    y_bin_true: np.ndarray,
+    y_bin_pred: np.ndarray,
+    n_bootstrap: int = 1000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Compute nonparametric 95% bootstrap confidence interval for binary positive-class F1."""
+    y_t = np.asarray(y_bin_true, dtype=np.int64)
+    y_p = np.asarray(y_bin_pred, dtype=np.int64)
+    n = len(y_t)
+    if n == 0 or n_bootstrap <= 0:
+        return {"mean": 0.0, "std": 0.0, "ci95_low": 0.0, "ci95_high": 0.0, "n_bootstrap": 0}
+
+    rng = np.random.default_rng(seed)
+    codes = y_t * 2 + y_p
+    scores = np.empty(n_bootstrap, dtype=np.float64)
+    for b in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        counts = np.bincount(codes[idx], minlength=4)
+        tp = int(counts[3])
+        fp = int(counts[1])
+        fn = int(counts[2])
+        denom = 2 * tp + fp + fn
+        scores[b] = float(2.0 * tp / denom) if denom > 0 else 0.0
+
+    return {
+        "mean": float(np.mean(scores)),
+        "std": float(np.std(scores, ddof=1)) if n_bootstrap > 1 else 0.0,
+        "ci95_low": float(np.percentile(scores, 2.5)),
+        "ci95_high": float(np.percentile(scores, 97.5)),
+        "n_bootstrap": int(n_bootstrap),
+    }
+
+
 def evaluate_supervised_model(
     y_true: np.ndarray,
     y_proba: np.ndarray,
     class_names: list[str],
     model_name: str,
+    bootstrap_n: int = 1000,
+    low_support_threshold: int = 30,
+    seed: int = 42,
 ) -> dict[str, Any]:
     """Compute comprehensive multi-class supervised classification metrics."""
     y_pred = np.argmax(y_proba, axis=1)
@@ -92,6 +169,26 @@ def evaluate_supervised_model(
         macro_roc_auc = 0.0
         macro_pr_auc = 0.0
 
+    per_class_metrics = [
+        {
+            "class_name": cname,
+            "precision": float(cls_report[cname]["precision"]),
+            "recall": float(cls_report[cname]["recall"]),
+            "f1_score": float(cls_report[cname]["f1-score"]),
+            "support": int(cls_report[cname]["support"]),
+            "statistically_unreliable": bool(int(cls_report[cname]["support"]) < low_support_threshold),
+        }
+        for cname in class_names
+        if cname in cls_report
+    ]
+    f1_macro_ci95 = bootstrap_macro_f1_ci(
+        y_true=y_true,
+        y_pred=y_pred,
+        num_classes=n_classes,
+        n_bootstrap=bootstrap_n,
+        seed=seed,
+    )
+
     return {
         "model": model_name,
         "framing": f"{n_classes}-class supervised",
@@ -102,12 +199,14 @@ def evaluate_supervised_model(
         "precision_macro": prec_m,
         "recall_macro": rec_m,
         "f1_macro": f1_m,
+        "f1_macro_ci95": f1_macro_ci95,
         "roc_auc_macro_ovr": macro_roc_auc,
         "pr_auc_macro_ovr": macro_pr_auc,
         "ece": compute_ece(y_true, y_proba),
         "brier_score": compute_multiclass_brier(y_true, y_proba),
         "per_class_roc_auc": per_class_roc_auc,
         "per_class_pr_auc": per_class_pr_auc,
+        "per_class_metrics": per_class_metrics,
         "classification_report": cls_report,
         "confusion_matrix_raw": cm_raw.tolist(),
         "confusion_matrix_normalized": cm_norm.tolist(),
@@ -147,6 +246,8 @@ def evaluate_autoencoder(
     class_names: list[str],
     benign_index: int,
     percentiles: list[float] | None = None,
+    bootstrap_n: int = 1000,
+    seed: int = 42,
 ) -> dict[str, Any]:
     """Evaluate the unsupervised Autoencoder under binary novelty framing."""
     y_bin_true = (y_test_multiclass != benign_index).astype(np.int64)
@@ -181,12 +282,19 @@ def evaluate_autoencoder(
 
     prec_curve, rec_curve, _ = precision_recall_curve(y_bin_true, recon_errors_test)
     pr_auc_curve = float(auc(rec_curve, prec_curve))
+    f1_ci95 = bootstrap_binary_f1_ci(
+        y_bin_true=y_bin_true,
+        y_bin_pred=y_pred_bin,
+        n_bootstrap=bootstrap_n,
+        seed=seed,
+    )
 
     return {
         "model": "Autoencoder",
         "framing": "Binary anomaly (Benign vs Anomalous)",
         "threshold": float(threshold),
         **primary,
+        "f1_ci95": f1_ci95,
         "pr_auc_trapz": pr_auc_curve,
         "confusion_matrix_raw": cm_raw.tolist(),
         "confusion_matrix_normalized": cm_norm.tolist(),

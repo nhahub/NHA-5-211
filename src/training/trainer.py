@@ -99,7 +99,7 @@ def train_all_models(
     num_features = dataset.X_train_scaled.shape[1]
     num_classes = len(dataset.class_names)
 
-    # 1. Experimentally compare SMOTE vs Class Weighting on validation set
+    # 1. Experimentally compare Unweighted vs Class Weighting vs SMOTE on validation set
     if app_cfg.data.imbalance.strategy == "auto_compare":
         imb_result = compare_smote_vs_class_weight(
             X_train_scaled=dataset.X_train_scaled,
@@ -110,6 +110,7 @@ def train_all_models(
             y_val=dataset.y_val,
             class_weights=dataset.class_weights,
             num_classes=num_classes,
+            smote_class_weights=dataset.smote_class_weights,
             xgb_device=hardware.xgb_device,
             seed=seed,
         )
@@ -127,8 +128,12 @@ def train_all_models(
     if chosen_imb == "smote":
         X_sup_train = dataset.X_train_sm
         y_sup_train = dataset.y_train_sm
-        keras_class_weight = None
-        xgb_sample_weight = None
+        keras_class_weight = dataset.smote_class_weights
+        xgb_sample_weight = (
+            np.array([dataset.smote_class_weights[int(c)] for c in y_sup_train], dtype=np.float32)
+            if dataset.smote_class_weights
+            else None
+        )
     elif chosen_imb == "class_weight":
         X_sup_train = dataset.X_train_scaled
         y_sup_train = dataset.y_train

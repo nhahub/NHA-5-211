@@ -5,15 +5,27 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import f1_score
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.utils.class_weight import compute_class_weight
 import xgboost as xgb
 
 from src.config import AppConfig, ModelConfig
-from src.data.loader import discover_csv_files
+from src.data.cleaner import clean_cicids_dataframe
+from src.data.feature_engineering import (
+    HighMissingColumnDropper,
+    MedianImputerTransformer,
+    SigmaOutlierClipper,
+)
+from src.data.loader import discover_csv_files, load_cicids2017_corpus
 from src.data.preprocessing import (
     PreparedDataset,
     _classify_day_bucket,
+    _row_hash_list,
+    apply_smote_safely,
+    compute_hybrid_smote_class_weights,
     run_preprocessing_pipeline,
 )
 from src.evaluation.metrics import (
@@ -45,7 +57,11 @@ def _select_supervised_train_arrays(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, dict[int, float] | None]:
     """Select standardized or SMOTE training arrays and matching weights for a strategy."""
     if imbalance_strategy == "smote":
-        return dataset.X_train_sm, dataset.y_train_sm, None, None
+        hybrid_cw = dataset.smote_class_weights
+        sw = (
+            np.array([hybrid_cw[int(c)] for c in dataset.y_train_sm], dtype=np.float32) if hybrid_cw else None
+        )
+        return dataset.X_train_sm, dataset.y_train_sm, sw, hybrid_cw
     if imbalance_strategy == "class_weight":
         sample_w = np.array([dataset.class_weights[int(c)] for c in dataset.y_train], dtype=np.float32)
         return dataset.X_train_scaled, dataset.y_train, sample_w, dataset.class_weights
@@ -456,4 +472,228 @@ def evaluate_feature_ablation(
         "delta_test_f1_weighted": round(float(delta_test_f1_weighted), 6),
         "delta_test_accuracy": round(float(delta_test_acc), 6),
         "delta_test_roc_auc_macro_ovr": round(float(delta_test_roc), 6),
+    }
+
+
+def _prepare_cv_fold(
+    X_tr_raw: pd.DataFrame,
+    y_tr: np.ndarray,
+    X_va_raw: pd.DataFrame,
+    y_va: np.ndarray,
+    cfg: AppConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Fit fold-only transformers, remove post-clip cross-fold collisions, and scale to float32."""
+    col_dropper = HighMissingColumnDropper(nan_threshold=cfg.data.nan_column_drop_threshold)
+    X_tr_k = col_dropper.fit_transform(X_tr_raw)
+    X_va_k = col_dropper.transform(X_va_raw)
+
+    imputer = MedianImputerTransformer()
+    X_tr_imp = imputer.fit_transform(X_tr_k)
+    X_va_imp = imputer.transform(X_va_k)
+
+    clipper = SigmaOutlierClipper(n_sigma=cfg.data.outlier_clip_sigma)
+    X_tr_clip = clipper.fit_transform(X_tr_imp)
+    X_va_clip = clipper.transform(X_va_imp)
+
+    # Deduplicate clipped fold train and strip any validation row matching fold train features.
+    tr_hashes = _row_hash_list(X_tr_clip.to_numpy(dtype=np.float64, copy=False))
+    seen_tr_pairs: set[tuple[bytes, int]] = set()
+    tr_feat_set: set[bytes] = set()
+    tr_keep = np.zeros(len(X_tr_clip), dtype=bool)
+    for idx, (h, lbl) in enumerate(zip(tr_hashes, y_tr, strict=True)):
+        pair = (h, int(lbl))
+        if pair not in seen_tr_pairs:
+            seen_tr_pairs.add(pair)
+            tr_feat_set.add(h)
+            tr_keep[idx] = True
+
+    va_hashes = _row_hash_list(X_va_clip.to_numpy(dtype=np.float64, copy=False))
+    va_keep = np.array([h not in tr_feat_set for h in va_hashes], dtype=bool)
+
+    X_tr_dedup = X_tr_clip.loc[tr_keep].reset_index(drop=True)
+    y_tr_dedup = y_tr[tr_keep]
+    X_va_dedup = X_va_clip.loc[va_keep].reset_index(drop=True)
+    y_va_dedup = y_va[va_keep]
+
+    scaler = StandardScaler()
+    X_tr_sc = scaler.fit_transform(X_tr_dedup).astype(np.float32)
+    X_va_sc = scaler.transform(X_va_dedup).astype(np.float32)
+
+    tr_scaled_set = set(_row_hash_list(X_tr_sc, decimals=6))
+    va_scaled_hashes = _row_hash_list(X_va_sc, decimals=6)
+    va_scaled_keep = np.array([h not in tr_scaled_set for h in va_scaled_hashes], dtype=bool)
+    return X_tr_sc, y_tr_dedup, X_va_sc[va_scaled_keep], y_va_dedup[va_scaled_keep]
+
+
+def run_xgboost_stratified_cv(
+    app_cfg: AppConfig,
+    model_cfg: ModelConfig,
+    xgb_params: dict[str, Any] | None = None,
+    imbalance_strategy: str = "class_weight",
+    n_splits: int = 5,
+    force_synthetic: bool = False,
+) -> dict[str, Any]:
+    """Run leak-free k-fold Stratified Cross-Validation for XGBoost on the development pool."""
+    seed = app_cfg.project.random_seed
+    set_global_seed(seed)
+    hardware = configure_hardware(
+        use_gpu=model_cfg.hardware.use_gpu,
+        memory_growth=model_cfg.hardware.memory_growth,
+        mixed_precision=model_cfg.hardware.mixed_precision,
+    )
+
+    raw_dir = app_cfg.paths.resolve("raw_data_dir")
+    syn_dir = app_cfg.paths.resolve("synthetic_data_dir")
+    df_raw, _ = load_cicids2017_corpus(
+        raw_dir=raw_dir,
+        synthetic_dir=syn_dir,
+        data_cfg=app_cfg.data,
+        seed=seed,
+        force_synthetic=force_synthetic,
+    )
+    X_df, y_series, _, _ = clean_cicids_dataframe(
+        df_raw,
+        label_col=app_cfg.data.label_column,
+        identifier_keywords=app_cfg.data.identifier_keywords,
+        preserve_features=app_cfg.data.preserve_features,
+        drop_features=app_cfg.data.drop_features,
+        merge_web_attacks=app_cfg.data.merge_web_attacks,
+        drop_ultra_rare_below=app_cfg.data.drop_ultra_rare_classes_below,
+    )
+
+    label_encoder = LabelEncoder()
+    y_all = label_encoder.fit_transform(y_series.astype(str))
+    class_names = [str(c) for c in label_encoder.classes_]
+    num_classes = len(class_names)
+
+    # Keep the final held-out test split isolated from CV.
+    idx_all = np.arange(len(X_df))
+    idx_dev, _ = train_test_split(
+        idx_all,
+        test_size=app_cfg.data.split.test_size,
+        random_state=seed,
+        stratify=y_all if app_cfg.data.split.stratify else None,
+    )
+    X_dev = X_df.iloc[idx_dev].reset_index(drop=True)
+    y_dev = y_all[idx_dev].astype(np.int64)
+
+    counts_dev = np.bincount(y_dev)
+    nz_dev = counts_dev[counts_dev > 0]
+    min_cls_count = int(nz_dev.min()) if len(nz_dev) else 0
+    effective_splits = min(int(n_splits), min_cls_count)
+    if effective_splits < 2:
+        return {
+            "executed": False,
+            "reason": f"Insufficient minimum class support ({min_cls_count}) for stratified CV.",
+        }
+    if effective_splits < n_splits:
+        logger.warning(
+            "Reducing stratified CV folds from %d to %d due to smallest dev class count=%d.",
+            n_splits,
+            effective_splits,
+            min_cls_count,
+        )
+
+    skf = StratifiedKFold(n_splits=effective_splits, shuffle=True, random_state=seed)
+    fold_results: list[dict[str, Any]] = []
+
+    for fold_idx, (tr_i, va_i) in enumerate(skf.split(X_dev, y_dev), start=1):
+        X_tr_raw = X_dev.iloc[tr_i].reset_index(drop=True)
+        y_tr_fold = y_dev[tr_i]
+        X_va_raw = X_dev.iloc[va_i].reset_index(drop=True)
+        y_va_fold = y_dev[va_i]
+
+        X_tr_sc, y_tr_clean, X_va_sc, y_va_clean = _prepare_cv_fold(
+            X_tr_raw, y_tr_fold, X_va_raw, y_va_fold, app_cfg
+        )
+
+        uniq_cls = np.unique(y_tr_clean)
+        cw_vals = compute_class_weight(class_weight="balanced", classes=uniq_cls, y=y_tr_clean)
+        fold_cw = {int(c): float(w) for c, w in zip(uniq_cls, cw_vals, strict=False)}
+
+        if imbalance_strategy == "smote":
+            X_fit, y_fit, sm_info = apply_smote_safely(
+                X_tr_sc,
+                y_tr_clean,
+                max_k_neighbors=app_cfg.data.imbalance.smote_max_k_neighbors,
+                sampling_strategy=app_cfg.data.imbalance.smote_sampling_strategy,
+                cap_per_class=app_cfg.data.imbalance.smote_cap_per_class,
+                max_multiplier=app_cfg.data.imbalance.smote_max_multiplier,
+                min_real_samples=app_cfg.data.imbalance.smote_min_real_samples,
+                seed=seed + fold_idx,
+            )
+            hybrid_cw = compute_hybrid_smote_class_weights(sm_info, fold_cw)
+            sw_fit = np.array([hybrid_cw[int(c)] for c in y_fit], dtype=np.float32) if hybrid_cw else None
+        elif imbalance_strategy == "class_weight":
+            X_fit, y_fit = X_tr_sc, y_tr_clean
+            sw_fit = np.array([fold_cw[int(c)] for c in y_fit], dtype=np.float32)
+        else:
+            X_fit, y_fit = X_tr_sc, y_tr_clean
+            sw_fit = None
+
+        clf, present_cls = fit_xgboost_safe_multiclass(
+            X_train=X_fit,
+            y_train=y_fit,
+            X_val=X_va_sc,
+            y_val=y_va_clean,
+            total_classes=num_classes,
+            cfg=model_cfg.xgboost,
+            params_override=xgb_params,
+            device=hardware.xgb_device,
+            seed=seed,
+            sample_weight=sw_fit,
+        )
+        p_va = expand_xgboost_probas(clf.predict_proba(X_va_sc), present_cls, num_classes)
+        ev = evaluate_supervised_model(
+            y_va_clean,
+            p_va,
+            class_names,
+            f"XGBoost (Fold {fold_idx})",
+            bootstrap_n=0,
+            seed=seed,
+        )
+        fold_results.append(
+            {
+                "fold": fold_idx,
+                "train_rows": int(len(X_fit)),
+                "val_rows": int(len(X_va_sc)),
+                "accuracy": float(ev["accuracy"]),
+                "precision_weighted": float(ev["precision_weighted"]),
+                "recall_weighted": float(ev["recall_weighted"]),
+                "f1_weighted": float(ev["f1_weighted"]),
+                "f1_macro": float(ev["f1_macro"]),
+                "roc_auc_macro_ovr": float(ev["roc_auc_macro_ovr"]),
+            }
+        )
+
+    ddof = 1 if len(fold_results) > 1 else 0
+    macro_f1s = [r["f1_macro"] for r in fold_results]
+    weighted_f1s = [r["f1_weighted"] for r in fold_results]
+    accs = [r["accuracy"] for r in fold_results]
+    rocs = [r["roc_auc_macro_ovr"] for r in fold_results]
+
+    mean_macro_f1 = float(np.mean(macro_f1s))
+    std_macro_f1 = float(np.std(macro_f1s, ddof=ddof))
+    logger.info(
+        "XGBoost %d-fold Stratified CV (%s): Macro-F1 = %.4f +/- %.4f",
+        effective_splits,
+        imbalance_strategy,
+        mean_macro_f1,
+        std_macro_f1,
+    )
+    return {
+        "executed": True,
+        "n_splits": int(effective_splits),
+        "requested_n_splits": int(n_splits),
+        "imbalance_strategy": imbalance_strategy,
+        "dev_pool_rows": int(len(idx_dev)),
+        "mean_macro_f1": mean_macro_f1,
+        "std_macro_f1": std_macro_f1,
+        "mean_weighted_f1": float(np.mean(weighted_f1s)),
+        "std_weighted_f1": float(np.std(weighted_f1s, ddof=ddof)),
+        "mean_accuracy": float(np.mean(accs)),
+        "std_accuracy": float(np.std(accs, ddof=ddof)),
+        "mean_roc_auc": float(np.mean(rocs)),
+        "std_roc_auc": float(np.std(rocs, ddof=ddof)),
+        "folds": fold_results,
     }

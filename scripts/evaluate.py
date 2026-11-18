@@ -22,7 +22,11 @@ from src.evaluation.metrics import (
     evaluate_supervised_model,
     evaluate_unseen_attack_protocol,
 )
-from src.evaluation.protocols import evaluate_by_day_protocol, evaluate_feature_ablation
+from src.evaluation.protocols import (
+    evaluate_by_day_protocol,
+    evaluate_feature_ablation,
+    run_xgboost_stratified_cv,
+)
 from src.evaluation.report_writer import write_academic_reports
 from src.evaluation.visualizations import (
     plot_autoencoder_diagnostics,
@@ -96,11 +100,23 @@ def run_evaluation_suite(
     cm_norm_dict: dict[str, np.ndarray] = {}
     latency_table: dict[str, dict[str, float]] = {}
 
+    boot_n = app_c.evaluation.bootstrap_n_resamples
+    low_sup = app_c.evaluation.low_support_threshold
+    eval_seed = app_c.project.random_seed
+
     # 1. Evaluate & benchmark each supervised classifier
     if "MLP" in artifacts.models:
         p_mlp = np.asarray(artifacts.models["MLP"].predict(X_test_scaled, batch_size=1024, verbose=0))
         supervised_probas["MLP"] = p_mlp
-        supervised_evals["MLP"] = evaluate_supervised_model(y_test, p_mlp, class_names, "MLP")
+        supervised_evals["MLP"] = evaluate_supervised_model(
+            y_test,
+            p_mlp,
+            class_names,
+            "MLP",
+            bootstrap_n=boot_n,
+            low_support_threshold=low_sup,
+            seed=eval_seed,
+        )
         cm_norm_dict["MLP"] = np.asarray(supervised_evals["MLP"]["confusion_matrix_normalized"])
         latency_table["MLP"] = benchmark_model_inference(
             artifacts.models["MLP"],
@@ -116,7 +132,15 @@ def run_evaluation_suite(
         X_test_cnn = X_test_scaled.reshape(-1, num_features, 1)
         p_cnn = np.asarray(artifacts.models["CNN"].predict(X_test_cnn, batch_size=1024, verbose=0))
         supervised_probas["CNN"] = p_cnn
-        supervised_evals["CNN"] = evaluate_supervised_model(y_test, p_cnn, class_names, "1D-CNN")
+        supervised_evals["CNN"] = evaluate_supervised_model(
+            y_test,
+            p_cnn,
+            class_names,
+            "1D-CNN",
+            bootstrap_n=boot_n,
+            low_support_threshold=low_sup,
+            seed=eval_seed,
+        )
         cm_norm_dict["CNN"] = np.asarray(supervised_evals["CNN"]["confusion_matrix_normalized"])
         latency_table["1D-CNN"] = benchmark_model_inference(
             artifacts.models["CNN"],
@@ -132,7 +156,15 @@ def run_evaluation_suite(
         xgb_raw_proba = np.asarray(artifacts.models["XGBoost"].predict_proba(X_test_scaled))
         p_xgb = expand_xgboost_probas(xgb_raw_proba, np.unique(y_train).astype(np.int64), len(class_names))
         supervised_probas["XGBoost"] = p_xgb
-        supervised_evals["XGBoost"] = evaluate_supervised_model(y_test, p_xgb, class_names, "XGBoost")
+        supervised_evals["XGBoost"] = evaluate_supervised_model(
+            y_test,
+            p_xgb,
+            class_names,
+            "XGBoost",
+            bootstrap_n=boot_n,
+            low_support_threshold=low_sup,
+            seed=eval_seed,
+        )
         cm_norm_dict["XGBoost"] = np.asarray(supervised_evals["XGBoost"]["confusion_matrix_normalized"])
         latency_table["XGBoost"] = benchmark_model_inference(
             artifacts.models["XGBoost"],
@@ -186,6 +218,8 @@ def run_evaluation_suite(
             class_names=class_names,
             benign_index=benign_idx,
             percentiles=app_c.evaluation.autoencoder_percentiles,
+            bootstrap_n=boot_n,
+            seed=eval_seed,
         )
         cm_norm_dict["Autoencoder"] = np.asarray(ae_eval["confusion_matrix_normalized"])
         latency_table["Autoencoder"] = benchmark_model_inference(
@@ -239,6 +273,7 @@ def run_evaluation_suite(
             continue
         ev = supervised_evals[key]
         lat = latency_table.get(display, {})
+        ci = ev.get("f1_macro_ci95", {})
         rows_cmp.append(
             {
                 "Model": display,
@@ -248,6 +283,8 @@ def run_evaluation_suite(
                 "Recall_Weighted": round(ev["recall_weighted"], 4),
                 "F1_Weighted": round(ev["f1_weighted"], 4),
                 "F1_Macro": round(ev["f1_macro"], 4),
+                "F1_Macro_CI95_Low": round(ci.get("ci95_low", ev["f1_macro"]), 4),
+                "F1_Macro_CI95_High": round(ci.get("ci95_high", ev["f1_macro"]), 4),
                 "ROC_AUC": round(ev["roc_auc_macro_ovr"], 4),
                 "PR_AUC": round(ev["pr_auc_macro_ovr"], 4),
                 "Latency_Mean_us": round(lat.get("single_mean_us", 0.0), 2),
@@ -261,6 +298,7 @@ def run_evaluation_suite(
 
     if ae_eval:
         lat_ae = latency_table.get("Autoencoder", {})
+        ae_ci = ae_eval.get("f1_ci95", {})
         rows_cmp.append(
             {
                 "Model": "Autoencoder",
@@ -270,6 +308,8 @@ def run_evaluation_suite(
                 "Recall_Weighted": round(ae_eval["recall"], 4),
                 "F1_Weighted": round(ae_eval["f1"], 4),
                 "F1_Macro": round(ae_eval["f1"], 4),
+                "F1_Macro_CI95_Low": round(ae_ci.get("ci95_low", ae_eval["f1"]), 4),
+                "F1_Macro_CI95_High": round(ae_ci.get("ci95_high", ae_eval["f1"]), 4),
                 "ROC_AUC": round(ae_eval["roc_auc"], 4),
                 "PR_AUC": round(ae_eval["pr_auc"], 4),
                 "Latency_Mean_us": round(lat_ae.get("single_mean_us", 0.0), 2),
@@ -385,6 +425,7 @@ def run_evaluation_suite(
 
     by_day_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
     ablation_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
+    xgb_cv_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
     if not skip_protocols:
         if app_c.evaluation.run_by_day_comparison:
             by_day_res = evaluate_by_day_protocol(
@@ -405,6 +446,15 @@ def run_evaluation_suite(
                 force_synthetic=is_synth,
                 compute_shap=not skip_shap,
             )
+        if app_c.evaluation.run_xgboost_cv:
+            xgb_cv_res = run_xgboost_stratified_cv(
+                app_cfg=app_c,
+                model_cfg=model_c,
+                xgb_params=selected_xgb_params,
+                imbalance_strategy=imb_strategy,
+                n_splits=app_c.evaluation.cv_n_splits,
+                force_synthetic=is_synth,
+            )
 
     full_summary = {
         "dataset_source": prep_audit.get("source", {}),
@@ -417,6 +467,7 @@ def run_evaluation_suite(
         "unseen_attack_protocol": unseen_res,
         "by_day_protocol": by_day_res,
         "feature_ablation": ablation_res,
+        "xgboost_cross_validation": xgb_cv_res,
         "preprocessing_latency": prep_latency,
         "inference_latency": latency_table,
         "shap_summary": shap_summary,

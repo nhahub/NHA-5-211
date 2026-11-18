@@ -15,6 +15,7 @@ from src.data.loader import CICIDS2017_FEATURES, discover_csv_files, generate_sy
 from src.data.preprocessing import (
     DataLeakageError,
     apply_smote_safely,
+    compute_hybrid_smote_class_weights,
     run_preprocessing_pipeline,
     verify_no_leakage,
 )
@@ -241,3 +242,50 @@ def test_by_day_split_and_drop_features(tmp_app_config: AppConfig) -> None:
     assert audit["leakage_checks"]["train_test_exact_overlap"] == 0
     assert audit["leakage_checks"]["train_val_exact_overlap"] == 0
     assert audit["leakage_checks"]["val_test_exact_overlap"] == 0
+
+
+def test_smote_multiplier_cap_and_min_real_samples_threshold() -> None:
+    """SMOTE skips ultra-rare classes below min_real_samples and enforces cap/multiplier bounds."""
+    rng = np.random.default_rng(77)
+    X_imb = np.vstack(
+        [
+            rng.normal(loc=0.0, scale=1.0, size=(500, 8)),
+            rng.normal(loc=3.0, scale=1.0, size=(80, 8)),
+            rng.normal(loc=-3.0, scale=1.0, size=(12, 8)),
+        ]
+    ).astype(np.float32)
+    y_imb = np.array([0] * 500 + [1] * 80 + [2] * 12, dtype=np.int64)
+
+    X_res, y_res, info = apply_smote_safely(
+        X_imb,
+        y_imb,
+        max_k_neighbors=5,
+        cap_per_class=5000,
+        max_multiplier=5.0,
+        min_real_samples=50,
+        seed=42,
+    )
+    counts = np.bincount(y_res)
+    assert info["applied"] is True
+    assert counts[0] == 500
+    assert counts[1] == 400  # 80 * 5.0 = 400 (< cap 5000)
+    assert counts[2] == 12  # 12 < min_real_samples=50 -> skipped by SMOTE
+    assert info["skipped_classes"] == {"2": 12}
+
+    fallback_cw = {0: 0.4, 1: 2.5, 2: 16.0}
+    hybrid_cw = compute_hybrid_smote_class_weights(info, fallback_cw)
+    assert hybrid_cw is not None
+    assert hybrid_cw[0] == 1.0
+    assert hybrid_cw[1] == 1.0
+    assert hybrid_cw[2] > 10.0
+
+    # Absolute cap_per_class takes precedence when smaller than max_multiplier * real size
+    _, y_capped, _ = apply_smote_safely(
+        X_imb,
+        y_imb,
+        cap_per_class=200,
+        max_multiplier=5.0,
+        min_real_samples=50,
+        seed=42,
+    )
+    assert np.bincount(y_capped)[1] == 200

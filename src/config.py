@@ -82,7 +82,9 @@ class ImbalanceConfig(BaseModel):
     strategy: str = "auto_compare"
     smote_sampling_strategy: str = "auto"
     smote_max_k_neighbors: int = Field(default=5, ge=1)
-    smote_cap_per_class: int | None = None
+    smote_cap_per_class: int | None = 5000
+    smote_max_multiplier: float | None = Field(default=5.0, gt=1.0)
+    smote_min_real_samples: int = Field(default=50, ge=2)
 
 
 class DataConfig(BaseModel):
@@ -124,6 +126,10 @@ class EvaluationConfig(BaseModel):
     by_day_keras_epochs: int = Field(default=20, ge=1)
     run_feature_ablation: bool = True
     ablation_drop_features: list[str] = Field(default_factory=lambda: ["Destination Port"])
+    bootstrap_n_resamples: int = Field(default=1000, ge=100)
+    low_support_threshold: int = Field(default=30, ge=1)
+    run_xgboost_cv: bool = True
+    cv_n_splits: int = Field(default=5, ge=2)
 
 
 class ResponseConfig(BaseModel):
