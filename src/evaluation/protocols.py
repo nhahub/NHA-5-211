@@ -202,7 +202,8 @@ def evaluate_by_day_protocol(
     bin_params = {
         k: v
         for k, v in (model_cfg.xgboost.baseline | (xgb_params or {})).items()
-        if k not in {"num_class", "objective", "eval_metric"}
+        if k
+        not in {"num_class", "objective", "eval_metric", "early_stopping_rounds", "random_state", "device"}
     }
     xgb_bin = xgb.XGBClassifier(
         **bin_params,

@@ -31,6 +31,17 @@
   "outlier_values_clipped_train": 37467,
   "outlier_values_clipped_val": 6337,
   "outlier_values_clipped_test": 7437,
+  "post_clip_dedup_removed": {
+    "train_within_split_removed": 0,
+    "val_cross_or_dup_removed": 1,
+    "test_cross_or_dup_removed": 1,
+    "val_scaled_collision_removed": 274,
+    "test_scaled_collision_removed": 366,
+    "total_removed": 642
+  },
+  "split_strategy": "random",
+  "split_day_files": {},
+  "dropped_features": [],
   "removed_columns": [
     "Fwd Header Length.1"
   ],
@@ -52,6 +63,53 @@
     "SSH-Patator",
     "Web Attack"
   ],
+  "split_classes_present": {
+    "train": [
+      "BENIGN",
+      "Bot",
+      "DDoS",
+      "DoS GoldenEye",
+      "DoS Hulk",
+      "DoS Slowhttptest",
+      "DoS slowloris",
+      "FTP-Patator",
+      "Heartbleed",
+      "Infiltration",
+      "PortScan",
+      "SSH-Patator",
+      "Web Attack"
+    ],
+    "validation": [
+      "BENIGN",
+      "Bot",
+      "DDoS",
+      "DoS GoldenEye",
+      "DoS Hulk",
+      "DoS Slowhttptest",
+      "DoS slowloris",
+      "FTP-Patator",
+      "Heartbleed",
+      "Infiltration",
+      "PortScan",
+      "SSH-Patator",
+      "Web Attack"
+    ],
+    "test": [
+      "BENIGN",
+      "Bot",
+      "DDoS",
+      "DoS GoldenEye",
+      "DoS Hulk",
+      "DoS Slowhttptest",
+      "DoS slowloris",
+      "FTP-Patator",
+      "Heartbleed",
+      "Infiltration",
+      "PortScan",
+      "SSH-Patator",
+      "Web Attack"
+    ]
+  },
   "original_class_distribution": {
     "BENIGN": 156481,
     "Bot": 137,
@@ -84,28 +142,35 @@
   },
   "train_post_smote_distribution": {
     "BENIGN": 113056,
-    "Bot": 25000,
-    "DDoS": 25000,
-    "DoS GoldenEye": 25000,
-    "DoS Hulk": 25000,
-    "DoS Slowhttptest": 25000,
-    "DoS slowloris": 25000,
-    "FTP-Patator": 25000,
-    "Heartbleed": 25000,
-    "Infiltration": 25000,
-    "PortScan": 25000,
-    "SSH-Patator": 25000,
-    "Web Attack": 25000
+    "Bot": 495,
+    "DDoS": 6535,
+    "DoS GoldenEye": 2625,
+    "DoS Hulk": 9094,
+    "DoS Slowhttptest": 1385,
+    "DoS slowloris": 1460,
+    "FTP-Patator": 1685,
+    "Heartbleed": 8,
+    "Infiltration": 26,
+    "PortScan": 7590,
+    "SSH-Patator": 1120,
+    "Web Attack": 635
   },
   "split_sizes": {
     "train_raw": 138190,
-    "train_smote": 413056,
-    "validation": 24387,
-    "test": 28691
+    "train_smote": 145714,
+    "validation": 24112,
+    "test": 28324
   },
   "smote": {
     "applied": true,
     "k_neighbors": 5,
+    "min_real_samples": 50,
+    "cap_per_class": 5000,
+    "max_multiplier": 5.0,
+    "skipped_classes": {
+      "8": 8,
+      "9": 26
+    },
     "pre_counts": {
       "0": 113056,
       "1": 99,
@@ -123,32 +188,46 @@
     },
     "post_counts": {
       "0": 113056,
-      "1": 25000,
-      "2": 25000,
-      "3": 25000,
-      "4": 25000,
-      "5": 25000,
-      "6": 25000,
-      "7": 25000,
-      "8": 25000,
-      "9": 25000,
-      "10": 25000,
-      "11": 25000,
-      "12": 25000
+      "1": 495,
+      "2": 6535,
+      "3": 2625,
+      "4": 9094,
+      "5": 1385,
+      "6": 1460,
+      "7": 1685,
+      "8": 8,
+      "9": 26,
+      "10": 7590,
+      "11": 1120,
+      "12": 635
     },
     "rows_before": 138190,
-    "rows_after": 413056
+    "rows_after": 145714,
+    "skipped_classes_named": {
+      "Heartbleed": 8,
+      "Infiltration": 26
+    },
+    "hybrid_class_weights_named": {
+      "Heartbleed": 196.5625,
+      "Infiltration": 60.4808
+    }
   },
   "leakage_checks": {
     "train_standardized_max_abs_mean": 0.0,
-    "val_mean_shift_observed": 0.016238,
-    "train_test_exact_overlap_sample": 123,
-    "train_val_exact_overlap_sample": 112,
-    "val_max_min_class_ratio": 19952.0,
-    "test_max_min_class_ratio": 11736.5,
+    "val_mean_shift_observed": 0.014484,
+    "train_test_exact_overlap_sample": 0,
+    "train_val_exact_overlap_sample": 0,
+    "val_test_exact_overlap_sample": 0,
+    "train_test_exact_overlap": 0,
+    "train_val_exact_overlap": 0,
+    "val_test_exact_overlap": 0,
+    "checked_full_splits": true,
+    "strict_mode": true,
+    "val_max_min_class_ratio": 19679.0,
+    "test_max_min_class_ratio": 11556.0,
     "scaler_n_samples_seen": 138190,
     "scaler_fit_strictly_on_train": true,
-    "passed": false
+    "passed": true
   },
   "cleaning_details": {
     "initial_rows": 200000,
@@ -162,6 +241,7 @@
     "duplicate_columns_removed": [
       "Fwd Header Length.1"
     ],
+    "dropped_features_removed": [],
     "rare_classes_dropped": {},
     "label_mapping_applied": {
       "Web Attack - Brute Force": "Web Attack",

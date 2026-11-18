@@ -1,5 +1,8 @@
-Model,Evaluation_Framing,Accuracy,Precision_Weighted,Recall_Weighted,F1_Weighted,F1_Macro,ROC_AUC,PR_AUC,Latency_Mean_us,Latency_Median_us,Latency_P95_us,Samples_Per_Sec,Model_Size_MB,Training_Duration_s
-MLP,13-class supervised,0.9633,0.9785,0.9633,0.9692,0.8076,0.9965,0.8919,5054.23,5001.15,5684.65,23584.7,2.534,361.81
-1D-CNN,13-class supervised,0.9849,0.9945,0.9849,0.9892,0.8281,0.9979,0.9089,10128.19,10166.85,11056.85,16945.0,1.31,2604.57
-XGBoost,13-class supervised,0.9989,0.9989,0.9989,0.9989,0.9704,0.9995,0.9908,516.82,501.15,621.49,263650.3,2.727,149.38
-Autoencoder,Binary anomaly (Benign vs Anomalous),0.8688,0.6863,0.5132,0.5873,0.5873,0.8393,0.6642,6335.78,6304.5,6938.95,24713.7,1.548,36.54
+Model,Evaluation_Framing,Accuracy,Precision_Weighted,Recall_Weighted,F1_Weighted,F1_Macro,F1_Macro_CI95_Low,F1_Macro_CI95_High,ROC_AUC,PR_AUC,Latency_Mean_us,Latency_Median_us,Latency_P95_us,Samples_Per_Sec,Model_Size_MB,Training_Duration_s
+MLP,13-class supervised,0.9767,0.9784,0.9767,0.9772,0.7592,0.6849,0.7923,0.9942,0.8421,281.89,240.75,540.79,15585.5,2.534,121.9
+1D-CNN,13-class supervised,0.9904,0.9925,0.9904,0.9913,0.8447,0.7649,0.8819,0.9933,0.8752,978.05,943.45,1245.5,9001.1,1.31,1031.38
+XGBoost,13-class supervised,0.9989,0.9989,0.9989,0.9988,0.9594,0.9,0.9833,0.9996,0.9939,2301.3,514.0,1358.5,234907.3,3.338,224.92
+Autoencoder,Binary anomaly (Benign vs Anomalous),0.8678,0.689,0.513,0.5881,0.5881,0.5759,0.6001,0.8384,0.6651,693.31,671.85,875.93,16344.5,1.548,73.85
+Isolation Forest,Binary anomaly (Benign vs Anomalous),0.8385,0.6085,0.3438,0.4394,0.4394,0.4253,0.4531,0.771,0.5005,9790.02,9254.1,12453.39,65464.5,2.096,0.81
+One-Class SVM,Binary anomaly (Benign vs Anomalous),0.869,0.696,0.5117,0.5898,0.5898,0.577,0.602,0.7467,0.5649,251.27,164.1,543.07,18114.6,0.478,2.52
+LOF,Binary anomaly (Benign vs Anomalous),0.8421,0.6178,0.3724,0.4647,0.4647,0.4516,0.4775,0.8607,0.5391,1598.18,1401.95,2408.75,35777.2,5.666,0.57
