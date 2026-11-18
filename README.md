@@ -1,6 +1,6 @@
 # SMART IDS v3
 
-**An Intelligent, Multi-Modal Hybrid Ensemble Architecture for Network Intrusion Detection and Zero-Day Anomaly Tracking**
+**Multi-Model Network Intrusion Detection with Zero-Day Anomaly Tracking**
 
 Academic Graduation Project — Built to the accompanying project technical specification (provided separately outside this repository) with split-isolated CICIDS2017 preprocessing (post-clipping cross-split deduplication and `strict_leakage_check` enforcement), CUDA/CPU adaptive XGBoost + TensorFlow/Keras models, classical anomaly baselines, SHAP explainability, dry-run active mitigation, CI automation, and a 7-tab Streamlit SOC dashboard.
 
@@ -10,7 +10,7 @@ Academic Graduation Project — Built to the accompanying project technical spec
 
 **SMART IDS v3** integrates supervised intrusion attribution, unsupervised novelty tracking, explainable AI (XAI), and safe dry-run mitigation across modular packages:
 
-- **Supervised Models:** `XGBoost` (CUDA/CPU, Optuna TPE), `MLP` (`512→256→128→64`), and `1D-CNN` evaluated independently and via calibration-aware ensembling (`best_single`, `val_weighted_voting`, validation `stacking`, and `hybrid_anomaly_override`).
+- **Supervised Models:** `XGBoost` (CUDA/CPU, Optuna TPE), `MLP` (`512→256→128→64`), and `1D-CNN` evaluated independently and compared against ensemble rules (`best_single`, `val_weighted_voting`, validation `stacking`, and `hybrid_anomaly_override`, defaulting to standalone `XGBoost` when multi-model fusion shows no statistically significant gain).
 - **Orthogonal Zero-Day Tracking:** `Autoencoder` trained exclusively on `BENIGN` traffic and benchmarked against **Isolation Forest**, **One-Class SVM**, and **Local Outlier Factor** across identical benign validation percentiles (`90, 95, 97, 99`) plus a Leave-One-Attack-Out unseen-attack protocol.
 - **Zero-Leakage Pipeline:** Stateless cleaning precedes stratified (`random`) or temporal (`by_day`) splitting; imputers, 5-sigma clippers, scalers, and SMOTE fit strictly on `train`, followed by post-clipping/post-scaling overlap removal enforced by `strict_leakage_check`.
 - **Canonical Response & SOC UI:** Shared dry-run `ActiveResponseEngine` with `ipaddress` validation and append-only audit logs surfaced through `app.py`.
@@ -67,15 +67,15 @@ docker run --rm -p 8501:8501 smart-ids-v3
 
 | Model | Framing | Accuracy | Precision (W) | Recall (W) | F1 (W) | F1 (Macro) | ROC-AUC | Mean / Median Latency (µs) | Batch Throughput (flows/s) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| **XGBoost (Baseline)** | 13-class supervised | **0.9989** | **0.9989** | **0.9989** | **0.9988** | **0.9594** | **0.9996** | 2,153.79 / 578.30 | **205,731.3** |
-| **1D-CNN** | 13-class supervised | 0.9904 | 0.9925 | 0.9904 | 0.9913 | 0.8447 | 0.9933 | 1,036.03 / 967.70 | 11,091.3 |
-| **MLP** | 13-class supervised | 0.9767 | 0.9784 | 0.9767 | 0.9772 | 0.7592 | 0.9942 | **314.57** / **270.70** | 13,175.8 |
-| **Autoencoder** | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.8384 | 336.88 / **270.20** | 14,135.2 |
-| **One-Class SVM** | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.7467 | **314.68** / 298.35 | 16,024.8 |
-| **LOF** | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.8607 | 1,743.21 / 1,683.65 | 34,474.6 |
-| **Isolation Forest** | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.7710 | 13,371.07 / 12,691.25 | 42,900.5 |
+| **XGBoost (Baseline)** | 13-class supervised | **0.9989** | **0.9989** | **0.9989** | **0.9988** | **0.9594** | **0.9996** | 1,792.22 / 448.00 | **201,374.0** |
+| **1D-CNN** | 13-class supervised | 0.9904 | 0.9925 | 0.9904 | 0.9913 | 0.8447 | 0.9933 | 756.79 / 703.20 | 17,222.4 |
+| **MLP** | 13-class supervised | 0.9767 | 0.9784 | 0.9767 | 0.9772 | 0.7592 | 0.9942 | 211.01 / 200.95 | 22,333.4 |
+| **Autoencoder** | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.8384 | 260.52 / 218.65 | 23,923.2 |
+| **One-Class SVM** | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.7467 | **159.35** / **149.10** | 21,602.8 |
+| **LOF** | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.8607 | 1,355.94 / 1,262.00 | 44,512.4 |
+| **Isolation Forest** | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.7710 | 8,074.94 / 7,952.35 | 69,437.9 |
 
-- **Cross-Validation, Calibration & Stacking:** 5-fold stratified CV on `162,577` dev rows gave `0.9670 ± 0.0076` Macro-F1 for `XGBoost` (`95%` test bootstrap CI `[0.9000, 0.9833]`). Optuna tuning (`+0.0120` val Macro-F1) stayed within baseline CV std (`0.0470`), so CV-std gating retained `baseline`. Validation temperature scaling found `T = 0.8777` (`MLP`), `0.8749` (`1D-CNN`), and `0.9429` (`XGBoost`); validation log-probability `stacking` reached Test Macro-F1 **`0.9661`** (`+0.0067` over `XGBoost`), while unweighted/weighted probability voting trailed standalone `XGBoost` (`0.9000–0.9284`).
+- **Cross-Validation, Calibration & Stacking Significance:** 5-fold stratified CV on `162,577` dev rows gave `0.9670 ± 0.0076` Macro-F1 for `XGBoost` (`95%` test bootstrap CI `[0.9000, 0.9833]`). Optuna tuning (`+0.0120` val Macro-F1) stayed within baseline CV std (`0.0470`), so CV-std gating retained `baseline`. Validation temperature scaling found `T = 0.8777` (`MLP`), `0.8749` (`1D-CNN`), and `0.9429` (`XGBoost`). Validation log-probability `stacking` (Test Macro-F1 `0.9661`) is comparable to standalone `XGBoost` (`0.9594`), difference not statistically significant (paired bootstrap `n=1000`: observed delta `+0.0067`, mean diff `+0.0079`, `95%` CI `[-0.0087, +0.0478]` includes `0`), while probability-voting variants (`0.9000–0.9284`) scored significantly lower (`CI` excludes `0`).
 - **Temporal Generalization (`by_day`):** With Mon–Wed training and Thu–Fri unseen attack classes (`Bot`, `DDoS`, `Infiltration`, `PortScan`, `Web Attack`), closed-set multi-class Macro-F1 dropped to `0.0782` (`XGBoost`), while cross-day binary detection reached `F1 = 0.4676` (`Autoencoder`, ROC-AUC `0.8784`) and `0.4435` (`XGBoost 1 - P_Benign`, precision `0.9989`, recall `0.2851`).
 
 ### Evaluation Caveats

@@ -17,10 +17,7 @@ class ProjectSettings(BaseModel):
     """Top-level project metadata."""
 
     name: str = "SMART IDS v3"
-    subtitle: str = (
-        "An Intelligent, Multi-Modal Hybrid Ensemble Architecture for "
-        "Network Intrusion Detection and Zero-Day Anomaly Tracking"
-    )
+    subtitle: str = "Multi-Model Intrusion Detection with Zero-Day Anomaly Tracking"
     version: str = "3.0.0"
     random_seed: int = 42
 

@@ -26,6 +26,7 @@ from src.evaluation.metrics import (
     bootstrap_macro_f1_ci,
     evaluate_anomaly_detector,
     evaluate_supervised_model,
+    paired_bootstrap_macro_f1_test,
 )
 from src.evaluation.protocols import (
     assert_ablation_row_parity,
@@ -33,7 +34,7 @@ from src.evaluation.protocols import (
     evaluate_feature_ablation,
     run_xgboost_stratified_cv,
 )
-from src.evaluation.report_writer import write_academic_reports
+from src.evaluation.report_writer import format_ensemble_empirical_conclusion, write_academic_reports
 from src.models.autoencoder import (
     build_autoencoder,
     calibrate_threshold,
@@ -560,3 +561,85 @@ def test_classical_anomaly_baselines_and_unified_evaluation(tmp_app_config: AppC
     )
     assert "Unsupervised Anomaly Detector Baselines" in cmp_path.read_text(encoding="utf-8")
     assert "Unsupervised Anomaly Detection & Classical Baselines" in exp_path.read_text(encoding="utf-8")
+
+
+def test_paired_bootstrap_significance_and_report_conclusion(tmp_path: Path) -> None:
+    """Paired bootstrap detects significant vs overlapping differences and drives report text cleanly."""
+    y_true = np.array(([0] * 60) + ([1] * 30) + ([2] * 30), dtype=np.int64)
+    y_base = y_true.copy()
+    # Baseline misclassifies 18 minority-class rows consistently -> clearly weaker Macro-F1
+    y_base[60:78] = 0
+    y_cand_sig = y_true.copy()
+
+    sig_res = paired_bootstrap_macro_f1_test(
+        y_true=y_true,
+        y_pred_candidate=y_cand_sig,
+        y_pred_baseline=y_base,
+        num_classes=3,
+        n_bootstrap=400,
+        seed=42,
+    )
+    assert sig_res["observed_diff"] > 0.05
+    assert sig_res["ci95_low"] > 0.0
+    assert sig_res["statistically_significant"] is True
+
+    # Overlapping / tiny opposing errors yield CI spanning zero (not significant)
+    y_cand_tie = y_true.copy()
+    y_cand_tie[60:64] = 2
+    y_base_tie = y_true.copy()
+    y_base_tie[90:94] = 1
+    tie_res = paired_bootstrap_macro_f1_test(
+        y_true=y_true,
+        y_pred_candidate=y_cand_tie,
+        y_pred_baseline=y_base_tie,
+        num_classes=3,
+        n_bootstrap=400,
+        seed=42,
+    )
+    assert tie_res["ci95_low"] <= 0.0 <= tie_res["ci95_high"]
+    assert tie_res["statistically_significant"] is False
+
+    # Report generator uses paired bootstrap significance to enforce honest Empirical Conclusion wording
+    ns_analysis = {
+        "best_single_model": "XGBoost",
+        "best_single_f1_macro": 0.9594,
+        "best_ensemble_strategy": "stacking",
+        "best_ensemble_f1_macro": 0.9661,
+        "delta_vs_best_single": 0.0067,
+        "paired_bootstrap_vs_best_single": {"stacking": tie_res},
+        "paired_bootstrap_stacking_vs_all": {"stacking_vs_soft_voting": sig_res},
+    }
+    ns_text = format_ensemble_empirical_conclusion(ns_analysis)
+    assert "comparable to XGBoost, difference not statistically significant" in ns_text
+    assert "outperforming" not in ns_text.lower()
+
+    cmp_path, _ = write_academic_reports(
+        summary={
+            "dataset_source": {"is_synthetic": True},
+            "ensemble_comparison": {
+                "best_single": {"f1_macro": 0.9594},
+                "stacking": {"f1_macro": 0.9661},
+            },
+            "ensemble_analysis": ns_analysis,
+            "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+            "training_diagnostics": {},
+        },
+        comparison_df=pd.DataFrame([{"Model": "XGBoost", "F1_Macro": 0.9594}]),
+        reports_dir=tmp_path / "rep_ns",
+    )
+    md_ns = cmp_path.read_text(encoding="utf-8")
+    assert "Paired Bootstrap Macro-F1 Significance" in md_ns
+    assert "comparable to XGBoost, difference not statistically significant" in md_ns
+    assert "outperforming" not in md_ns.lower()
+
+    sig_analysis = {
+        "best_single_model": "XGBoost",
+        "best_single_f1_macro": 0.85,
+        "best_ensemble_strategy": "stacking",
+        "best_ensemble_f1_macro": 0.98,
+        "delta_vs_best_single": 0.13,
+        "paired_bootstrap_vs_best_single": {"stacking": sig_res},
+    }
+    sig_text = format_ensemble_empirical_conclusion(sig_analysis)
+    assert "statistically significant, CI excludes 0" in sig_text
+    assert "outperforming" not in sig_text.lower()

@@ -31,6 +31,17 @@ from src.models.ensemble import compute_ece, compute_multiclass_brier
 from src.training.callbacks import build_keras_callbacks
 
 
+def _macro_f1_from_codes(codes: np.ndarray, idx: np.ndarray, num_classes: int) -> float:
+    """Compute Macro-F1 across present classes from pre-encoded (y_true * K + y_pred) values."""
+    cm = np.bincount(codes[idx], minlength=num_classes * num_classes).reshape(num_classes, num_classes)
+    tp = np.diag(cm)
+    denom = cm.sum(axis=0) + cm.sum(axis=1)
+    present = denom > 0
+    if not np.any(present):
+        return 0.0
+    return float(np.mean(2.0 * tp[present] / denom[present]))
+
+
 def bootstrap_macro_f1_ci(
     y_true: np.ndarray,
     y_pred: np.ndarray,
@@ -47,26 +58,69 @@ def bootstrap_macro_f1_ci(
 
     rng = np.random.default_rng(seed)
     codes = y_t * num_classes + y_p
-    k_sq = num_classes * num_classes
     scores = np.empty(n_bootstrap, dtype=np.float64)
     for b in range(n_bootstrap):
         idx = rng.integers(0, n, size=n)
-        cm = np.bincount(codes[idx], minlength=k_sq).reshape(num_classes, num_classes)
-        tp = np.diag(cm)
-        denom = cm.sum(axis=0) + cm.sum(axis=1)
-        present = denom > 0
-        if not np.any(present):
-            scores[b] = 0.0
-            continue
-        f1_cls = np.zeros(num_classes, dtype=np.float64)
-        f1_cls[present] = 2.0 * tp[present] / denom[present]
-        scores[b] = float(np.mean(f1_cls[present]))
+        scores[b] = _macro_f1_from_codes(codes, idx, num_classes)
 
     return {
         "mean": float(np.mean(scores)),
         "std": float(np.std(scores, ddof=1)) if n_bootstrap > 1 else 0.0,
         "ci95_low": float(np.percentile(scores, 2.5)),
         "ci95_high": float(np.percentile(scores, 97.5)),
+        "n_bootstrap": int(n_bootstrap),
+    }
+
+
+def paired_bootstrap_macro_f1_test(
+    y_true: np.ndarray,
+    y_pred_candidate: np.ndarray,
+    y_pred_baseline: np.ndarray,
+    num_classes: int,
+    n_bootstrap: int = 1000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Compare candidate vs. baseline Macro-F1 using identical paired bootstrap resamples."""
+    y_t = np.asarray(y_true, dtype=np.int64)
+    y_c = np.asarray(y_pred_candidate, dtype=np.int64)
+    y_b = np.asarray(y_pred_baseline, dtype=np.int64)
+    n = len(y_t)
+    if n == 0 or num_classes <= 0 or n_bootstrap <= 0:
+        return {
+            "observed_diff": 0.0,
+            "mean_diff": 0.0,
+            "std_diff": 0.0,
+            "ci95_low": 0.0,
+            "ci95_high": 0.0,
+            "statistically_significant": False,
+            "n_bootstrap": 0,
+        }
+
+    codes_cand = y_t * num_classes + y_c
+    codes_base = y_t * num_classes + y_b
+    full_idx = np.arange(n, dtype=np.int64)
+    observed_diff = float(
+        _macro_f1_from_codes(codes_cand, full_idx, num_classes)
+        - _macro_f1_from_codes(codes_base, full_idx, num_classes)
+    )
+
+    rng = np.random.default_rng(seed)
+    diffs = np.empty(n_bootstrap, dtype=np.float64)
+    for b in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        diffs[b] = _macro_f1_from_codes(codes_cand, idx, num_classes) - _macro_f1_from_codes(
+            codes_base, idx, num_classes
+        )
+
+    ci_low = float(np.percentile(diffs, 2.5))
+    ci_high = float(np.percentile(diffs, 97.5))
+    return {
+        "observed_diff": observed_diff,
+        "mean_diff": float(np.mean(diffs)),
+        "std_diff": float(np.std(diffs, ddof=1)) if n_bootstrap > 1 else 0.0,
+        "ci95_low": ci_low,
+        "ci95_high": ci_high,
+        "statistically_significant": bool(ci_low > 0.0 or ci_high < 0.0),
         "n_bootstrap": int(n_bootstrap),
     }
 

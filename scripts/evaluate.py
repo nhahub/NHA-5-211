@@ -26,13 +26,14 @@ from src.evaluation.metrics import (
     evaluate_autoencoder,
     evaluate_supervised_model,
     evaluate_unseen_attack_protocol,
+    paired_bootstrap_macro_f1_test,
 )
 from src.evaluation.protocols import (
     evaluate_by_day_protocol,
     evaluate_feature_ablation,
     run_xgboost_stratified_cv,
 )
-from src.evaluation.report_writer import write_academic_reports
+from src.evaluation.report_writer import format_ensemble_empirical_conclusion, write_academic_reports
 from src.evaluation.visualizations import (
     plot_autoencoder_diagnostics,
     plot_confusion_matrices,
@@ -223,6 +224,7 @@ def run_evaluation_suite(
         stacker=stacker,
     )
     ensemble_comparison: dict[str, dict[str, Any]] = {}
+    ensemble_preds: dict[str, np.ndarray] = {}
     for strat in (
         "best_single",
         "soft_voting",
@@ -231,6 +233,7 @@ def run_evaluation_suite(
         "stacking",
     ):
         ens_probs, eff_name = ensemble_engine.combine_probabilities(supervised_probas, strategy=strat)
+        ensemble_preds[strat] = np.argmax(ens_probs, axis=1)
         ens_eval = evaluate_supervised_model(
             y_test,
             ens_probs,
@@ -252,29 +255,56 @@ def run_evaluation_suite(
     fusion_keys = [k for k in ensemble_comparison if k != "best_single"]
     best_fusion = max(fusion_keys, key=lambda k: ensemble_comparison[k]["f1_macro"], default="soft_voting")
     best_fusion_f1 = float(ensemble_comparison.get(best_fusion, {}).get("f1_macro", 0.0))
-    ens_beats = best_fusion_f1 > best_single_f1
     delta_ens = best_fusion_f1 - best_single_f1
-    if ens_beats:
-        honest_verdict = (
-            f"Ensemble fusion '{best_fusion}' achieved Test Macro-F1={best_fusion_f1:.4f}, "
-            f"outperforming best_single ({best_single}={best_single_f1:.4f}) by {delta_ens:+.4f}."
-        )
-    else:
-        honest_verdict = (
-            f"No ensemble fusion strategy beat standalone {best_single} (Macro-F1={best_single_f1:.4f}): "
-            f"best fusion was '{best_fusion}' ({best_fusion_f1:.4f}, delta={delta_ens:+.4f}). "
-            f"Retaining {best_single} for supervised attribution while keeping the Autoencoder orthogonal."
-        )
-    ensemble_analysis = {
+
+    paired_n = int(boot_n) if boot_n > 0 else 1000
+    paired_vs_best: dict[str, dict[str, Any]] = {}
+    if "best_single" in ensemble_preds:
+        for strat in ensemble_preds:
+            if strat == "best_single":
+                continue
+            paired_vs_best[strat] = paired_bootstrap_macro_f1_test(
+                y_true=y_test,
+                y_pred_candidate=ensemble_preds[strat],
+                y_pred_baseline=ensemble_preds["best_single"],
+                num_classes=len(class_names),
+                n_bootstrap=paired_n,
+                seed=eval_seed,
+            )
+
+    paired_stacking_vs_all: dict[str, dict[str, Any]] = {}
+    if "stacking" in ensemble_preds:
+        for other in ensemble_preds:
+            if other == "stacking":
+                continue
+            paired_stacking_vs_all[f"stacking_vs_{other}"] = paired_bootstrap_macro_f1_test(
+                y_true=y_test,
+                y_pred_candidate=ensemble_preds["stacking"],
+                y_pred_baseline=ensemble_preds[other],
+                num_classes=len(class_names),
+                n_bootstrap=paired_n,
+                seed=eval_seed,
+            )
+
+    ens_beats = bool(
+        best_fusion_f1 > best_single_f1
+        and paired_vs_best.get(best_fusion, {}).get("statistically_significant", False)
+    )
+    ensemble_analysis: dict[str, Any] = {
         "best_single_model": best_single,
         "best_single_f1_macro": round(best_single_f1, 6),
         "best_ensemble_strategy": best_fusion,
         "best_ensemble_f1_macro": round(best_fusion_f1, 6),
-        "ensemble_beats_best_single": bool(ens_beats),
+        "ensemble_beats_best_single": ens_beats,
+        "stacking_vs_best_single_significant": bool(
+            paired_vs_best.get("stacking", {}).get("statistically_significant", False)
+        ),
         "delta_vs_best_single": round(delta_ens, 6),
         "val_weights": stacker.val_weights if stacker else {},
-        "honest_verdict": honest_verdict,
+        "paired_bootstrap_vs_best_single": paired_vs_best,
+        "paired_bootstrap_stacking_vs_all": paired_stacking_vs_all,
     }
+    ensemble_analysis["honest_verdict"] = format_ensemble_empirical_conclusion(ensemble_analysis)
 
     # 3. Evaluate Autoencoder & Classical Benign-Only Anomaly Baselines + Unseen-Attack Protocol
     ae_eval: dict[str, Any] = {}

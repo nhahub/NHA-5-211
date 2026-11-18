@@ -11,13 +11,13 @@
 
 | Model | Evaluation_Framing | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro | F1_Macro_CI95_Low | F1_Macro_CI95_High | ROC_AUC | PR_AUC | Latency_Mean_us | Latency_Median_us | Latency_P95_us | Samples_Per_Sec | Model_Size_MB | Training_Duration_s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MLP | 13-class supervised | 0.9767 | 0.9784 | 0.9767 | 0.9772 | 0.7592 | 0.6849 | 0.7923 | 0.9942 | 0.8421 | 314.5700 | 270.7000 | 581.8300 | 13175.8000 | 2.5340 | 121.9000 |
-| 1D-CNN | 13-class supervised | 0.9904 | 0.9925 | 0.9904 | 0.9913 | 0.8447 | 0.7649 | 0.8819 | 0.9933 | 0.8752 | 1036.0300 | 967.7000 | 1366.2800 | 11091.3000 | 1.3100 | 1031.3800 |
-| XGBoost | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9594 | 0.9000 | 0.9833 | 0.9996 | 0.9939 | 2153.7900 | 578.3000 | 1586.6400 | 205731.3000 | 3.3380 | 224.9200 |
-| Autoencoder | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.5759 | 0.6001 | 0.8384 | 0.6651 | 336.8800 | 270.2000 | 683.4700 | 14135.2000 | 1.5480 | 73.8500 |
-| Isolation Forest | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 13371.0700 | 12691.2500 | 18341.9800 | 42900.5000 | 2.0960 | 0.8100 |
-| One-Class SVM | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 314.6800 | 298.3500 | 574.6100 | 16024.8000 | 0.4780 | 2.5200 |
-| LOF | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1743.2100 | 1683.6500 | 2470.7600 | 34474.6000 | 5.6660 | 0.5700 |
+| MLP | 13-class supervised | 0.9767 | 0.9784 | 0.9767 | 0.9772 | 0.7592 | 0.6849 | 0.7923 | 0.9942 | 0.8421 | 211.0100 | 200.9500 | 274.2100 | 22333.4000 | 2.5340 | 121.9000 |
+| 1D-CNN | 13-class supervised | 0.9904 | 0.9925 | 0.9904 | 0.9913 | 0.8447 | 0.7649 | 0.8819 | 0.9933 | 0.8752 | 756.7900 | 703.2000 | 1110.4400 | 17222.4000 | 1.3100 | 1031.3800 |
+| XGBoost | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9594 | 0.9000 | 0.9833 | 0.9996 | 0.9939 | 1792.2200 | 448.0000 | 930.9900 | 201374.0000 | 3.3380 | 224.9200 |
+| Autoencoder | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.5759 | 0.6001 | 0.8384 | 0.6651 | 260.5200 | 218.6500 | 457.2900 | 23923.2000 | 1.5480 | 73.8500 |
+| Isolation Forest | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 8074.9400 | 7952.3500 | 9187.7800 | 69437.9000 | 2.0960 | 0.8100 |
+| One-Class SVM | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 159.3500 | 149.1000 | 238.8700 | 21602.8000 | 0.4780 | 2.5200 |
+| LOF | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1355.9400 | 1262.0000 | 2080.2800 | 44512.4000 | 5.6660 | 0.5700 |
 
 
 - **XGBoost Macro-F1 (95% Bootstrap CI, n=1000):** `0.9594` (`[0.9000, 0.9833]`, bootstrap std=`0.0192`)
@@ -175,7 +175,29 @@
 | stacking | 0.9987 | 0.9661 | 0.9987 | 0.9991 | 0.0007 |
 
 
-- **Empirical Conclusion:** Ensemble fusion 'stacking' achieved Test Macro-F1=0.9661, outperforming best_single (XGBoost=0.9594) by +0.0067.
+### Paired Bootstrap Macro-F1 Significance vs. Best Single (`XGBoost`)
+
+
+| Strategy_vs_BestSingle | Observed_Diff | Mean_Diff | CI95_Low | CI95_High | Statistically_Significant | N_Bootstrap |
+| --- | --- | --- | --- | --- | --- | --- |
+| soft_voting | -0.0594 | -0.0637 | -0.1280 | -0.0292 | True | 1000 |
+| confidence_weighted | -0.0309 | -0.0346 | -0.0932 | -0.0078 | True | 1000 |
+| val_weighted_voting | -0.0581 | -0.0624 | -0.1265 | -0.0280 | True | 1000 |
+| stacking | 0.0067 | 0.0079 | -0.0087 | 0.0478 | False | 1000 |
+
+
+### Paired Bootstrap Macro-F1 Comparison: Stacking vs. Other Strategies
+
+
+| Comparison | Observed_Diff | Mean_Diff | CI95_Low | CI95_High | Statistically_Significant | N_Bootstrap |
+| --- | --- | --- | --- | --- | --- | --- |
+| stacking_vs_best_single | 0.0067 | 0.0079 | -0.0087 | 0.0478 | False | 1000 |
+| stacking_vs_soft_voting | 0.0661 | 0.0716 | 0.0292 | 0.1426 | True | 1000 |
+| stacking_vs_confidence_weighted | 0.0376 | 0.0425 | 0.0069 | 0.1100 | True | 1000 |
+| stacking_vs_val_weighted_voting | 0.0647 | 0.0703 | 0.0281 | 0.1421 | True | 1000 |
+
+
+- **Empirical Conclusion:** Ensemble fusion 'stacking' (Test Macro-F1=0.9661) is comparable to XGBoost, difference not statistically significant (XGBoost=0.9594; observed delta=+0.0067, paired bootstrap n=1000 mean diff=+0.0079, 95% CI=[-0.0087, +0.0478] includes 0; statistically_significant=False). Standalone XGBoost is kept as the supervised default with the Autoencoder orthogonal.
 
 
 ## 7. Unsupervised Anomaly Detector Baselines (Benign-Only Training)
@@ -235,4 +257,4 @@ Tabular CICFlowMeter features do not form a physical time series; 1D convolution
 
 ## 10. Preprocessing vs. Model Inference Latency
 
-- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** mean = `1464.69 µs`, median = `1184.80 µs`, P95 = `2666.32 µs` (`682.7` flows/sec).
+- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** mean = `860.56 µs`, median = `825.30 µs`, P95 = `1050.75 µs` (`1162.0` flows/sec).

@@ -8,6 +8,53 @@ from typing import Any
 import pandas as pd
 
 
+def format_ensemble_empirical_conclusion(ens_analysis: dict[str, Any]) -> str:
+    """Generate the ensemble empirical conclusion directly from paired bootstrap test results."""
+    best_single = str(ens_analysis.get("best_single_model", "XGBoost"))
+    best_single_f1 = float(ens_analysis.get("best_single_f1_macro", 0.0))
+    best_fusion = str(ens_analysis.get("best_ensemble_strategy", "stacking"))
+    best_fusion_f1 = float(ens_analysis.get("best_ensemble_f1_macro", 0.0))
+    delta_obs = float(ens_analysis.get("delta_vs_best_single", best_fusion_f1 - best_single_f1))
+
+    paired_vs_best = ens_analysis.get("paired_bootstrap_vs_best_single", {}) or {}
+    target_key = "stacking" if "stacking" in paired_vs_best else best_fusion
+    test_res = paired_vs_best.get(target_key)
+
+    if isinstance(test_res, dict) and test_res.get("n_bootstrap", 0) > 0:
+        obs_d = float(test_res.get("observed_diff", delta_obs))
+        mean_d = float(test_res.get("mean_diff", obs_d))
+        ci_lo = float(test_res.get("ci95_low", 0.0))
+        ci_hi = float(test_res.get("ci95_high", 0.0))
+        sig = bool(test_res.get("statistically_significant", ci_lo > 0.0 or ci_hi < 0.0))
+        n_boot = int(test_res.get("n_bootstrap", 1000))
+        if sig and mean_d > 0.0:
+            return (
+                f"Ensemble fusion '{target_key}' achieved Test Macro-F1={best_fusion_f1:.4f} vs. "
+                f"{best_single}={best_single_f1:.4f} (paired bootstrap n={n_boot}, mean diff={mean_d:+.4f}, "
+                f"95% CI=[{ci_lo:+.4f}, {ci_hi:+.4f}]; statistically significant, CI excludes 0)."
+            )
+        if sig and mean_d < 0.0:
+            return (
+                f"Ensemble fusion '{target_key}' (Test Macro-F1={best_fusion_f1:.4f}) scored below standalone "
+                f"{best_single} ({best_single_f1:.4f}; paired bootstrap n={n_boot}, mean diff={mean_d:+.4f}, "
+                f"95% CI=[{ci_lo:+.4f}, {ci_hi:+.4f}]; statistically significant, CI excludes 0). "
+                f"Standalone {best_single} is retained for supervised attribution with the Autoencoder orthogonal."
+            )
+        return (
+            f"Ensemble fusion '{target_key}' (Test Macro-F1={best_fusion_f1:.4f}) is comparable to "
+            f"{best_single}, difference not statistically significant ({best_single}={best_single_f1:.4f}; "
+            f"observed delta={obs_d:+.4f}, paired bootstrap n={n_boot} mean diff={mean_d:+.4f}, "
+            f"95% CI=[{ci_lo:+.4f}, {ci_hi:+.4f}] includes 0; statistically_significant=False). "
+            f"Standalone {best_single} is kept as the supervised default with the Autoencoder orthogonal."
+        )
+
+    return (
+        f"Ensemble fusion '{best_fusion}' (Test Macro-F1={best_fusion_f1:.4f}) is comparable to "
+        f"{best_single}, difference not statistically significant without a paired bootstrap test excluding 0 "
+        f"({best_single}={best_single_f1:.4f}, delta={delta_obs:+.4f})."
+    )
+
+
 def _df_to_markdown(df: pd.DataFrame) -> str:
     """Format a DataFrame as a GitHub-Flavored Markdown table without external dependencies."""
     if df.empty:
@@ -257,8 +304,43 @@ def write_academic_reports(
     if ens:
         ens_df = pd.DataFrame(ens).T.reset_index(names="Strategy")
         comp_lines.append(_df_to_markdown(ens_df) + "\n\n")
-    if ens_analysis.get("honest_verdict"):
-        comp_lines.append(f"- **Empirical Conclusion:** {ens_analysis['honest_verdict']}\n\n")
+    paired_best = ens_analysis.get("paired_bootstrap_vs_best_single", {}) or {}
+    if paired_best:
+        pb_rows = [
+            {
+                "Strategy_vs_BestSingle": strat,
+                "Observed_Diff": float(vals.get("observed_diff", 0.0)),
+                "Mean_Diff": float(vals.get("mean_diff", 0.0)),
+                "CI95_Low": float(vals.get("ci95_low", 0.0)),
+                "CI95_High": float(vals.get("ci95_high", 0.0)),
+                "Statistically_Significant": bool(vals.get("statistically_significant", False)),
+                "N_Bootstrap": int(vals.get("n_bootstrap", 0)),
+            }
+            for strat, vals in paired_best.items()
+        ]
+        comp_lines.append(
+            f"### Paired Bootstrap Macro-F1 Significance vs. Best Single (`{ens_analysis.get('best_single_model', 'XGBoost')}`)\n\n"
+        )
+        comp_lines.append(_df_to_markdown(pd.DataFrame(pb_rows)) + "\n\n")
+    paired_stack = ens_analysis.get("paired_bootstrap_stacking_vs_all", {}) or {}
+    if paired_stack:
+        ps_rows = [
+            {
+                "Comparison": comp_name,
+                "Observed_Diff": float(vals.get("observed_diff", 0.0)),
+                "Mean_Diff": float(vals.get("mean_diff", 0.0)),
+                "CI95_Low": float(vals.get("ci95_low", 0.0)),
+                "CI95_High": float(vals.get("ci95_high", 0.0)),
+                "Statistically_Significant": bool(vals.get("statistically_significant", False)),
+                "N_Bootstrap": int(vals.get("n_bootstrap", 0)),
+            }
+            for comp_name, vals in paired_stack.items()
+        ]
+        comp_lines.append("### Paired Bootstrap Macro-F1 Comparison: Stacking vs. Other Strategies\n\n")
+        comp_lines.append(_df_to_markdown(pd.DataFrame(ps_rows)) + "\n\n")
+    if ens_analysis:
+        conclusion = format_ensemble_empirical_conclusion(ens_analysis)
+        comp_lines.append(f"- **Empirical Conclusion:** {conclusion}\n\n")
 
     if anom_comp.get("detectors"):
         sec_num += 1

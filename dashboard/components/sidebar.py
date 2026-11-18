@@ -18,7 +18,7 @@ def render_sidebar() -> dict[str, Any]:
 
     with st.sidebar:
         st.markdown("### 🛡️ SMART IDS v3 Control")
-        st.caption("Multi-Modal Hybrid Ensemble & Zero-Day Tracker")
+        st.caption("Multi-Model IDS & Zero-Day Anomaly Tracker")
         st.divider()
 
         st.markdown("#### ⚙️ Configuration")

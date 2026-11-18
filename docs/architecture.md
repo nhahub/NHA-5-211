@@ -28,7 +28,7 @@ flowchart TB
     end
 
     subgraph Hybrid["4. Calibration, XAI & Active Mitigation"]
-        MLP & CNN & XGB --> CAL["Validation Temperature Scaling & Hybrid Ensemble"]
+        MLP & CNN & XGB --> CAL["Validation Temperature Scaling & Decision Layer"]
         THRESH --> ANOM["Orthogonal Anomaly Signal (MSE > Threshold)"]
         CAL & ANOM --> SCORING["4-Tier Threat Scoring (Benign Safety Guard)"]
         CAL --> SHAP["SHAP XAI (TreeExplainer + Gradient/KernelExplainer)"]
