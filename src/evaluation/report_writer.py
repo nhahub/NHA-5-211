@@ -88,6 +88,7 @@ def write_academic_reports(
     ae = summary.get("autoencoder_evaluation", {})
     unseen = summary.get("unseen_attack_protocol", {})
     by_day = summary.get("by_day_protocol", {})
+    time_block = summary.get("time_block_protocol", {})
     ablation = summary.get("feature_ablation", {})
     xgb_cv = summary.get("xgboost_cross_validation", {})
     sup_evals = summary.get("supervised_evaluations", {})
@@ -143,37 +144,104 @@ def write_academic_reports(
     if ci_lines:
         comp_lines.extend([*ci_lines, "\n"])
 
+    if time_block.get("executed"):
+        sec_num += 1
+        tb_sizes = time_block.get("split_sizes", {})
+        comp_lines.append(
+            f"## {sec_num}. Chronological Drift Evaluation (`time_block`: Per-Class Earliest ~60% Train / Next ~20% Val / Last ~20% Test)\n"
+        )
+        comp_lines.append(
+            f"- **Partitions (`split_strategy='time_block'`):** Train pre-SMOTE=`{tb_sizes.get('train_raw', 0):,}`, "
+            f"Validation=`{tb_sizes.get('validation', 0):,}`, Test=`{tb_sizes.get('test', 0):,}` "
+            f"(Ordering=`{time_block.get('ordering_source', 'Timestamp')}`, "
+            f"`leakage_checks.passed={time_block.get('leakage_checks', {}).get('passed')}`).\n"
+        )
+        fallbacks = time_block.get("tiny_class_fallbacks", {})
+        if fallbacks:
+            fb_summary = "; ".join(f"`{k}`: {v}" for k, v in fallbacks.items())
+            comp_lines.append(f"- **Low-Support / Tiny-Class Chronological Allocations:** {fb_summary}.\n")
+        comp_lines.append(
+            "- **Protocol Interpretation:** Closed-set temporal drift split where every class is trained on its "
+            "earliest ~60% of flows and evaluated on its latest ~20%, isolating concept drift over capture time "
+            "without introducing unseen attack labels.\n\n"
+        )
+        tb_rows = []
+        for m_name, m_vals in time_block.get("models", {}).items():
+            ci = m_vals.get("f1_macro_ci95", {})
+            tb_rows.append(
+                {
+                    "Model": m_name,
+                    "Accuracy": m_vals.get("accuracy", 0.0),
+                    "Precision_Weighted": m_vals.get("precision_weighted", 0.0),
+                    "Recall_Weighted": m_vals.get("recall_weighted", 0.0),
+                    "F1_Weighted": m_vals.get("f1_weighted", 0.0),
+                    "F1_Macro": m_vals.get("f1_macro", 0.0),
+                    "F1_Macro_CI95_Low": ci.get("ci95_low", m_vals.get("f1_macro", 0.0)),
+                    "F1_Macro_CI95_High": ci.get("ci95_high", m_vals.get("f1_macro", 0.0)),
+                    "ROC_AUC_OVR": m_vals.get("roc_auc_macro_ovr", 0.0),
+                    "PR_AUC_OVR": m_vals.get("pr_auc_macro_ovr", 0.0),
+                }
+            )
+        if tb_rows:
+            comp_lines.append(_df_to_markdown(pd.DataFrame(tb_rows)) + "\n\n")
+        for m_name, m_vals in time_block.get("models", {}).items():
+            ci = m_vals.get("f1_macro_ci95", {})
+            if ci.get("n_bootstrap", 0) > 0:
+                comp_lines.append(
+                    f"- **{m_name} (`time_block`) Macro-F1 (95% Bootstrap CI, n={ci['n_bootstrap']}):** "
+                    f"`{m_vals.get('f1_macro', 0.0):.4f}` (`[{ci['ci95_low']:.4f}, {ci['ci95_high']:.4f}]`, "
+                    f"bootstrap std=`{ci['std']:.4f}`)\n"
+                )
+        tb_ae = time_block.get("autoencoder", {})
+        if tb_ae:
+            ae_ci = tb_ae.get("f1_ci95", {})
+            ci_txt = (
+                f" (`[{ae_ci['ci95_low']:.4f}, {ae_ci['ci95_high']:.4f}]`, n={ae_ci['n_bootstrap']})"
+                if ae_ci.get("n_bootstrap", 0) > 0
+                else ""
+            )
+            comp_lines.append(
+                f"- **Autoencoder (`time_block`, benign-only binary):** Accuracy=`{tb_ae.get('accuracy', 0.0):.4f}`, "
+                f"F1=`{tb_ae.get('f1', 0.0):.4f}`{ci_txt}, ROC-AUC=`{tb_ae.get('roc_auc', 0.0):.4f}`, "
+                f"FPR=`{tb_ae.get('fpr', 0.0):.4f}`.\n"
+            )
+        comp_lines.append("\n")
+        tb_pc_map = time_block.get("per_class_metrics", {})
+        pc_target = "XGBoost" if "XGBoost" in tb_pc_map else next(iter(tb_pc_map), None)
+        if pc_target and tb_pc_map.get(pc_target):
+            comp_lines.append(f"### {pc_target} Per-Class Metrics (`time_block` Test Partition)\n\n")
+            tb_pc_rows = [
+                {
+                    "Class": row["class_name"],
+                    "Precision": float(row["precision"]),
+                    "Recall": float(row["recall"]),
+                    "F1_Score": float(row["f1_score"]),
+                    "Support": int(row["support"]),
+                    "Reliability": "Statistically Unreliable"
+                    if row.get("statistically_unreliable")
+                    else "Adequate",
+                }
+                for row in tb_pc_map[pc_target]
+            ]
+            comp_lines.append(_df_to_markdown(pd.DataFrame(tb_pc_rows)) + "\n\n")
+
     if by_day.get("executed"):
         sec_num += 1
         bd_sizes = by_day.get("split_sizes", {})
         unseen_cls = ", ".join(f"`{c}`" for c in by_day.get("unseen_test_classes", [])) or "None"
         comp_lines.append(
-            f"## {sec_num}. Cross-Day Temporal Split Protocol (`by_day`: Mon–Wed Train / Thu Val / Thu–Fri Test)\n"
+            f"## {sec_num}. Open-Set Cross-Day Protocol (`by_day`: Mon–Wed Train / Thu Val / Thu–Fri Unseen Attacks)\n"
         )
         comp_lines.append(
             f"- **Partitions (`split_strategy='by_day'`):** Train pre-SMOTE=`{bd_sizes.get('train_raw', 0):,}`, "
             f"Validation (Thursday half)=`{bd_sizes.get('validation', 0):,}`, "
-            f"Test (Thursday remainder + Friday)=`{bd_sizes.get('test', 0):,}`.\n"
+            f"Test (Thursday remainder + Friday)=`{bd_sizes.get('test', 0):,}` "
+            f"(`leakage_checks.passed={by_day.get('leakage_checks', {}).get('passed')}`).\n"
         )
         comp_lines.append(f"- **Thursday–Friday Unseen Attack Classes:** {unseen_cls}.\n")
         if by_day.get("caveat_note"):
-            comp_lines.append(f"- **Protocol Interpretation:** {by_day['caveat_note']}\n")
-        comp_lines.append("\n### Closed-Set Multi-Class Evaluation (`by_day`)\n\n")
-        mc_rows = [
-            {
-                "Model": name,
-                "Accuracy": vals.get("accuracy", 0.0),
-                "Precision_Weighted": vals.get("precision_weighted", 0.0),
-                "Recall_Weighted": vals.get("recall_weighted", 0.0),
-                "F1_Weighted": vals.get("f1_weighted", 0.0),
-                "F1_Macro_All": vals.get("f1_macro", 0.0),
-                "F1_Macro_Present_Test": vals.get("f1_macro_present_test_classes", 0.0),
-                "ROC_AUC_OVR": vals.get("roc_auc_macro_ovr", 0.0),
-            }
-            for name, vals in by_day.get("multiclass_models", {}).items()
-        ]
-        comp_lines.append(_df_to_markdown(pd.DataFrame(mc_rows)) + "\n\n")
-        comp_lines.append("### Cross-Day Binary Intrusion Detection (`by_day`: Benign vs. Attack)\n\n")
+            comp_lines.append(f"\n> **Open-Set Interpretation:** {by_day['caveat_note']}\n\n")
+        comp_lines.append("### Open-Set Cross-Day Binary Detection (`by_day`: Benign vs. Attack)\n\n")
         bin_rows = [
             {
                 "Model": name,
@@ -189,6 +257,21 @@ def write_academic_reports(
             for name, vals in by_day.get("binary_cross_day_models", {}).items()
         ]
         comp_lines.append(_df_to_markdown(pd.DataFrame(bin_rows)) + "\n\n")
+        comp_lines.append("### Closed-Set Multi-Class Reference Under Open-Set Split (`by_day`)\n\n")
+        mc_rows = [
+            {
+                "Model": name,
+                "Accuracy": vals.get("accuracy", 0.0),
+                "Precision_Weighted": vals.get("precision_weighted", 0.0),
+                "Recall_Weighted": vals.get("recall_weighted", 0.0),
+                "F1_Weighted": vals.get("f1_weighted", 0.0),
+                "F1_Macro_All": vals.get("f1_macro", 0.0),
+                "F1_Macro_Present_Test": vals.get("f1_macro_present_test_classes", 0.0),
+                "ROC_AUC_OVR": vals.get("roc_auc_macro_ovr", 0.0),
+            }
+            for name, vals in by_day.get("multiclass_models", {}).items()
+        ]
+        comp_lines.append(_df_to_markdown(pd.DataFrame(mc_rows)) + "\n\n")
 
     if ablation.get("executed"):
         sec_num += 1
@@ -420,11 +503,17 @@ def write_academic_reports(
     cmp_path.write_text("\n".join(comp_lines), encoding="utf-8")
 
     # 2. Experimental Results Report
+    eff_split = audit.get("split_strategy", split_strat)
+    split_desc = {
+        "random": "Stratified Random Split",
+        "time_block": "Chronological Drift Split (earliest ~60% train / ~20% val / ~20% test)",
+        "by_day": "Open-Set Cross-Day Protocol (Mon-Wed train / Thu val / Thu-Fri unseen attacks)",
+    }.get(eff_split, eff_split)
     exp_lines = [
         "# SMART IDS v3 — Experimental Results Report\n",
         mode_banner,
         "## 1. Data Engineering & Leakage Safeguard Audit\n",
-        f"- **Split Strategy:** `{audit.get('split_strategy', split_strat)}`\n",
+        f"- **Split Strategy:** `{eff_split}` ({split_desc})\n",
         f"- **Explicitly Dropped Features (`drop_features`):** `{audit.get('dropped_features', [])}`\n",
         f"- **Original Dataset Dimensions:** `{audit.get('original_shape', [])}`\n",
         f"- **Rows After Exact Deduplication:** `{audit.get('rows_after_deduplication', 0):,}` (removed `{audit.get('duplicates_removed', 0):,}` duplicates)\n",

@@ -308,7 +308,7 @@ def train_all_models(
     if (
         xgb_cfg.optuna.enabled
         and xgb_cfg.optuna.n_trials > 0
-        and app_cfg.data.split_strategy == "random"
+        and app_cfg.data.split_strategy in {"random", "time_block"}
         and app_cfg.evaluation.cv_n_splits >= 2
     ):
         baseline_cv_res = run_xgboost_stratified_cv(

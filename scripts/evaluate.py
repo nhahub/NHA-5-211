@@ -31,6 +31,7 @@ from src.evaluation.metrics import (
 from src.evaluation.protocols import (
     evaluate_by_day_protocol,
     evaluate_feature_ablation,
+    evaluate_time_block_protocol,
     run_xgboost_stratified_cv,
 )
 from src.evaluation.report_writer import format_ensemble_empirical_conclusion, write_academic_reports
@@ -66,8 +67,8 @@ def run_evaluation_suite(
     skip_protocols: bool = False,
 ) -> dict[str, Any]:
     """Evaluate all persisted models independently from training memory."""
-    app_c = app_cfg or get_app_config()
-    model_c = model_cfg or get_model_config()
+    app_c = (app_cfg or get_app_config()).model_copy(deep=True)
+    model_c = (model_cfg or get_model_config()).model_copy(deep=True)
 
     proc_dir = app_c.paths.resolve("processed_data_dir")
     models_dir = app_c.paths.resolve("models_dir")
@@ -87,6 +88,9 @@ def run_evaluation_suite(
 
     with (proc_dir / "preprocessing_audit.json").open("r", encoding="utf-8") as fh:
         prep_audit = json.load(fh)
+    audit_split = prep_audit.get("split_strategy")
+    if audit_split in {"random", "by_day", "time_block"}:
+        app_c.data.split_strategy = audit_split
 
     train_diag: dict[str, Any] = {}
     diag_path = artifacts_dir / "training_diagnostics.json"
@@ -637,15 +641,16 @@ def run_evaluation_suite(
         with (artifacts_dir / "shap_summary.json").open("w", encoding="utf-8") as fh:
             json.dump(shap_summary, fh, indent=2)
 
-    # 8. Secondary Evaluation Protocols (Cross-Day by_day & Shortcut Feature Ablation)
+    # 8. Secondary Evaluation Protocols (Open-Set Cross-Day by_day, Chronological time_block & Ablation)
     is_synth = bool(prep_audit.get("source", {}).get("is_synthetic", False))
     xgb_opt_diag = train_diag.get("xgboost_optimization", {})
     selected_xgb_params = (
         xgb_opt_diag.get("best_params") if xgb_opt_diag.get("selected_variant") == "tuned" else None
     )
-    imb_strategy = train_diag.get("imbalance_experiment", {}).get("selected_strategy", "smote")
+    imb_strategy = train_diag.get("imbalance_experiment", {}).get("selected_strategy", "none")
 
     by_day_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
+    time_block_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
     ablation_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
     xgb_cv_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
     if not skip_protocols:
@@ -656,6 +661,15 @@ def run_evaluation_suite(
                 xgb_params=selected_xgb_params,
                 imbalance_strategy=imb_strategy,
                 keras_epochs=app_c.evaluation.by_day_keras_epochs,
+                force_synthetic=is_synth,
+            )
+        if app_c.evaluation.run_time_block_comparison:
+            time_block_res = evaluate_time_block_protocol(
+                app_cfg=app_c,
+                model_cfg=model_c,
+                xgb_params=selected_xgb_params,
+                imbalance_strategy=imb_strategy,
+                keras_epochs=app_c.evaluation.time_block_keras_epochs,
                 force_synthetic=is_synth,
             )
         if app_c.evaluation.run_feature_ablation:
@@ -669,14 +683,20 @@ def run_evaluation_suite(
                 compute_shap=not skip_shap,
             )
         if app_c.evaluation.run_xgboost_cv:
-            xgb_cv_res = run_xgboost_stratified_cv(
-                app_cfg=app_c,
-                model_cfg=model_c,
-                xgb_params=selected_xgb_params,
-                imbalance_strategy=imb_strategy,
-                n_splits=app_c.evaluation.cv_n_splits,
-                force_synthetic=is_synth,
-            )
+            if app_c.data.split_strategy == "by_day":
+                xgb_cv_res = {
+                    "executed": False,
+                    "reason": "Skipped all-class stratified CV under open-set cross-day (by_day) primary split.",
+                }
+            else:
+                xgb_cv_res = run_xgboost_stratified_cv(
+                    app_cfg=app_c,
+                    model_cfg=model_c,
+                    xgb_params=selected_xgb_params,
+                    imbalance_strategy=imb_strategy,
+                    n_splits=app_c.evaluation.cv_n_splits,
+                    force_synthetic=is_synth,
+                )
 
     full_summary = {
         "dataset_source": prep_audit.get("source", {}),
@@ -691,6 +711,7 @@ def run_evaluation_suite(
         "anomaly_detector_comparison": anomaly_detector_comparison,
         "unseen_attack_protocol": unseen_res,
         "by_day_protocol": by_day_res,
+        "time_block_protocol": time_block_res,
         "feature_ablation": ablation_res,
         "xgboost_cross_validation": xgb_cv_res,
         "preprocessing_latency": prep_latency,
@@ -717,7 +738,7 @@ def main() -> None:
     parser.add_argument(
         "--skip-protocols",
         action="store_true",
-        help="Skip secondary by_day and feature ablation evaluation protocols.",
+        help="Skip secondary open-set cross-day (by_day), time_block, and feature ablation protocols.",
     )
     args = parser.parse_args()
     run_evaluation_suite(

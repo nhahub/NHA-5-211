@@ -439,7 +439,7 @@ def _split_indices_by_day(
     stratify: bool,
     seed: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
-    """Split CICIDS2017 rows chronologically by capture day (Mon-Wed / part of Thu / Thu+Fri)."""
+    """Split CICIDS2017 rows under the open-set cross-day protocol (Mon-Wed / part of Thu / Thu+Fri)."""
     if "Source_File" not in metadata.columns:
         raise ValueError(
             "split_strategy='by_day' requires raw CSV filenames ('Source_File' metadata) identifying "
@@ -488,7 +488,7 @@ def _split_indices_by_day(
         "test_files": sorted({src_files[i] for i in idx_test}),
     }
     logger.info(
-        "Applied split_strategy='by_day': train=%d (%s) | val=%d (Thu split %.2f) | test=%d (Thu+Fri)",
+        "Applied open-set cross-day split_strategy='by_day': train=%d (%s) | val=%d (Thu split %.2f) | test=%d (Thu+Fri)",
         len(idx_train),
         split_details["train_files"],
         len(idx_val),
@@ -496,6 +496,163 @@ def _split_indices_by_day(
         len(idx_test),
     )
     return np.sort(idx_train), np.sort(idx_val), idx_test, split_details
+
+
+def _parse_timestamp_series(ts_series: pd.Series) -> pd.Series:
+    """Parse ISO or CICIDS2017 DD/MM/YYYY timestamp strings into naive datetimes."""
+    raw = ts_series.astype(str).str.strip()
+    valid_mask = raw.ne("") & raw.str.lower().ne("nan") & raw.str.lower().ne("nat")
+    if not valid_mask.any():
+        return pd.Series(pd.NaT, index=ts_series.index, dtype="datetime64[ns]")
+    sample = raw[valid_mask]
+    iso_ratio = float(sample.str.match(r"^\d{4}-\d{2}-\d{2}").mean())
+    if iso_ratio >= 0.5:
+        return pd.to_datetime(raw, format="mixed", errors="coerce")
+    return pd.to_datetime(raw, format="mixed", dayfirst=True, errors="coerce")
+
+
+def _split_indices_time_block(
+    metadata: pd.DataFrame,
+    y_all: np.ndarray,
+    class_names: list[str],
+    train_fraction: float = 0.60,
+    val_fraction: float = 0.20,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+    """Split each class chronologically (earliest ~60% train, middle ~20% val, latest ~20% test).
+
+    Ordering precedence:
+    1. Parsed ``Timestamp`` column (kept strictly in non-feature metadata and dropped from X).
+    2. Pre-sample chronological ``Capture_Order`` (file session schedule + raw CSV row index)
+       when MachineLearningCVE exports omit a ``Timestamp`` column.
+
+    Tiny-class fallback policy (documented):
+    - ``n >= 5``: ``round(n * train_fraction)`` train, ``round(n * val_fraction)`` val, remainder
+      test, clamped so every partition retains at least 1 row.
+    - ``n == 4``: 2 earliest -> train, 1 -> val, 1 -> test.
+    - ``n == 3``: 1 earliest -> train, 1 -> val, 1 -> test.
+    - ``n == 2``: 1 earliest -> train, 1 -> test (val omitted so both train and test cover class).
+    - ``n == 1``: 1 -> train (val and test omitted to avoid eval-only classes).
+    """
+    n_total = len(y_all)
+    if n_total == 0:
+        raise ValueError("Cannot perform time_block split on empty dataset.")
+
+    secondary_key = (
+        metadata["Capture_Order"].to_numpy(dtype=np.int64)
+        if "Capture_Order" in metadata.columns
+        else np.arange(n_total, dtype=np.int64)
+    )
+    ordering_source = ""
+    primary_key: np.ndarray | None = None
+
+    if "Timestamp" in metadata.columns:
+        parsed_ts = _parse_timestamp_series(metadata["Timestamp"])
+        valid_frac = float(parsed_ts.notna().mean()) if n_total else 0.0
+        n_unique_ts = int(parsed_ts.nunique(dropna=True))
+        if valid_frac >= 0.95 and n_unique_ts >= 2:
+            ts_ns = parsed_ts.dt.as_unit("ns").fillna(pd.Timestamp.max.as_unit("ns"))
+            primary_key = ts_ns.to_numpy(dtype="datetime64[ns]").view(np.int64)
+            ordering_source = "Timestamp"
+
+    if primary_key is None:
+        if "Capture_Order" in metadata.columns:
+            primary_key = secondary_key
+            ordering_source = "Capture_Order (capture session schedule + CSV row index; Timestamp column absent in MachineLearningCVE CSVs)"
+        else:
+            raise ValueError(
+                "split_strategy='time_block' requires 'Timestamp' or 'Capture_Order' metadata to sort "
+                "flows chronologically."
+            )
+
+    train_parts: list[np.ndarray] = []
+    val_parts: list[np.ndarray] = []
+    test_parts: list[np.ndarray] = []
+    per_class_allocations: dict[str, dict[str, int]] = {}
+    tiny_class_fallbacks: dict[str, str] = {}
+
+    for cls_id in np.unique(y_all):
+        cls_name = class_names[int(cls_id)] if int(cls_id) < len(class_names) else str(cls_id)
+        cls_idx = np.where(y_all == cls_id)[0]
+        order = np.lexsort((secondary_key[cls_idx], primary_key[cls_idx]))
+        cls_sorted = cls_idx[order]
+        n = len(cls_sorted)
+
+        if n >= 5:
+            n_train = max(1, int(round(n * train_fraction)))
+            n_val = max(1, int(round(n * val_fraction)))
+            if n_train + n_val >= n:
+                overflow = n_train + n_val - (n - 1)
+                reduce_train = min(overflow, max(0, n_train - 1))
+                n_train -= reduce_train
+                n_val -= overflow - reduce_train
+            n_test = n - n_train - n_val
+            if n < 30:
+                tiny_class_fallbacks[cls_name] = (
+                    f"Low-support chronological split (n={n}): {n_train} earliest train / {n_val} middle val / {n_test} latest test"
+                )
+        elif n == 4:
+            n_train, n_val, n_test = 2, 1, 1
+            tiny_class_fallbacks[cls_name] = "Tiny-class fallback (n=4): 2 train / 1 val / 1 test"
+        elif n == 3:
+            n_train, n_val, n_test = 1, 1, 1
+            tiny_class_fallbacks[cls_name] = "Tiny-class fallback (n=3): 1 train / 1 val / 1 test"
+        elif n == 2:
+            n_train, n_val, n_test = 1, 0, 1
+            tiny_class_fallbacks[cls_name] = (
+                "Tiny-class fallback (n=2): 1 earliest train / 0 val / 1 latest test"
+            )
+        else:
+            n_train, n_val, n_test = 1, 0, 0
+            tiny_class_fallbacks[cls_name] = (
+                "Singleton fallback (n=1): retained in train only (0 val / 0 test)"
+            )
+
+        tr_slice = cls_sorted[:n_train]
+        va_slice = cls_sorted[n_train : n_train + n_val]
+        te_slice = cls_sorted[n_train + n_val :]
+        train_parts.append(tr_slice)
+        if len(va_slice) > 0:
+            val_parts.append(va_slice)
+        if len(te_slice) > 0:
+            test_parts.append(te_slice)
+        per_class_allocations[cls_name] = {
+            "total": int(n),
+            "train": int(len(tr_slice)),
+            "validation": int(len(va_slice)),
+            "test": int(len(te_slice)),
+        }
+
+    idx_train = np.sort(np.concatenate(train_parts)).astype(np.int64)
+    idx_val = (
+        np.sort(np.concatenate(val_parts)).astype(np.int64) if val_parts else np.empty(0, dtype=np.int64)
+    )
+    idx_test = (
+        np.sort(np.concatenate(test_parts)).astype(np.int64) if test_parts else np.empty(0, dtype=np.int64)
+    )
+
+    if len(idx_train) == 0 or len(idx_val) == 0 or len(idx_test) == 0:
+        raise ValueError(
+            "split_strategy='time_block' produced an empty split partition "
+            f"(train={len(idx_train)}, val={len(idx_val)}, test={len(idx_test)})."
+        )
+
+    split_details = {
+        "ordering_source": ordering_source,
+        "train_fraction_target": float(train_fraction),
+        "val_fraction_target": float(val_fraction),
+        "test_fraction_target": round(float(1.0 - train_fraction - val_fraction), 4),
+        "tiny_class_fallbacks": tiny_class_fallbacks,
+        "per_class_allocations": per_class_allocations,
+    }
+    logger.info(
+        "Applied split_strategy='time_block' (%s): train=%d | val=%d | test=%d | fallbacks=%d",
+        ordering_source,
+        len(idx_train),
+        len(idx_val),
+        len(idx_test),
+        len(tiny_class_fallbacks),
+    )
+    return idx_train, idx_val, idx_test, split_details
 
 
 def run_preprocessing_pipeline(
@@ -542,6 +699,7 @@ def run_preprocessing_pipeline(
 
     # STEP 1 OF LEAKAGE PREVENTION: Split BEFORE fitting imputer, clipper, or scaler
     by_day_files: dict[str, Any] = {}
+    time_block_details: dict[str, Any] = {}
     if cfg.data.split_strategy == "by_day":
         idx_train, idx_val, idx_test, by_day_files = _split_indices_by_day(
             metadata=metadata,
@@ -549,6 +707,14 @@ def run_preprocessing_pipeline(
             thursday_val_fraction=cfg.data.split.thursday_val_fraction,
             stratify=cfg.data.split.stratify,
             seed=seed,
+        )
+    elif cfg.data.split_strategy == "time_block":
+        idx_train, idx_val, idx_test, time_block_details = _split_indices_time_block(
+            metadata=metadata,
+            y_all=y_all,
+            class_names=class_names,
+            train_fraction=cfg.data.split.time_block_train_fraction,
+            val_fraction=cfg.data.split.time_block_val_fraction,
         )
     else:
         strat = y_all if cfg.data.split.stratify else None
@@ -722,6 +888,7 @@ def run_preprocessing_pipeline(
         "post_clip_dedup_removed": post_clip_dedup_removed,
         "split_strategy": cfg.data.split_strategy,
         "split_day_files": by_day_files,
+        "time_block_details": time_block_details,
         "dropped_features": clean_report.dropped_features_removed,
         "removed_columns": (
             clean_report.id_columns_removed

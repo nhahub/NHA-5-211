@@ -14,6 +14,8 @@ from src.utils.logging import get_logger
 logger = get_logger("smart_ids.data.cleaner")
 
 SOURCE_FILE_COLUMN = "__source_file__"
+CHRON_ORDER_COLUMN = "__chron_order__"
+INTERNAL_PROVENANCE_COLUMNS = frozenset({SOURCE_FILE_COLUMN, CHRON_ORDER_COLUMN})
 
 
 @dataclass
@@ -70,6 +72,12 @@ def identify_structural_columns(
             continue
         if any(kw in col_lower for kw in identifier_keywords):
             id_cols.append(col_str)
+    # Always exclude timestamp columns even if identifier_keywords was customized, so timestamps
+    # remain non-feature ordering metadata and never leak into model features.
+    for col in columns:
+        col_str = str(col)
+        if col_str != label_col and col_str.strip().lower() == "timestamp" and col_str not in id_cols:
+            id_cols.append(col_str)
     return id_cols
 
 
@@ -96,7 +104,7 @@ def clean_cicids_dataframe(
     Note: Imputation (median) and outlier clipping (5-sigma) are deliberately NOT
     executed here; they are fit exclusively on the training partition after splitting.
     """
-    raw_col_count = df.shape[1] - (1 if SOURCE_FILE_COLUMN in df.columns else 0)
+    raw_col_count = df.shape[1] - sum(1 for col in INTERNAL_PROVENANCE_COLUMNS if col in df.columns)
     report = CleaningReport(initial_rows=len(df), initial_cols=raw_col_count)
     work = normalize_column_names(df)
 
@@ -136,9 +144,9 @@ def clean_cicids_dataframe(
                 report.rare_classes_dropped,
             )
 
-    # Remove exact duplicate rows (excluding internal provenance column) before separating metadata
+    # Remove exact duplicate rows (excluding internal provenance columns) before separating metadata
     before_dedup = len(work)
-    dedup_cols = [c for c in work.columns if c != SOURCE_FILE_COLUMN]
+    dedup_cols = [c for c in work.columns if c not in INTERNAL_PROVENANCE_COLUMNS]
     work = work.drop_duplicates(subset=dedup_cols).reset_index(drop=True)
     report.duplicates_removed = before_dedup - len(work)
     report.rows_after_dedup = len(work)
@@ -148,11 +156,13 @@ def clean_cicids_dataframe(
     metadata["True_Label"] = work[label_col].values
     if SOURCE_FILE_COLUMN in work.columns:
         metadata["Source_File"] = work[SOURCE_FILE_COLUMN].astype(str).values
+    if CHRON_ORDER_COLUMN in work.columns:
+        metadata["Capture_Order"] = work[CHRON_ORDER_COLUMN].to_numpy(dtype=np.int64)
 
-    # Remove structural identifiers (never include internal provenance tag in id_columns_removed)
+    # Remove structural identifiers (never include internal provenance tags in id_columns_removed)
     kw_list = identifier_keywords or ["ip", "timestamp", "flow id", "src", "dst", "source port"]
     preserve = preserve_features or ["Destination Port"]
-    feature_candidates = [c for c in work.columns if c != SOURCE_FILE_COLUMN]
+    feature_candidates = [c for c in work.columns if c not in INTERNAL_PROVENANCE_COLUMNS]
     id_cols = identify_structural_columns(feature_candidates, kw_list, preserve, label_col=label_col)
     report.id_columns_removed = id_cols
 
@@ -173,7 +183,7 @@ def clean_cicids_dataframe(
     report.dropped_features_removed = explicit_drops
 
     y_series = work[label_col].copy()
-    drop_set = set(id_cols) | set(dup_cols) | set(explicit_drops) | {label_col, SOURCE_FILE_COLUMN}
+    drop_set = set(id_cols) | set(dup_cols) | set(explicit_drops) | {label_col} | INTERNAL_PROVENANCE_COLUMNS
     X_df = work.drop(columns=[c for c in work.columns if c in drop_set]).copy()
 
     # Coerce all remaining features to numeric, tracking coerced NaNs and Inf replacements

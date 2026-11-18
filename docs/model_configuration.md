@@ -15,9 +15,11 @@ All system parameters are centralized in two Pydantic-validated YAML files:
 | `data` | `merge_web_attacks` | `true` | Consolidates CICIDS2017 Web Attack sub-labels into canonical `Web Attack` |
 | `data` | `nan_column_drop_threshold` | `0.50` | Drops columns exceeding 50% missingness (computed strictly on training split) |
 | `data` | `outlier_clip_sigma` | `5.0` | Clips rate/duration artifacts to $\mu \pm 5\sigma$ using training statistics only |
-| `data.split` | `test_size`, `val_size_of_remainder` | `0.15`, `0.15` | Stratified `72.25%` Train / `12.75%` Validation / `15.0%` Test split |
+| `data` | `split_strategy` | `random` | `random` (stratified), `time_block` (per-class chronological drift), or `by_day` (open-set cross-day) |
+| `data.split` | `test_size`, `val_size_of_remainder`, `time_block_*` | `0.15`, `0.15`, `0.60`/`0.20` | Stratified `72.25%`/`12.75%`/`15.0%` (`random`) or chronological `60%`/`20%`/`20%` (`time_block`) |
 | `data.imbalance` | `strategy`, `imbalance_tie_tolerance` | `auto_compare`, `0.002` | Compares Unweighted, Class-Weighting, and SMOTE on validation Macro-F1; prefers `none > class_weight > smote` when tied within tolerance |
 | `evaluation` | `latency_warmup_runs`, `latency_timed_runs` | `5`, `100` | Warm-up runs before repeated `time.perf_counter()` single-flow latency measurement |
+| `evaluation` | `run_by_day_comparison`, `run_time_block_comparison` | `true`, `true` | Runs secondary open-set cross-day (`by_day`) and chronological drift (`time_block`) benchmarks |
 | `evaluation` | `autoencoder_percentiles` | `[90, 95, 97, 99]` | Percentile thresholds evaluated for precision/recall/FPR trade-off analysis |
 | `response` | `dry_run`, `rate_limit_pps` | `true`, `100` | Safety lock ensuring all `iptables` actions remain simulated |
 

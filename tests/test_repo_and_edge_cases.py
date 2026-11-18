@@ -13,12 +13,13 @@ from scripts.export_onnx import check_onnx_environment
 from scripts.export_onnx import main as export_onnx_main
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-from src.config import AppConfig, DataConfig, ModelConfig
+from src.config import AppConfig, DataConfig, ModelConfig, SplitConfig
 from src.data.feature_engineering import SchemaValidationError
 from src.data.loader import CICIDS2017_FEATURES, generate_synthetic_cicids2017
 from src.data.preprocessing import (
     _classify_day_bucket,
     _split_indices_by_day,
+    _split_indices_time_block,
     run_preprocessing_pipeline,
 )
 from src.detection.inference import UnifiedDetectionEngine
@@ -139,9 +140,12 @@ def test_batch_csv_scoring_schema_validation_and_reordering(
 
 
 def test_split_strategy_validation_and_error_paths(tmp_app_config: AppConfig) -> None:
-    """Split strategy config validates literals and by_day handles missing metadata/unknown filenames cleanly."""
+    """Split strategy config validates literals and by_day/time_block handle missing metadata cleanly."""
     with pytest.raises(ValueError):
         DataConfig(split_strategy="temporal_invalid")
+    assert DataConfig(split_strategy="time_block").split_strategy == "time_block"
+    with pytest.raises(ValueError, match="time_block_train_fraction"):
+        SplitConfig(time_block_train_fraction=0.80, time_block_val_fraction=0.20)
 
     assert _classify_day_bucket("Monday-WorkingHours.pcap_ISCX.csv") == "train_mon_wed"
     assert _classify_day_bucket("Tuesday-WorkingHours.pcap_ISCX.csv") == "train_mon_wed"
@@ -155,6 +159,8 @@ def test_split_strategy_validation_and_error_paths(tmp_app_config: AppConfig) ->
     y_dummy = np.array([0, 0, 1, 1, 0, 1], dtype=np.int64)
     with pytest.raises(ValueError, match="Source_File"):
         _split_indices_by_day(pd.DataFrame({"Other": [1] * 6}), y_dummy, 0.35, True, 42)
+    with pytest.raises(ValueError, match="Timestamp"):
+        _split_indices_time_block(pd.DataFrame({"Other": [1] * 6}), y_dummy, ["BENIGN", "Attack"])
 
     missing_thu = pd.DataFrame(
         {"Source_File": ["Monday.csv", "Monday.csv", "Friday.csv", "Friday.csv", "Friday.csv", "Friday.csv"]}

@@ -1,4 +1,4 @@
-"""Secondary evaluation protocols: cross-day splitting (by_day) and feature shortcut ablation."""
+"""Secondary evaluation protocols: open-set cross-day (by_day), chronological drift (time_block), and feature ablation."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from src.data.preprocessing import (
     PreparedDataset,
     _classify_day_bucket,
     _row_hash_list,
+    _split_indices_time_block,
     apply_smote_safely,
     compute_hybrid_smote_class_weights,
     drop_features_from_prepared_dataset,
@@ -131,6 +132,114 @@ def _summarize_multiclass_by_day(
     }
 
 
+def _fit_and_predict_keras_pair(
+    X_fit: np.ndarray,
+    y_fit: np.ndarray,
+    X_es: np.ndarray,
+    y_es: np.ndarray,
+    X_test: np.ndarray,
+    num_features: int,
+    num_classes: int,
+    model_cfg: ModelConfig,
+    epochs: int,
+    keras_cw: dict[int, float] | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Train in-memory MLP and 1D-CNN classifiers without modifying persisted checkpoints."""
+    mlp = build_mlp(num_features, num_classes, cfg=model_cfg.mlp)
+    mlp_cb = build_keras_callbacks(
+        checkpoint_path=None,
+        early_stopping_patience=model_cfg.mlp.early_stopping_patience,
+        reduce_lr_patience=model_cfg.mlp.reduce_lr_patience,
+        reduce_lr_factor=model_cfg.mlp.reduce_lr_factor,
+        min_lr=model_cfg.mlp.min_lr,
+    )
+    mlp.fit(
+        X_fit,
+        y_fit,
+        validation_data=(X_es, y_es),
+        epochs=epochs,
+        batch_size=model_cfg.mlp.batch_size,
+        callbacks=mlp_cb,
+        class_weight=keras_cw,
+        verbose=0,
+    )
+    p_mlp = np.asarray(mlp.predict(X_test, batch_size=1024, verbose=0), dtype=np.float64)
+
+    cnn = build_cnn1d(num_features, num_classes, cfg=model_cfg.cnn)
+    cnn_cb = build_keras_callbacks(
+        checkpoint_path=None,
+        early_stopping_patience=model_cfg.cnn.early_stopping_patience,
+        reduce_lr_patience=model_cfg.cnn.reduce_lr_patience,
+        reduce_lr_factor=model_cfg.cnn.reduce_lr_factor,
+        min_lr=model_cfg.cnn.min_lr,
+    )
+    cnn.fit(
+        X_fit.reshape(-1, num_features, 1),
+        y_fit,
+        validation_data=(X_es.reshape(-1, num_features, 1), y_es),
+        epochs=epochs,
+        batch_size=model_cfg.cnn.batch_size,
+        callbacks=cnn_cb,
+        class_weight=keras_cw,
+        verbose=0,
+    )
+    p_cnn = np.asarray(
+        cnn.predict(X_test.reshape(-1, num_features, 1), batch_size=1024, verbose=0),
+        dtype=np.float64,
+    )
+    return p_mlp, p_cnn
+
+
+def _fit_and_eval_in_memory_autoencoder(
+    dataset: PreparedDataset,
+    app_cfg: AppConfig,
+    model_cfg: ModelConfig,
+    epochs: int,
+    bootstrap_n: int = 0,
+    seed: int = 42,
+) -> tuple[dict[str, Any], float]:
+    """Train in-memory benign-only Autoencoder and evaluate on dataset test flows."""
+    num_features = dataset.X_train_scaled.shape[1]
+    X_benign_train, benign_idx, _ = extract_benign_subset(
+        dataset.X_train_scaled, dataset.y_train, dataset.label_encoder
+    )
+    X_benign_val, _, _ = extract_benign_subset(dataset.X_val_scaled, dataset.y_val, dataset.label_encoder)
+    ae_model, _, _ = build_autoencoder(num_features, cfg=model_cfg.autoencoder)
+    ae_cb = build_keras_callbacks(
+        checkpoint_path=None,
+        early_stopping_patience=model_cfg.autoencoder.early_stopping_patience,
+        reduce_lr_patience=model_cfg.autoencoder.reduce_lr_patience,
+        reduce_lr_factor=model_cfg.autoencoder.reduce_lr_factor,
+        min_lr=model_cfg.autoencoder.min_lr,
+    )
+    ae_model.fit(
+        X_benign_train,
+        X_benign_train,
+        validation_data=(X_benign_val, X_benign_val),
+        epochs=epochs,
+        batch_size=model_cfg.autoencoder.batch_size,
+        callbacks=ae_cb,
+        verbose=0,
+    )
+    benign_val_errors = compute_reconstruction_error(ae_model, X_benign_val)
+    ae_threshold, _ = calibrate_threshold(
+        benign_val_errors, percentile=model_cfg.autoencoder.threshold_percentile
+    )
+    ae_test_errors = compute_reconstruction_error(ae_model, dataset.X_test_scaled)
+    ae_eval = evaluate_autoencoder(
+        y_test_multiclass=dataset.y_test,
+        recon_errors_test=ae_test_errors,
+        benign_val_errors=benign_val_errors,
+        threshold=ae_threshold,
+        class_names=dataset.class_names,
+        benign_index=benign_idx,
+        percentiles=app_cfg.evaluation.autoencoder_percentiles,
+        bootstrap_n=bootstrap_n,
+        seed=seed,
+    )
+    return ae_eval, float(ae_threshold)
+
+
 def evaluate_by_day_protocol(
     app_cfg: AppConfig,
     model_cfg: ModelConfig,
@@ -139,16 +248,16 @@ def evaluate_by_day_protocol(
     keras_epochs: int | None = None,
     force_synthetic: bool = False,
 ) -> dict[str, Any]:
-    """Run temporal cross-day evaluation: Mon-Wed train, part of Thu val, Thu-Fri test."""
+    """Run open-set cross-day evaluation: Mon-Wed train, part of Thu val, Thu-Fri unseen attacks."""
     if force_synthetic:
         return {
             "executed": False,
-            "reason": "Skipped by_day evaluation under synthetic mode (requires Monday-Friday CICIDS2017 CSVs).",
+            "reason": "Skipped open-set cross-day (by_day) evaluation under synthetic mode (requires Monday-Friday CICIDS2017 CSVs).",
         }
 
     ok, reason = _can_run_by_day_split(app_cfg)
     if not ok:
-        logger.warning("Skipping by_day comparison: %s", reason)
+        logger.warning("Skipping open-set cross-day (by_day) comparison: %s", reason)
         return {"executed": False, "reason": reason}
 
     seed = app_cfg.project.random_seed
@@ -228,53 +337,24 @@ def evaluate_by_day_protocol(
 
     # 3. MLP & 1D-CNN in-memory training (no checkpoint overwrite in models/)
     ep = int(keras_epochs or app_cfg.evaluation.by_day_keras_epochs)
-    mlp = build_mlp(num_features, num_classes, cfg=model_cfg.mlp)
-    mlp_cb = build_keras_callbacks(
-        checkpoint_path=None,
-        early_stopping_patience=model_cfg.mlp.early_stopping_patience,
-        reduce_lr_patience=model_cfg.mlp.reduce_lr_patience,
-        reduce_lr_factor=model_cfg.mlp.reduce_lr_factor,
-        min_lr=model_cfg.mlp.min_lr,
-    )
-    mlp.fit(
-        X_fit,
-        y_fit,
-        validation_data=(X_es, y_es),
+    p_mlp, p_cnn = _fit_and_predict_keras_pair(
+        X_fit=X_fit,
+        y_fit=y_fit,
+        X_es=X_es,
+        y_es=y_es,
+        X_test=dataset.X_test_scaled,
+        num_features=num_features,
+        num_classes=num_classes,
+        model_cfg=model_cfg,
         epochs=ep,
-        batch_size=model_cfg.mlp.batch_size,
-        callbacks=mlp_cb,
-        class_weight=keras_cw,
-        verbose=0,
+        keras_cw=keras_cw,
     )
-    p_mlp = np.asarray(mlp.predict(dataset.X_test_scaled, batch_size=1024, verbose=0), dtype=np.float64)
     mlp_mc_eval = evaluate_supervised_model(dataset.y_test, p_mlp, dataset.class_names, "MLP")
     multiclass_table["MLP"] = _summarize_multiclass_by_day(mlp_mc_eval, dataset.y_test, p_mlp)
     binary_table["MLP (1 - P_Benign)"] = _binary_metrics(
         y_test_bin, 1.0 - p_mlp[:, benign_idx], threshold=0.5
     )
 
-    cnn = build_cnn1d(num_features, num_classes, cfg=model_cfg.cnn)
-    cnn_cb = build_keras_callbacks(
-        checkpoint_path=None,
-        early_stopping_patience=model_cfg.cnn.early_stopping_patience,
-        reduce_lr_patience=model_cfg.cnn.reduce_lr_patience,
-        reduce_lr_factor=model_cfg.cnn.reduce_lr_factor,
-        min_lr=model_cfg.cnn.min_lr,
-    )
-    cnn.fit(
-        X_fit.reshape(-1, num_features, 1),
-        y_fit,
-        validation_data=(X_es.reshape(-1, num_features, 1), y_es),
-        epochs=ep,
-        batch_size=model_cfg.cnn.batch_size,
-        callbacks=cnn_cb,
-        class_weight=keras_cw,
-        verbose=0,
-    )
-    p_cnn = np.asarray(
-        cnn.predict(dataset.X_test_scaled.reshape(-1, num_features, 1), batch_size=1024, verbose=0),
-        dtype=np.float64,
-    )
     cnn_mc_eval = evaluate_supervised_model(dataset.y_test, p_cnn, dataset.class_names, "1D-CNN")
     multiclass_table["1D-CNN"] = _summarize_multiclass_by_day(cnn_mc_eval, dataset.y_test, p_cnn)
     binary_table["1D-CNN (1 - P_Benign)"] = _binary_metrics(
@@ -282,40 +362,13 @@ def evaluate_by_day_protocol(
     )
 
     # 4. Autoencoder (BENIGN Mon-Wed train, threshold strictly calibrated on Thursday BENIGN val)
-    X_benign_train, _, _ = extract_benign_subset(
-        dataset.X_train_scaled, dataset.y_train, dataset.label_encoder
-    )
-    X_benign_val, _, _ = extract_benign_subset(dataset.X_val_scaled, dataset.y_val, dataset.label_encoder)
-    ae_model, _, _ = build_autoencoder(num_features, cfg=model_cfg.autoencoder)
-    ae_cb = build_keras_callbacks(
-        checkpoint_path=None,
-        early_stopping_patience=model_cfg.autoencoder.early_stopping_patience,
-        reduce_lr_patience=model_cfg.autoencoder.reduce_lr_patience,
-        reduce_lr_factor=model_cfg.autoencoder.reduce_lr_factor,
-        min_lr=model_cfg.autoencoder.min_lr,
-    )
-    ae_model.fit(
-        X_benign_train,
-        X_benign_train,
-        validation_data=(X_benign_val, X_benign_val),
+    ae_eval, ae_threshold = _fit_and_eval_in_memory_autoencoder(
+        dataset=dataset,
+        app_cfg=app_cfg,
+        model_cfg=model_cfg,
         epochs=ep,
-        batch_size=model_cfg.autoencoder.batch_size,
-        callbacks=ae_cb,
-        verbose=0,
-    )
-    benign_val_errors = compute_reconstruction_error(ae_model, X_benign_val)
-    ae_threshold, _ = calibrate_threshold(
-        benign_val_errors, percentile=model_cfg.autoencoder.threshold_percentile
-    )
-    ae_test_errors = compute_reconstruction_error(ae_model, dataset.X_test_scaled)
-    ae_eval = evaluate_autoencoder(
-        y_test_multiclass=dataset.y_test,
-        recon_errors_test=ae_test_errors,
-        benign_val_errors=benign_val_errors,
-        threshold=ae_threshold,
-        class_names=dataset.class_names,
-        benign_index=benign_idx,
-        percentiles=app_cfg.evaluation.autoencoder_percentiles,
+        bootstrap_n=0,
+        seed=seed,
     )
     binary_table["Autoencoder"] = {
         k: float(ae_eval[k])
@@ -327,8 +380,14 @@ def evaluate_by_day_protocol(
     test_cls = split_cls.get("test", [])
     unseen_test_cls = sorted(c for c in set(test_cls) - set(train_cls) if c != benign_name)
 
+    xgb_1p = binary_table.get("XGBoost (1 - P_Benign)", {})
+    xgb_rec = float(xgb_1p.get("recall", 0.0))
+    xgb_prec = float(xgb_1p.get("precision", 0.0))
+    miss_pct = 100.0 * (1.0 - xgb_rec)
+
     return {
         "executed": True,
+        "protocol_name": "open-set cross-day",
         "split_strategy": "by_day",
         "imbalance_strategy": imbalance_strategy,
         "keras_epochs": ep,
@@ -343,11 +402,135 @@ def evaluate_by_day_protocol(
         "binary_cross_day_models": binary_table,
         "autoencoder_threshold": float(ae_threshold),
         "caveat_note": (
-            "In CICIDS2017, all attack families occurring on Thursday and Friday "
-            f"({', '.join(unseen_test_cls)}) are absent from Monday-Wednesday training data. "
-            "Closed-set multi-class Macro-F1 therefore cannot attribute unseen Thursday-Friday labels, "
-            "whereas the Cross-Day Binary table evaluates Benign-vs-Attack generalization directly."
+            "Open-set cross-day protocol (by_day): by construction in CICIDS2017, all Thursday and Friday "
+            f"attack families ({', '.join(unseen_test_cls)}) have zero training instances in Monday-Wednesday data. "
+            "Closed-set multi-class Macro-F1 is therefore near zero by design rather than ordinary generalization "
+            "degradation. The real empirical finding is that supervised XGBoost misses "
+            f"~{miss_pct:.0f}% of unseen attack flows (binary recall={xgb_rec:.4f}, precision={xgb_prec:.4f}), "
+            "which is why benign-only anomaly detectors are kept as a supplementary zero-day signal."
         ),
+    }
+
+
+def evaluate_time_block_protocol(
+    app_cfg: AppConfig,
+    model_cfg: ModelConfig,
+    xgb_params: dict[str, Any] | None = None,
+    imbalance_strategy: str = "none",
+    keras_epochs: int | None = None,
+    force_synthetic: bool = False,
+) -> dict[str, Any]:
+    """Evaluate closed-set temporal drift using chronological per-class ~60%/~20%/~20% splits."""
+    seed = app_cfg.project.random_seed
+    set_global_seed(seed)
+    hardware = configure_hardware(
+        use_gpu=model_cfg.hardware.use_gpu,
+        memory_growth=model_cfg.hardware.memory_growth,
+        mixed_precision=model_cfg.hardware.mixed_precision,
+    )
+
+    time_cfg = app_cfg.model_copy(deep=True)
+    time_cfg.data.split_strategy = "time_block"
+    dataset = run_preprocessing_pipeline(time_cfg, force_synthetic=force_synthetic, save_outputs=False)
+
+    num_features = dataset.X_train_scaled.shape[1]
+    num_classes = len(dataset.class_names)
+    boot_n = int(app_cfg.evaluation.bootstrap_n_resamples)
+    low_sup = int(app_cfg.evaluation.low_support_threshold)
+
+    X_sup_train, y_sup_train, sample_w, keras_cw = _select_supervised_train_arrays(
+        dataset, imbalance_strategy
+    )
+
+    # 1. XGBoost (baseline or selected variant) evaluated against chronological middle val / latest test
+    xgb_clf, present_cls = fit_xgboost_safe_multiclass(
+        X_train=X_sup_train,
+        y_train=y_sup_train,
+        X_val=dataset.X_val_scaled,
+        y_val=dataset.y_val,
+        total_classes=num_classes,
+        cfg=model_cfg.xgboost,
+        params_override=xgb_params,
+        device=hardware.xgb_device,
+        seed=seed,
+        sample_weight=sample_w,
+    )
+    p_xgb = expand_xgboost_probas(xgb_clf.predict_proba(dataset.X_test_scaled), present_cls, num_classes)
+
+    # 2. MLP & 1D-CNN trained in memory on earliest 60%, early-stopped on middle 20%
+    ep = int(keras_epochs or app_cfg.evaluation.time_block_keras_epochs)
+    p_mlp, p_cnn = _fit_and_predict_keras_pair(
+        X_fit=X_sup_train,
+        y_fit=y_sup_train,
+        X_es=dataset.X_val_scaled,
+        y_es=dataset.y_val,
+        X_test=dataset.X_test_scaled,
+        num_features=num_features,
+        num_classes=num_classes,
+        model_cfg=model_cfg,
+        epochs=ep,
+        keras_cw=keras_cw,
+    )
+
+    models_summary: dict[str, dict[str, Any]] = {}
+    per_class_by_model: dict[str, list[dict[str, Any]]] = {}
+    for display_name, proba in (("XGBoost", p_xgb), ("1D-CNN", p_cnn), ("MLP", p_mlp)):
+        ev = evaluate_supervised_model(
+            dataset.y_test,
+            proba,
+            dataset.class_names,
+            display_name,
+            bootstrap_n=boot_n,
+            low_support_threshold=low_sup,
+            seed=seed,
+        )
+        ci = ev.get("f1_macro_ci95", {})
+        models_summary[display_name] = {
+            "accuracy": float(ev["accuracy"]),
+            "precision_weighted": float(ev["precision_weighted"]),
+            "recall_weighted": float(ev["recall_weighted"]),
+            "f1_weighted": float(ev["f1_weighted"]),
+            "f1_macro": float(ev["f1_macro"]),
+            "f1_macro_ci95": ci,
+            "roc_auc_macro_ovr": float(ev["roc_auc_macro_ovr"]),
+            "pr_auc_macro_ovr": float(ev["pr_auc_macro_ovr"]),
+        }
+        per_class_by_model[display_name] = list(ev.get("per_class_metrics", []))
+
+    ae_eval, ae_threshold = _fit_and_eval_in_memory_autoencoder(
+        dataset=dataset,
+        app_cfg=app_cfg,
+        model_cfg=model_cfg,
+        epochs=ep,
+        bootstrap_n=boot_n,
+        seed=seed,
+    )
+
+    tb_details = dataset.audit_report.get("time_block_details", {})
+    return {
+        "executed": True,
+        "split_strategy": "time_block",
+        "imbalance_strategy": imbalance_strategy,
+        "keras_epochs": ep,
+        "ordering_source": tb_details.get("ordering_source", ""),
+        "tiny_class_fallbacks": tb_details.get("tiny_class_fallbacks", {}),
+        "per_class_allocations": tb_details.get("per_class_allocations", {}),
+        "split_sizes": dataset.audit_report["split_sizes"],
+        "post_clip_dedup_removed": dataset.audit_report.get("post_clip_dedup_removed", {}),
+        "leakage_checks": dataset.audit_report["leakage_checks"],
+        "models": models_summary,
+        "per_class_metrics": per_class_by_model,
+        "autoencoder": {
+            "accuracy": float(ae_eval["accuracy"]),
+            "precision": float(ae_eval["precision"]),
+            "recall": float(ae_eval["recall"]),
+            "f1": float(ae_eval["f1"]),
+            "f1_ci95": ae_eval.get("f1_ci95", {}),
+            "roc_auc": float(ae_eval["roc_auc"]),
+            "pr_auc": float(ae_eval["pr_auc"]),
+            "fpr": float(ae_eval["fpr"]),
+            "threshold": float(ae_threshold),
+        },
     }
 
 
@@ -595,7 +778,7 @@ def run_xgboost_stratified_cv(
         seed=seed,
         force_synthetic=force_synthetic,
     )
-    X_df, y_series, _, _ = clean_cicids_dataframe(
+    X_df, y_series, metadata, _ = clean_cicids_dataframe(
         df_raw,
         label_col=app_cfg.data.label_column,
         identifier_keywords=app_cfg.data.identifier_keywords,
@@ -610,14 +793,24 @@ def run_xgboost_stratified_cv(
     class_names = [str(c) for c in label_encoder.classes_]
     num_classes = len(class_names)
 
-    # Keep the final held-out test split isolated from CV.
-    idx_all = np.arange(len(X_df))
-    idx_dev, _ = train_test_split(
-        idx_all,
-        test_size=app_cfg.data.split.test_size,
-        random_state=seed,
-        stratify=y_all if app_cfg.data.split.stratify else None,
-    )
+    # Keep the final held-out test split isolated from CV (respecting time_block if configured).
+    if app_cfg.data.split_strategy == "time_block":
+        idx_tr_tb, idx_va_tb, _, _ = _split_indices_time_block(
+            metadata=metadata,
+            y_all=y_all,
+            class_names=class_names,
+            train_fraction=app_cfg.data.split.time_block_train_fraction,
+            val_fraction=app_cfg.data.split.time_block_val_fraction,
+        )
+        idx_dev = np.sort(np.concatenate([idx_tr_tb, idx_va_tb]))
+    else:
+        idx_all = np.arange(len(X_df))
+        idx_dev, _ = train_test_split(
+            idx_all,
+            test_size=app_cfg.data.split.test_size,
+            random_state=seed,
+            stratify=y_all if app_cfg.data.split.stratify else None,
+        )
     X_dev = X_df.iloc[idx_dev].reset_index(drop=True)
     y_dev = y_all[idx_dev].astype(np.int64)
 

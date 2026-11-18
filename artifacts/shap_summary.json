@@ -2,7 +2,7 @@
   "XGBoost": {
     "explainer_type": "TreeExplainer",
     "n_samples_explained": 500,
-    "elapsed_sec": 0.2857381999492645,
+    "elapsed_sec": 0.49334089999319986,
     "top_features": [
       {
         "feature": "Destination Port",
@@ -89,87 +89,87 @@
   "MLP": {
     "explainer_type": "GradientExplainer",
     "n_samples_explained": 20,
-    "elapsed_sec": 2.38064889999805,
+    "elapsed_sec": 2.34350399998948,
     "top_features": [
       {
         "feature": "ACK Flag Count",
-        "mean_abs_shap": 0.006600444942653392
+        "mean_abs_shap": 0.0072253068885793515
       },
       {
         "feature": "PSH Flag Count",
-        "mean_abs_shap": 0.006259524687610188
+        "mean_abs_shap": 0.005334117716260285
       },
       {
         "feature": "Min Packet Length",
-        "mean_abs_shap": 0.006191298577036481
+        "mean_abs_shap": 0.004296511657824399
       },
       {
         "feature": "Flow IAT Std",
-        "mean_abs_shap": 0.004897401007865335
-      },
-      {
-        "feature": "Bwd Packets/s",
-        "mean_abs_shap": 0.003983525180163192
-      },
-      {
-        "feature": "Idle Max",
-        "mean_abs_shap": 0.0038465177543441182
+        "mean_abs_shap": 0.00411218462173295
       },
       {
         "feature": "Down/Up Ratio",
-        "mean_abs_shap": 0.0036085569002668356
+        "mean_abs_shap": 0.0036150882447887945
       },
       {
-        "feature": "Fwd Packet Length Std",
-        "mean_abs_shap": 0.003324666446616849
-      },
-      {
-        "feature": "Packet Length Std",
-        "mean_abs_shap": 0.00331329402119816
+        "feature": "Bwd Packets/s",
+        "mean_abs_shap": 0.0030179912235951518
       },
       {
         "feature": "Packet Length Variance",
-        "mean_abs_shap": 0.003180030146893878
+        "mean_abs_shap": 0.002982320651140822
+      },
+      {
+        "feature": "Idle Max",
+        "mean_abs_shap": 0.0028945739042419275
+      },
+      {
+        "feature": "Packet Length Std",
+        "mean_abs_shap": 0.002892546238235007
       },
       {
         "feature": "Init_Win_bytes_forward",
-        "mean_abs_shap": 0.0029767123945696576
+        "mean_abs_shap": 0.002774224994236199
       },
       {
         "feature": "Average Packet Size",
-        "mean_abs_shap": 0.0029381043395187703
-      },
-      {
-        "feature": "Idle Mean",
-        "mean_abs_shap": 0.002832231999451496
-      },
-      {
-        "feature": "Fwd IAT Std",
-        "mean_abs_shap": 0.0026250010556097434
-      },
-      {
-        "feature": "Bwd Packet Length Std",
-        "mean_abs_shap": 0.00260648675087572
+        "mean_abs_shap": 0.002604607913473263
       },
       {
         "feature": "Flow IAT Mean",
-        "mean_abs_shap": 0.0025005416156606785
+        "mean_abs_shap": 0.002485481650005147
+      },
+      {
+        "feature": "Fwd Packet Length Std",
+        "mean_abs_shap": 0.0024293866712171686
+      },
+      {
+        "feature": "Bwd Packet Length Std",
+        "mean_abs_shap": 0.002376516574509802
       },
       {
         "feature": "Bwd Packet Length Max",
-        "mean_abs_shap": 0.0024120528886505247
+        "mean_abs_shap": 0.0021492827875298996
       },
       {
-        "feature": "Packet Length Mean",
-        "mean_abs_shap": 0.0023858186736161113
+        "feature": "Idle Mean",
+        "mean_abs_shap": 0.002125613427926855
+      },
+      {
+        "feature": "Fwd IAT Std",
+        "mean_abs_shap": 0.002070110236618523
       },
       {
         "feature": "Max Packet Length",
-        "mean_abs_shap": 0.0023307337229840535
+        "mean_abs_shap": 0.0019733866575684543
       },
       {
-        "feature": "Destination Port",
-        "mean_abs_shap": 0.0023073443852650623
+        "feature": "Packet Length Mean",
+        "mean_abs_shap": 0.0019205496282964421
+      },
+      {
+        "feature": "Bwd Packet Length Min",
+        "mean_abs_shap": 0.0018182611196012118
       }
     ],
     "explainer_benchmark": {
@@ -177,16 +177,16 @@
         "status": "success",
         "n_background": 50,
         "n_explained": 20,
-        "elapsed_sec": 2.3806
+        "elapsed_sec": 2.3435
       },
       "kernel_explainer": {
         "status": "success",
         "n_background": 10,
         "n_explained": 10,
-        "elapsed_sec": 6.8116
+        "elapsed_sec": 6.781
       },
-      "spearman_rank_agreement": 0.699,
-      "speedup_vs_kernel": 2.86
+      "spearman_rank_agreement": 0.7041,
+      "speedup_vs_kernel": 2.89
     }
   },
   "local_example": {

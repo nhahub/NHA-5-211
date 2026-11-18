@@ -14,6 +14,7 @@ from src.data.feature_engineering import SchemaValidationError, align_feature_sc
 from src.data.loader import CICIDS2017_FEATURES, discover_csv_files, generate_synthetic_cicids2017
 from src.data.preprocessing import (
     DataLeakageError,
+    _split_indices_time_block,
     apply_smote_safely,
     compute_hybrid_smote_class_weights,
     run_preprocessing_pipeline,
@@ -289,3 +290,69 @@ def test_smote_multiplier_cap_and_min_real_samples_threshold() -> None:
         seed=42,
     )
     assert np.bincount(y_capped)[1] == 200
+
+
+def test_time_block_split_timestamp_ordering_no_leakage_and_fallbacks(tmp_app_config: AppConfig) -> None:
+    """time_block sorts chronologically per class (~60/20/20), drops Timestamp, and handles tiny classes."""
+    tmp_app_config.data.split_strategy = "time_block"
+    tmp_app_config.data.synthetic_fallback.n_samples = 800
+    dataset = run_preprocessing_pipeline(tmp_app_config, force_synthetic=True, save_outputs=False)
+    audit = dataset.audit_report
+
+    assert audit["split_strategy"] == "time_block"
+    assert "Timestamp" not in dataset.feature_names
+    assert "Capture_Order" not in dataset.feature_names
+    assert "Timestamp" in audit["id_columns_removed"]
+    assert audit["time_block_details"]["ordering_source"] == "Timestamp"
+    assert audit["leakage_checks"]["passed"] is True
+    assert audit["leakage_checks"]["train_test_exact_overlap"] == 0
+    assert audit["leakage_checks"]["train_val_exact_overlap"] == 0
+    assert audit["leakage_checks"]["val_test_exact_overlap"] == 0
+
+    # Verify validation timestamps strictly precede test timestamps within every class
+    val_ts = pd.to_datetime(dataset.val_metadata["Timestamp"])
+    test_ts = pd.to_datetime(dataset.test_metadata["Timestamp"])
+    for cls_name in dataset.class_names:
+        v_mask = dataset.val_metadata["True_Label"].to_numpy() == cls_name
+        t_mask = dataset.test_metadata["True_Label"].to_numpy() == cls_name
+        if np.any(v_mask) and np.any(t_mask):
+            assert val_ts[v_mask].max() <= test_ts[t_mask].min()
+
+    # Verify DD/MM/YYYY TrafficLabelling timestamps + tiny-class fallbacks (n=1, 2, 3, 4, 10)
+    cls_names = ["BENIGN", "TinyOne", "TinyTwo", "TinyThree", "TinyFour"]
+    y_tiny = np.array([0] * 10 + [1] * 1 + [2] * 2 + [3] * 3 + [4] * 4, dtype=np.int64)
+    # Deliberately reverse timestamp strings vs array index to verify genuine Timestamp sorting
+    meta_ts = pd.DataFrame(
+        {"Timestamp": [f"{20 - idx:02d}/07/2017 09:00:{idx:02d}" for idx in range(len(y_tiny))]}
+    )
+    i_tr, i_va, i_te, details = _split_indices_time_block(meta_ts, y_tiny, cls_names)
+    assert details["ordering_source"] == "Timestamp"
+    assert len(set(i_tr) & set(i_va)) == 0
+    assert len(set(i_tr) & set(i_te)) == 0
+    assert len(set(i_va) & set(i_te)) == 0
+    assert details["per_class_allocations"]["BENIGN"] == {"total": 10, "train": 6, "validation": 2, "test": 2}
+    assert details["per_class_allocations"]["TinyFour"] == {
+        "total": 4,
+        "train": 2,
+        "validation": 1,
+        "test": 1,
+    }
+    assert details["per_class_allocations"]["TinyThree"] == {
+        "total": 3,
+        "train": 1,
+        "validation": 1,
+        "test": 1,
+    }
+    assert details["per_class_allocations"]["TinyTwo"] == {"total": 2, "train": 1, "validation": 0, "test": 1}
+    assert details["per_class_allocations"]["TinyOne"] == {"total": 1, "train": 1, "validation": 0, "test": 0}
+    assert "TinyOne" in details["tiny_class_fallbacks"]
+    # Verify earliest timestamps went to train and latest to test for BENIGN (idx 9 = oldest 11/07 -> idx 0 = newest 20/07)
+    benign_tr = [i for i in i_tr if y_tiny[i] == 0]
+    benign_te = [i for i in i_te if y_tiny[i] == 0]
+    parsed = pd.to_datetime(meta_ts["Timestamp"], dayfirst=True)
+    assert parsed.iloc[benign_tr].max() <= parsed.iloc[benign_te].min()
+
+    # Verify transparent fallback to Capture_Order when Timestamp column is absent (MachineLearningCVE style)
+    meta_cap = pd.DataFrame({"Capture_Order": np.arange(len(y_tiny))[::-1]})
+    _, _, _, cap_details = _split_indices_time_block(meta_cap, y_tiny, cls_names)
+    assert cap_details["ordering_source"].startswith("Capture_Order")

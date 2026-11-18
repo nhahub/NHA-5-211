@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import DataConfig
-from src.data.cleaner import SOURCE_FILE_COLUMN
+from src.data.cleaner import CHRON_ORDER_COLUMN, SOURCE_FILE_COLUMN
 from src.utils.logging import get_logger
 
 logger = get_logger("smart_ids.data.loader")
@@ -426,6 +426,28 @@ def generate_synthetic_cicids2017(
     return df
 
 
+def _session_chronological_rank(filename: str) -> int:
+    """Return CICIDS2017 capture session order (Monday -> Friday afternoon)."""
+    name = Path(str(filename)).name.lower()
+    if "monday" in name:
+        return 0
+    if "tuesday" in name:
+        return 1
+    if "wednesday" in name:
+        return 2
+    if "thursday" in name:
+        return 3 if "morning" in name else 4
+    if "friday" in name:
+        if "morning" in name:
+            return 5
+        if "portscan" in name:
+            return 6
+        if "ddos" in name:
+            return 7
+        return 8
+    return 9
+
+
 def load_cicids2017_corpus(
     raw_dir: Path,
     synthetic_dir: Path,
@@ -443,9 +465,18 @@ def load_cicids2017_corpus(
             part = _read_single_csv(csv_path)
             logger.info("Loaded %-55s -> %d rows x %d cols", csv_path.name, len(part), part.shape[1])
             part[SOURCE_FILE_COLUMN] = csv_path.name
+            session_rank = _session_chronological_rank(csv_path.name)
+            part[CHRON_ORDER_COLUMN] = (session_rank + 1) * 100_000_000 + np.arange(len(part), dtype=np.int64)
             frames.append(part)
 
         df = pd.concat(frames, ignore_index=True)
+        has_ts_col = any(str(col).strip().lower() == "timestamp" for col in df.columns)
+        if not has_ts_col:
+            logger.info(
+                "Raw CSVs omit a 'Timestamp' column (MachineLearningCVE export); preserving session+row "
+                "chronological order in '%s' for time_block splitting.",
+                CHRON_ORDER_COLUMN,
+            )
         raw_count = len(df)
         label_col = data_cfg.label_column
 

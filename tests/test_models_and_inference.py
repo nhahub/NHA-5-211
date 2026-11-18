@@ -32,6 +32,7 @@ from src.evaluation.protocols import (
     assert_ablation_row_parity,
     evaluate_by_day_protocol,
     evaluate_feature_ablation,
+    evaluate_time_block_protocol,
     run_xgboost_stratified_cv,
 )
 from src.evaluation.report_writer import format_ensemble_empirical_conclusion, write_academic_reports
@@ -210,6 +211,20 @@ def test_by_day_protocol_feature_ablation_and_report_tables(tmp_app_config: AppC
     )
     assert {"DDoS", "PortScan", "Web Attack"}.issubset(set(by_day_res["unseen_test_classes"]))
 
+    time_block_res = evaluate_time_block_protocol(
+        app_cfg=tmp_app_config,
+        model_cfg=model_cfg,
+        xgb_params=xgb_fast,
+        imbalance_strategy="none",
+        keras_epochs=1,
+        force_synthetic=False,
+    )
+    assert time_block_res["executed"] is True
+    assert time_block_res["leakage_checks"]["passed"] is True
+    assert set(["XGBoost", "MLP", "1D-CNN"]).issubset(time_block_res["models"].keys())
+    assert time_block_res["models"]["XGBoost"]["f1_macro_ci95"]["n_bootstrap"] > 0
+    assert len(time_block_res["per_class_metrics"]["XGBoost"]) > 0
+
     ablation_res = evaluate_feature_ablation(
         app_cfg=tmp_app_config,
         model_cfg=model_cfg,
@@ -258,6 +273,7 @@ def test_by_day_protocol_feature_ablation_and_report_tables(tmp_app_config: AppC
     summary = {
         "dataset_source": {"is_synthetic": False},
         "split_strategy": "random",
+        "time_block_protocol": time_block_res,
         "by_day_protocol": by_day_res,
         "feature_ablation": ablation_res,
         "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
@@ -265,8 +281,10 @@ def test_by_day_protocol_feature_ablation_and_report_tables(tmp_app_config: AppC
     }
     cmp_path, _ = write_academic_reports(summary, cmp_df, reports_dir)
     md_text = cmp_path.read_text(encoding="utf-8")
-    assert "Cross-Day Temporal Split Protocol (`by_day`" in md_text
-    assert "Cross-Day Binary Intrusion Detection (`by_day`: Benign vs. Attack)" in md_text
+    assert "Chronological Drift Evaluation (`time_block`" in md_text
+    assert "XGBoost Per-Class Metrics (`time_block` Test Partition)" in md_text
+    assert "Open-Set Cross-Day Protocol (`by_day`" in md_text
+    assert "Open-Set Cross-Day Binary Detection (`by_day`: Benign vs. Attack)" in md_text
     assert "Shortcut Feature Ablation (With vs. Without `Destination Port`)" in md_text
     assert "Delta Test Macro-F1 (without - with):" in md_text
 

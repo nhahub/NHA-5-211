@@ -186,6 +186,57 @@ def render_model_performance_page() -> None:
                 st.markdown(f"**Unseen-Attack Holdout Experiment (`{unseen.get('holdout_attack_class')}`)**")
                 st.json(unseen)
 
+    # Open-Set Cross-Day (by_day) & Chronological Drift (time_block) Protocols
+    time_blk = eval_summary.get("time_block_protocol", {})
+    by_day = eval_summary.get("by_day_protocol", {})
+    if time_blk.get("executed") or by_day.get("executed"):
+        st.markdown("#### 🕒 Chronological Drift (`time_block`) & Open-Set Cross-Day (`by_day`) Protocols")
+        if time_blk.get("executed"):
+            st.markdown(
+                "**Chronological Drift Evaluation (`time_block`: Per-Class Earliest ~60% / Next ~20% / Last ~20%)**"
+            )
+            tb_rows = []
+            for m_name, m_vals in time_blk.get("models", {}).items():
+                ci = m_vals.get("f1_macro_ci95", {})
+                tb_rows.append(
+                    {
+                        "Model": m_name,
+                        "Accuracy": m_vals.get("accuracy", 0.0),
+                        "F1_Weighted": m_vals.get("f1_weighted", 0.0),
+                        "F1_Macro": m_vals.get("f1_macro", 0.0),
+                        "CI95_Low": ci.get("ci95_low", 0.0),
+                        "CI95_High": ci.get("ci95_high", 0.0),
+                        "ROC_AUC_OVR": m_vals.get("roc_auc_macro_ovr", 0.0),
+                    }
+                )
+            if tb_rows:
+                st.dataframe(pd.DataFrame(tb_rows), use_container_width=True, hide_index=True)
+            st.caption(
+                f"Ordering: `{time_blk.get('ordering_source', 'Timestamp')}` | "
+                f"Leakage Check Passed: `{time_blk.get('leakage_checks', {}).get('passed')}`."
+            )
+            tb_pc_xgb = time_blk.get("per_class_metrics", {}).get("XGBoost", [])
+            if tb_pc_xgb:
+                with st.expander("View `time_block` XGBoost Per-Class Breakdown", expanded=False):
+                    st.dataframe(pd.DataFrame(tb_pc_xgb), use_container_width=True, hide_index=True)
+
+        if by_day.get("executed"):
+            st.markdown(
+                "**Open-Set Cross-Day Protocol (`by_day`: Mon–Wed Train / Thu Val / Thu–Fri Unseen Attacks)**"
+            )
+            if by_day.get("caveat_note"):
+                st.info(by_day["caveat_note"])
+            bin_rows = [
+                {"Model": name, **vals} for name, vals in by_day.get("binary_cross_day_models", {}).items()
+            ]
+            if bin_rows:
+                st.markdown("*Open-Set Cross-Day Binary Detection (Benign vs. Unseen Attacks)*")
+                st.dataframe(pd.DataFrame(bin_rows), use_container_width=True, hide_index=True)
+            mc_rows = [{"Model": name, **vals} for name, vals in by_day.get("multiclass_models", {}).items()]
+            if mc_rows:
+                with st.expander("View Reference Closed-Set Multi-Class Scores (`by_day`)", expanded=False):
+                    st.dataframe(pd.DataFrame(mc_rows), use_container_width=True, hide_index=True)
+
     # Diagnostic Figures
     st.markdown("#### 🖼️ Confusion Matrices, ROC & Precision-Recall Curves")
     fig_cols = st.columns(2)

@@ -34,6 +34,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--optuna-trials", type=int, default=None, help="Override Optuna trials for XGBoost.")
     parser.add_argument("--max-rows", type=int, default=None, help="Override dataset sample limit.")
     parser.add_argument(
+        "--split-strategy",
+        choices=["random", "by_day", "time_block"],
+        default=None,
+        help="Override data.split_strategy from configs/config.yaml.",
+    )
+    parser.add_argument(
         "--run-eval",
         action="store_true",
         help="Immediately run full evaluation, latency benchmarking, and SHAP reports after training.",
@@ -46,6 +52,8 @@ def main() -> None:
     app_cfg = get_app_config().model_copy(deep=True)
     model_cfg = get_model_config().model_copy(deep=True)
 
+    if args.split_strategy is not None:
+        app_cfg.data.split_strategy = args.split_strategy
     if args.max_rows is not None:
         app_cfg.data.max_rows_sample = args.max_rows
         app_cfg.data.synthetic_fallback.n_samples = args.max_rows

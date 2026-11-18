@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -70,7 +70,18 @@ class SplitConfig(BaseModel):
     test_size: float = Field(default=0.15, gt=0.0, lt=0.5)
     val_size_of_remainder: float = Field(default=0.15, gt=0.0, lt=0.5)
     thursday_val_fraction: float = Field(default=0.5, gt=0.0, lt=1.0)
+    time_block_train_fraction: float = Field(default=0.60, gt=0.0, lt=1.0)
+    time_block_val_fraction: float = Field(default=0.20, gt=0.0, lt=1.0)
     stratify: bool = True
+
+    @model_validator(mode="after")
+    def _validate_time_block_fractions(self) -> SplitConfig:
+        if self.time_block_train_fraction + self.time_block_val_fraction >= 1.0:
+            raise ValueError(
+                "time_block_train_fraction + time_block_val_fraction must be strictly less than 1.0 "
+                "so chronological test blocks receive positive support."
+            )
+        return self
 
 
 class ImbalanceConfig(BaseModel):
@@ -104,7 +115,7 @@ class DataConfig(BaseModel):
     preserve_features: list[str] = Field(default_factory=lambda: ["Destination Port"])
     drop_features: list[str] = Field(default_factory=list)
     strict_leakage_check: bool = True
-    split_strategy: Literal["random", "by_day"] = "random"
+    split_strategy: Literal["random", "by_day", "time_block"] = "random"
     split: SplitConfig = Field(default_factory=SplitConfig)
     imbalance: ImbalanceConfig = Field(default_factory=ImbalanceConfig)
 
@@ -122,6 +133,8 @@ class EvaluationConfig(BaseModel):
     unseen_attack_holdout_class: str = "Web Attack"
     run_by_day_comparison: bool = True
     by_day_keras_epochs: int = Field(default=20, ge=1)
+    run_time_block_comparison: bool = True
+    time_block_keras_epochs: int = Field(default=20, ge=1)
     run_feature_ablation: bool = True
     ablation_drop_features: list[str] = Field(default_factory=lambda: ["Destination Port"])
     bootstrap_n_resamples: int = Field(default=1000, ge=100)

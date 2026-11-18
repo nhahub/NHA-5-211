@@ -67,12 +67,14 @@ data:
     - "Destination Port"
   drop_features: []
   strict_leakage_check: true
-  split_strategy: "random" # random | by_day (Mon-Wed train, part of Thu val, Thu-Fri test)
+  split_strategy: "random" # random | by_day (open-set cross-day: Mon-Wed train, part of Thu val, Thu-Fri unseen attacks) | time_block (chronological per-class ~60%/~20%/~20%)
   split:
-    # Matches report: 15% held-out test, then 15% of remainder validation (12.75% val, 72.25% train)
+    # Matches report for random: 15% held-out test, then 15% of remainder validation (12.75% val, 72.25% train)
     test_size: 0.15
     val_size_of_remainder: 0.15
     thursday_val_fraction: 0.50
+    time_block_train_fraction: 0.60
+    time_block_val_fraction: 0.20
     stratify: true
   imbalance:
     strategy: "auto_compare" # Compares None, Class-Weight, and SMOTE on validation Macro-F1; options: smote, class_weight, none, auto_compare
@@ -92,8 +94,10 @@ evaluation:
   shap_mlp_explain_samples: 20
   autoencoder_percentiles: [90, 95, 97, 99]
   unseen_attack_holdout_class: "Web Attack"
-  run_by_day_comparison: true
+  run_by_day_comparison: true # Open-set cross-day protocol (Mon-Wed train, Thu-Fri unseen attacks)
   by_day_keras_epochs: 20
+  run_time_block_comparison: true # Chronological per-class temporal drift split (~60%/~20%/~20%)
+  time_block_keras_epochs: 20
   run_feature_ablation: true
   ablation_drop_features:
     - "Destination Port"

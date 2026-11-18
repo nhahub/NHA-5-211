@@ -3530,19 +3530,19 @@
     "n_unseen_test_samples": 26,
     "n_benign_test_samples": 23112,
     "supervised_closed_set_unseen_class_recall": 0.0,
-    "autoencoder_threshold_95pct": 0.07663855701684938,
+    "autoencoder_threshold_95pct": 0.0751497074961661,
     "autoencoder_unseen_attack_recall": 0.0,
     "autoencoder_benign_vs_unseen_metrics": {
-      "accuracy": 0.9483965770593829,
+      "accuracy": 0.9472728844325352,
       "precision": 0.0,
       "recall": 0.0,
       "f1": 0.0,
-      "roc_auc": 0.6060022099741725,
-      "pr_auc": 0.0013879509262648315,
-      "fpr": 0.05053651782623745,
+      "roc_auc": 0.45425286897249517,
+      "pr_auc": 0.0009916497923384267,
+      "fpr": 0.051661474558670824,
       "fnr": 1.0,
-      "tn": 21944,
-      "fp": 1168,
+      "tn": 21918,
+      "fp": 1194,
       "fn": 26,
       "tp": 0
     },
@@ -3550,6 +3550,7 @@
   },
   "by_day_protocol": {
     "executed": true,
+    "protocol_name": "open-set cross-day",
     "split_strategy": "by_day",
     "imbalance_strategy": "none",
     "keras_epochs": 20,
@@ -3722,7 +3723,515 @@
       }
     },
     "autoencoder_threshold": 0.11694750636816025,
-    "caveat_note": "In CICIDS2017, all attack families occurring on Thursday and Friday (Bot, DDoS, Infiltration, PortScan, Web Attack) are absent from Monday-Wednesday training data. Closed-set multi-class Macro-F1 therefore cannot attribute unseen Thursday-Friday labels, whereas the Cross-Day Binary table evaluates Benign-vs-Attack generalization directly."
+    "caveat_note": "Open-set cross-day protocol (by_day): by construction in CICIDS2017, all Thursday and Friday attack families (Bot, DDoS, Infiltration, PortScan, Web Attack) have zero training instances in Monday-Wednesday data. Closed-set multi-class Macro-F1 is therefore near zero by design rather than ordinary generalization degradation. The real empirical finding is that supervised XGBoost misses ~71% of unseen attack flows (binary recall=0.2876, precision=0.9991), which is why benign-only anomaly detectors are kept as a supplementary zero-day signal."
+  },
+  "time_block_protocol": {
+    "executed": true,
+    "split_strategy": "time_block",
+    "imbalance_strategy": "none",
+    "keras_epochs": 20,
+    "ordering_source": "Capture_Order (capture session schedule + CSV row index; Timestamp column absent in MachineLearningCVE CSVs)",
+    "tiny_class_fallbacks": {
+      "Heartbleed": "Low-support chronological split (n=11): 7 earliest train / 2 middle val / 2 latest test"
+    },
+    "per_class_allocations": {
+      "BENIGN": {
+        "total": 156481,
+        "train": 93889,
+        "validation": 31296,
+        "test": 31296
+      },
+      "Bot": {
+        "total": 137,
+        "train": 82,
+        "validation": 27,
+        "test": 28
+      },
+      "DDoS": {
+        "total": 9045,
+        "train": 5427,
+        "validation": 1809,
+        "test": 1809
+      },
+      "DoS GoldenEye": {
+        "total": 727,
+        "train": 436,
+        "validation": 145,
+        "test": 146
+      },
+      "DoS Hulk": {
+        "total": 12587,
+        "train": 7552,
+        "validation": 2517,
+        "test": 2518
+      },
+      "DoS Slowhttptest": {
+        "total": 383,
+        "train": 230,
+        "validation": 77,
+        "test": 76
+      },
+      "DoS slowloris": {
+        "total": 404,
+        "train": 242,
+        "validation": 81,
+        "test": 81
+      },
+      "FTP-Patator": {
+        "total": 466,
+        "train": 280,
+        "validation": 93,
+        "test": 93
+      },
+      "Heartbleed": {
+        "total": 11,
+        "train": 7,
+        "validation": 2,
+        "test": 2
+      },
+      "Infiltration": {
+        "total": 36,
+        "train": 22,
+        "validation": 7,
+        "test": 7
+      },
+      "PortScan": {
+        "total": 10506,
+        "train": 6304,
+        "validation": 2101,
+        "test": 2101
+      },
+      "SSH-Patator": {
+        "total": 309,
+        "train": 185,
+        "validation": 62,
+        "test": 62
+      },
+      "Web Attack": {
+        "total": 176,
+        "train": 106,
+        "validation": 35,
+        "test": 35
+      }
+    },
+    "split_sizes": {
+      "train_raw": 114762,
+      "train_smote": 121006,
+      "validation": 37952,
+      "test": 37862
+    },
+    "post_clip_dedup_removed": {
+      "train_within_split_removed": 0,
+      "val_cross_or_dup_removed": 6,
+      "test_cross_or_dup_removed": 3,
+      "val_scaled_collision_removed": 294,
+      "test_scaled_collision_removed": 389,
+      "total_removed": 692
+    },
+    "leakage_checks": {
+      "train_standardized_max_abs_mean": 0.0,
+      "val_mean_shift_observed": 0.128386,
+      "train_test_exact_overlap_sample": 0,
+      "train_val_exact_overlap_sample": 0,
+      "val_test_exact_overlap_sample": 0,
+      "train_test_exact_overlap": 0,
+      "train_val_exact_overlap": 0,
+      "val_test_exact_overlap": 0,
+      "checked_full_splits": true,
+      "strict_mode": true,
+      "val_max_min_class_ratio": 15498.5,
+      "test_max_min_class_ratio": 15453.5,
+      "scaler_n_samples_seen": 114762,
+      "scaler_fit_strictly_on_train": true,
+      "passed": true
+    },
+    "models": {
+      "XGBoost": {
+        "accuracy": 0.9923934287676298,
+        "precision_weighted": 0.9915758050095471,
+        "recall_weighted": 0.9923934287676298,
+        "f1_weighted": 0.99174985650868,
+        "f1_macro": 0.7517909665390111,
+        "f1_macro_ci95": {
+          "mean": 0.757525997740971,
+          "std": 0.027347631031857292,
+          "ci95_low": 0.7098102670683029,
+          "ci95_high": 0.8249950284534832,
+          "n_bootstrap": 1000
+        },
+        "roc_auc_macro_ovr": 0.9928953067041821,
+        "pr_auc_macro_ovr": 0.8048519256082455
+      },
+      "1D-CNN": {
+        "accuracy": 0.9521419893296709,
+        "precision_weighted": 0.9489118755853481,
+        "recall_weighted": 0.9521419893296709,
+        "f1_weighted": 0.9456035895960979,
+        "f1_macro": 0.4376174020515864,
+        "f1_macro_ci95": {
+          "mean": 0.44240198907815054,
+          "std": 0.013662593370355856,
+          "ci95_low": 0.4265234122445761,
+          "ci95_high": 0.4786943926540567,
+          "n_bootstrap": 1000
+        },
+        "roc_auc_macro_ovr": 0.9699843837709445,
+        "pr_auc_macro_ovr": 0.7023511361518312
+      },
+      "MLP": {
+        "accuracy": 0.9502403465215784,
+        "precision_weighted": 0.9376441039889345,
+        "recall_weighted": 0.9502403465215784,
+        "f1_weighted": 0.9400238960098315,
+        "f1_macro": 0.2766685093610244,
+        "f1_macro_ci95": {
+          "mean": 0.2798774582620763,
+          "std": 0.008054002060932224,
+          "ci95_low": 0.2751528584314101,
+          "ci95_high": 0.30042933904749947,
+          "n_bootstrap": 1000
+        },
+        "roc_auc_macro_ovr": 0.9231439570902779,
+        "pr_auc_macro_ovr": 0.4422291325037625
+      }
+    },
+    "per_class_metrics": {
+      "XGBoost": [
+        {
+          "class_name": "BENIGN",
+          "precision": 0.9913704606698319,
+          "recall": 0.9998705794803766,
+          "f1_score": 0.9956023776156188,
+          "support": 30907,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "Bot",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 28,
+          "statistically_unreliable": true
+        },
+        {
+          "class_name": "DDoS",
+          "precision": 1.0,
+          "recall": 0.9939192924267551,
+          "f1_score": 0.9969503742722484,
+          "support": 1809,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "DoS GoldenEye",
+          "precision": 0.952755905511811,
+          "recall": 0.8287671232876712,
+          "f1_score": 0.8864468864468864,
+          "support": 146,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "DoS Hulk",
+          "precision": 0.9978849407783418,
+          "recall": 0.9375993640699523,
+          "f1_score": 0.9668032786885246,
+          "support": 2516,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "DoS Slowhttptest",
+          "precision": 0.9493670886075949,
+          "recall": 0.9868421052631579,
+          "f1_score": 0.967741935483871,
+          "support": 76,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "DoS slowloris",
+          "precision": 1.0,
+          "recall": 0.7160493827160493,
+          "f1_score": 0.8345323741007195,
+          "support": 81,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "FTP-Patator",
+          "precision": 1.0,
+          "recall": 0.978494623655914,
+          "f1_score": 0.9891304347826086,
+          "support": 93,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "Heartbleed",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 2,
+          "statistically_unreliable": true
+        },
+        {
+          "class_name": "Infiltration",
+          "precision": 1.0,
+          "recall": 0.42857142857142855,
+          "f1_score": 0.6,
+          "support": 7,
+          "statistically_unreliable": true
+        },
+        {
+          "class_name": "PortScan",
+          "precision": 1.0,
+          "recall": 0.9952380952380953,
+          "f1_score": 0.9976133651551312,
+          "support": 2100,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "SSH-Patator",
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1_score": 1.0,
+          "support": 62,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "Web Attack",
+          "precision": 0.8235294117647058,
+          "recall": 0.4,
+          "f1_score": 0.5384615384615384,
+          "support": 35,
+          "statistically_unreliable": false
+        }
+      ],
+      "1D-CNN": [
+        {
+          "class_name": "BENIGN",
+          "precision": 0.9550031269543464,
+          "recall": 0.9881580224544602,
+          "f1_score": 0.9712977244899582,
+          "support": 30907,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "Bot",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 28,
+          "statistically_unreliable": true
+        },
+        {
+          "class_name": "DDoS",
+          "precision": 0.8318706697459585,
+          "recall": 0.9955776672194583,
+          "f1_score": 0.9063915450427781,
+          "support": 1809,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "DoS GoldenEye",
+          "precision": 0.98989898989899,
+          "recall": 0.6712328767123288,
+          "f1_score": 0.8,
+          "support": 146,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "DoS Hulk",
+          "precision": 0.9979324603721571,
+          "recall": 0.575516693163752,
+          "f1_score": 0.7300226871691454,
+          "support": 2516,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "DoS Slowhttptest",
+          "precision": 0.9242424242424242,
+          "recall": 0.8026315789473685,
+          "f1_score": 0.8591549295774648,
+          "support": 76,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "DoS slowloris",
+          "precision": 1.0,
+          "recall": 0.2716049382716049,
+          "f1_score": 0.42718446601941745,
+          "support": 81,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "FTP-Patator",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 93,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "Heartbleed",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 2,
+          "statistically_unreliable": true
+        },
+        {
+          "class_name": "Infiltration",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 7,
+          "statistically_unreliable": true
+        },
+        {
+          "class_name": "PortScan",
+          "precision": 1.0,
+          "recall": 0.99,
+          "f1_score": 0.9949748743718593,
+          "support": 2100,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "SSH-Patator",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 62,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "Web Attack",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 35,
+          "statistically_unreliable": false
+        }
+      ],
+      "MLP": [
+        {
+          "class_name": "BENIGN",
+          "precision": 0.94800602650432,
+          "recall": 0.9975733652570615,
+          "f1_score": 0.972158284723317,
+          "support": 30907,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "Bot",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 28,
+          "statistically_unreliable": true
+        },
+        {
+          "class_name": "DDoS",
+          "precision": 0.9583333333333334,
+          "recall": 0.8899944720840243,
+          "f1_score": 0.9229005445686443,
+          "support": 1809,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "DoS GoldenEye",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 146,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "DoS Hulk",
+          "precision": 0.9725935828877005,
+          "recall": 0.5782988871224165,
+          "f1_score": 0.7253240279162513,
+          "support": 2516,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "DoS Slowhttptest",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 76,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "DoS slowloris",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 81,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "FTP-Patator",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 93,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "Heartbleed",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 2,
+          "statistically_unreliable": true
+        },
+        {
+          "class_name": "Infiltration",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 7,
+          "statistically_unreliable": true
+        },
+        {
+          "class_name": "PortScan",
+          "precision": 0.9620896902450301,
+          "recall": 0.9909523809523809,
+          "f1_score": 0.9763077644851044,
+          "support": 2100,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "SSH-Patator",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 62,
+          "statistically_unreliable": false
+        },
+        {
+          "class_name": "Web Attack",
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "support": 35,
+          "statistically_unreliable": false
+        }
+      ]
+    },
+    "autoencoder": {
+      "accuracy": 0.8455707569594845,
+      "precision": 0.6167298777918246,
+      "recall": 0.42084831056793676,
+      "f1": 0.5002991197333562,
+      "f1_ci95": {
+        "mean": 0.5003066222614581,
+        "std": 0.005452496519178449,
+        "ci95_low": 0.48923848884274657,
+        "ci95_high": 0.5107413925412042,
+        "n_bootstrap": 1000
+      },
+      "roc_auc": 0.8263166392105517,
+      "pr_auc": 0.5468441755803345,
+      "fpr": 0.05885398129873491,
+      "threshold": 0.10084990262985227
+    }
   },
   "feature_ablation": {
     "executed": true,
@@ -3779,43 +4288,43 @@
       "top_shap_features": [
         {
           "feature": "Destination Port",
-          "mean_abs_shap": 0.8609660422347776
+          "mean_abs_shap": 0.86096604169547
         },
         {
           "feature": "Init_Win_bytes_backward",
-          "mean_abs_shap": 0.3711411675713922
+          "mean_abs_shap": 0.37114116726928537
         },
         {
           "feature": "Init_Win_bytes_forward",
-          "mean_abs_shap": 0.29337946941382964
+          "mean_abs_shap": 0.29337946914203566
         },
         {
           "feature": "min_seg_size_forward",
-          "mean_abs_shap": 0.2820225839512601
+          "mean_abs_shap": 0.2820225839294815
         },
         {
           "feature": "Flow IAT Min",
-          "mean_abs_shap": 0.21271180293642764
+          "mean_abs_shap": 0.21271180346930532
         },
         {
           "feature": "Bwd Packets/s",
-          "mean_abs_shap": 0.21030745424550557
+          "mean_abs_shap": 0.2103074544804851
         },
         {
           "feature": "Bwd Packet Length Mean",
-          "mean_abs_shap": 0.19770626632668656
+          "mean_abs_shap": 0.19770626622810977
         },
         {
           "feature": "Total Length of Fwd Packets",
-          "mean_abs_shap": 0.16721272015173094
+          "mean_abs_shap": 0.16721272009742766
         },
         {
           "feature": "Fwd IAT Min",
-          "mean_abs_shap": 0.15448450418944962
+          "mean_abs_shap": 0.15448450430944707
         },
         {
           "feature": "Flow Duration",
-          "mean_abs_shap": 0.14109548089404295
+          "mean_abs_shap": 0.14109548079460646
         }
       ]
     },
@@ -3867,43 +4376,43 @@
       "top_shap_features": [
         {
           "feature": "Init_Win_bytes_backward",
-          "mean_abs_shap": 0.4961664111674496
+          "mean_abs_shap": 0.4961664115331012
         },
         {
           "feature": "Init_Win_bytes_forward",
-          "mean_abs_shap": 0.44487473696033253
+          "mean_abs_shap": 0.4448747370915773
         },
         {
           "feature": "min_seg_size_forward",
-          "mean_abs_shap": 0.363403351270701
+          "mean_abs_shap": 0.3634033513918449
         },
         {
           "feature": "Flow IAT Min",
-          "mean_abs_shap": 0.3315472410441592
+          "mean_abs_shap": 0.3315472409450802
         },
         {
           "feature": "Bwd Packets/s",
-          "mean_abs_shap": 0.29489111996918477
+          "mean_abs_shap": 0.29489112018295927
         },
         {
           "feature": "Flow Bytes/s",
-          "mean_abs_shap": 0.2364442546187293
+          "mean_abs_shap": 0.23644425481477255
         },
         {
           "feature": "Bwd Packet Length Mean",
-          "mean_abs_shap": 0.23232992673285582
+          "mean_abs_shap": 0.23232992647480788
         },
         {
           "feature": "Flow Duration",
-          "mean_abs_shap": 0.18793949524929332
+          "mean_abs_shap": 0.1879394953114769
         },
         {
           "feature": "Fwd Packet Length Max",
-          "mean_abs_shap": 0.18132300707647722
+          "mean_abs_shap": 0.1813230071156644
         },
         {
           "feature": "Fwd IAT Min",
-          "mean_abs_shap": 0.17741323660314073
+          "mean_abs_shap": 0.17741323683595353
         }
       ]
     },
@@ -3987,66 +4496,66 @@
     ]
   },
   "preprocessing_latency": {
-    "mean_us": 838.2190024713054,
-    "median_us": 827.1999831777066,
-    "p95_us": 953.7650417769328,
-    "samples_per_sec": 1193.0056429784086
+    "mean_us": 835.137001122348,
+    "median_us": 804.2000117711723,
+    "p95_us": 1023.050016374327,
+    "samples_per_sec": 1197.4083278026135
   },
   "inference_latency": {
     "MLP": {
-      "single_mean_us": 205.28800203464925,
-      "single_median_us": 202.89997337386012,
-      "single_p95_us": 273.449980886653,
-      "single_samples_per_sec": 4871.2052827676525,
-      "batch_samples_per_sec": 23816.445912525298,
+      "single_mean_us": 191.41199882142246,
+      "single_median_us": 169.80001237243414,
+      "single_p95_us": 323.7550146877765,
+      "single_samples_per_sec": 5224.332884862399,
+      "batch_samples_per_sec": 25016.266270815206,
       "model_size_mb": 2.534
     },
     "1D-CNN": {
-      "single_mean_us": 718.661998398602,
-      "single_median_us": 693.3999829925597,
-      "single_p95_us": 943.2700229808688,
-      "single_samples_per_sec": 1391.4747158306754,
-      "batch_samples_per_sec": 16872.863084647357,
+      "single_mean_us": 708.3139981841668,
+      "single_median_us": 689.949985826388,
+      "single_p95_us": 926.4850028557703,
+      "single_samples_per_sec": 1411.8032434253723,
+      "batch_samples_per_sec": 17950.950430766774,
       "model_size_mb": 1.31
     },
     "XGBoost": {
-      "single_mean_us": 592.8629997652024,
-      "single_median_us": 535.0500287022442,
-      "single_p95_us": 744.7400188539177,
-      "single_samples_per_sec": 1686.7303245371024,
-      "batch_samples_per_sec": 237598.0330626214,
+      "single_mean_us": 548.0509978951886,
+      "single_median_us": 495.69999100640416,
+      "single_p95_us": 621.3849963387473,
+      "single_samples_per_sec": 1824.6477131517674,
+      "batch_samples_per_sec": 317054.0385922942,
       "model_size_mb": 2.954
     },
     "Autoencoder": {
-      "single_mean_us": 269.31900123599917,
-      "single_median_us": 249.1000050213188,
-      "single_p95_us": 416.90496727824205,
-      "single_samples_per_sec": 3713.068871526517,
-      "batch_samples_per_sec": 24332.6154634136,
+      "single_mean_us": 242.78399941977113,
+      "single_median_us": 208.500016015023,
+      "single_p95_us": 468.4000072302296,
+      "single_samples_per_sec": 4118.887580688585,
+      "batch_samples_per_sec": 24204.47104008961,
       "model_size_mb": 1.548
     },
     "Isolation Forest": {
-      "single_mean_us": 8052.484000218101,
-      "single_median_us": 7982.1000108495355,
-      "single_p95_us": 8787.905008648522,
-      "single_samples_per_sec": 124.18528245109398,
-      "batch_samples_per_sec": 72477.6161956096,
+      "single_mean_us": 7863.027002895251,
+      "single_median_us": 7789.699971908703,
+      "single_p95_us": 8862.435011542402,
+      "single_samples_per_sec": 127.17748516338419,
+      "batch_samples_per_sec": 75076.6162995821,
       "model_size_mb": 2.096
     },
     "One-Class SVM": {
-      "single_mean_us": 145.2330022584647,
-      "single_median_us": 134.85003728419542,
-      "single_p95_us": 176.2299943948164,
-      "single_samples_per_sec": 6885.487351010926,
-      "batch_samples_per_sec": 22546.45803420574,
+      "single_mean_us": 161.2089987611398,
+      "single_median_us": 141.2999990861863,
+      "single_p95_us": 318.19498108234257,
+      "single_samples_per_sec": 6203.127664614308,
+      "batch_samples_per_sec": 21578.504096910805,
       "model_size_mb": 0.478
     },
     "LOF": {
-      "single_mean_us": 1299.07300171908,
-      "single_median_us": 1265.5000027734786,
-      "single_p95_us": 1705.4450057912618,
-      "single_samples_per_sec": 769.7796803387394,
-      "batch_samples_per_sec": 40917.391374970575,
+      "single_mean_us": 1339.5059999311343,
+      "single_median_us": 1220.3500082250684,
+      "single_p95_us": 2140.815000166185,
+      "single_samples_per_sec": 746.543875168466,
+      "batch_samples_per_sec": 45810.61072956747,
       "model_size_mb": 5.666
     }
   },
@@ -4054,7 +4563,7 @@
     "XGBoost": {
       "explainer_type": "TreeExplainer",
       "n_samples_explained": 500,
-      "elapsed_sec": 0.2857381999492645,
+      "elapsed_sec": 0.49334089999319986,
       "top_features": [
         {
           "feature": "Destination Port",
@@ -4141,87 +4650,87 @@
     "MLP": {
       "explainer_type": "GradientExplainer",
       "n_samples_explained": 20,
-      "elapsed_sec": 2.38064889999805,
+      "elapsed_sec": 2.34350399998948,
       "top_features": [
         {
           "feature": "ACK Flag Count",
-          "mean_abs_shap": 0.006600444942653392
+          "mean_abs_shap": 0.0072253068885793515
         },
         {
           "feature": "PSH Flag Count",
-          "mean_abs_shap": 0.006259524687610188
+          "mean_abs_shap": 0.005334117716260285
         },
         {
           "feature": "Min Packet Length",
-          "mean_abs_shap": 0.006191298577036481
+          "mean_abs_shap": 0.004296511657824399
         },
         {
           "feature": "Flow IAT Std",
-          "mean_abs_shap": 0.004897401007865335
-        },
-        {
-          "feature": "Bwd Packets/s",
-          "mean_abs_shap": 0.003983525180163192
-        },
-        {
-          "feature": "Idle Max",
-          "mean_abs_shap": 0.0038465177543441182
+          "mean_abs_shap": 0.00411218462173295
         },
         {
           "feature": "Down/Up Ratio",
-          "mean_abs_shap": 0.0036085569002668356
+          "mean_abs_shap": 0.0036150882447887945
         },
         {
-          "feature": "Fwd Packet Length Std",
-          "mean_abs_shap": 0.003324666446616849
-        },
-        {
-          "feature": "Packet Length Std",
-          "mean_abs_shap": 0.00331329402119816
+          "feature": "Bwd Packets/s",
+          "mean_abs_shap": 0.0030179912235951518
         },
         {
           "feature": "Packet Length Variance",
-          "mean_abs_shap": 0.003180030146893878
+          "mean_abs_shap": 0.002982320651140822
+        },
+        {
+          "feature": "Idle Max",
+          "mean_abs_shap": 0.0028945739042419275
+        },
+        {
+          "feature": "Packet Length Std",
+          "mean_abs_shap": 0.002892546238235007
         },
         {
           "feature": "Init_Win_bytes_forward",
-          "mean_abs_shap": 0.0029767123945696576
+          "mean_abs_shap": 0.002774224994236199
         },
         {
           "feature": "Average Packet Size",
-          "mean_abs_shap": 0.0029381043395187703
-        },
-        {
-          "feature": "Idle Mean",
-          "mean_abs_shap": 0.002832231999451496
-        },
-        {
-          "feature": "Fwd IAT Std",
-          "mean_abs_shap": 0.0026250010556097434
-        },
-        {
-          "feature": "Bwd Packet Length Std",
-          "mean_abs_shap": 0.00260648675087572
+          "mean_abs_shap": 0.002604607913473263
         },
         {
           "feature": "Flow IAT Mean",
-          "mean_abs_shap": 0.0025005416156606785
+          "mean_abs_shap": 0.002485481650005147
+        },
+        {
+          "feature": "Fwd Packet Length Std",
+          "mean_abs_shap": 0.0024293866712171686
+        },
+        {
+          "feature": "Bwd Packet Length Std",
+          "mean_abs_shap": 0.002376516574509802
         },
         {
           "feature": "Bwd Packet Length Max",
-          "mean_abs_shap": 0.0024120528886505247
+          "mean_abs_shap": 0.0021492827875298996
         },
         {
-          "feature": "Packet Length Mean",
-          "mean_abs_shap": 0.0023858186736161113
+          "feature": "Idle Mean",
+          "mean_abs_shap": 0.002125613427926855
+        },
+        {
+          "feature": "Fwd IAT Std",
+          "mean_abs_shap": 0.002070110236618523
         },
         {
           "feature": "Max Packet Length",
-          "mean_abs_shap": 0.0023307337229840535
+          "mean_abs_shap": 0.0019733866575684543
         },
         {
-          "feature": "Destination Port",
-          "mean_abs_shap": 0.0023073443852650623
+          "feature": "Packet Length Mean",
+          "mean_abs_shap": 0.0019205496282964421
+        },
+        {
+          "feature": "Bwd Packet Length Min",
+          "mean_abs_shap": 0.0018182611196012118
         }
       ],
       "explainer_benchmark": {
@@ -4229,16 +4738,16 @@
           "status": "success",
           "n_background": 50,
           "n_explained": 20,
-          "elapsed_sec": 2.3806
+          "elapsed_sec": 2.3435
         },
         "kernel_explainer": {
           "status": "success",
           "n_background": 10,
           "n_explained": 10,
-          "elapsed_sec": 6.8116
+          "elapsed_sec": 6.781
         },
-        "spearman_rank_agreement": 0.699,
-        "speedup_vs_kernel": 2.86
+        "spearman_rank_agreement": 0.7041,
+        "speedup_vs_kernel": 2.89
       }
     },
     "local_example": {

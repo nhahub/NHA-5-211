@@ -64,6 +64,14 @@ def render_dataset_explorer_page() -> None:
                     f"Val {splits.get('validation', 0):,} | Test {splits.get('test', 0):,}",
                 )
 
+            strat_code = str(audit.get("split_strategy", "random"))
+            strat_label = {
+                "random": "Stratified Random (`random`)",
+                "time_block": "Chronological Drift (`time_block`: earliest 60% / middle 20% / latest 20%)",
+                "by_day": "Open-Set Cross-Day (`by_day`: Mon–Wed train / Thu–Fri unseen attacks)",
+            }.get(strat_code, strat_code)
+            st.caption(f"**Active Split Protocol:** {strat_label}")
+
             leak = audit.get("leakage_checks", {})
             if leak:
                 if leak.get("passed"):

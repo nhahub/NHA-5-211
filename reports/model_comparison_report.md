@@ -11,13 +11,13 @@
 
 | Model | Evaluation_Framing | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro | F1_Macro_CI95_Low | F1_Macro_CI95_High | ROC_AUC | PR_AUC | Latency_Mean_us | Latency_Median_us | Latency_P95_us | Samples_Per_Sec | Model_Size_MB | Training_Duration_s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MLP | 13-class supervised | 0.9780 | 0.9762 | 0.9780 | 0.9767 | 0.6728 | 0.6236 | 0.7067 | 0.9905 | 0.8117 | 205.2900 | 202.9000 | 273.4500 | 23816.4000 | 2.5340 | 33.5500 |
-| 1D-CNN | 13-class supervised | 0.9946 | 0.9936 | 0.9946 | 0.9940 | 0.8499 | 0.7942 | 0.8827 | 0.9853 | 0.8735 | 718.6600 | 693.4000 | 943.2700 | 16872.9000 | 1.3100 | 858.3600 |
-| XGBoost | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9603 | 0.9013 | 0.9849 | 0.9995 | 0.9773 | 592.8600 | 535.0500 | 744.7400 | 237598.0000 | 2.9540 | 119.3100 |
-| Autoencoder | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.5759 | 0.6001 | 0.8384 | 0.6651 | 269.3200 | 249.1000 | 416.9000 | 24332.6000 | 1.5480 | 36.1000 |
-| Isolation Forest | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 8052.4800 | 7982.1000 | 8787.9100 | 72477.6000 | 2.0960 | 0.5000 |
-| One-Class SVM | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 145.2300 | 134.8500 | 176.2300 | 22546.5000 | 0.4780 | 1.4800 |
-| LOF | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1299.0700 | 1265.5000 | 1705.4500 | 40917.4000 | 5.6660 | 0.5300 |
+| MLP | 13-class supervised | 0.9780 | 0.9762 | 0.9780 | 0.9767 | 0.6728 | 0.6236 | 0.7067 | 0.9905 | 0.8117 | 191.4100 | 169.8000 | 323.7600 | 25016.3000 | 2.5340 | 33.5500 |
+| 1D-CNN | 13-class supervised | 0.9946 | 0.9936 | 0.9946 | 0.9940 | 0.8499 | 0.7942 | 0.8827 | 0.9853 | 0.8735 | 708.3100 | 689.9500 | 926.4900 | 17951.0000 | 1.3100 | 858.3600 |
+| XGBoost | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9603 | 0.9013 | 0.9849 | 0.9995 | 0.9773 | 548.0500 | 495.7000 | 621.3800 | 317054.0000 | 2.9540 | 119.3100 |
+| Autoencoder | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.5759 | 0.6001 | 0.8384 | 0.6651 | 242.7800 | 208.5000 | 468.4000 | 24204.5000 | 1.5480 | 36.1000 |
+| Isolation Forest | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 7863.0300 | 7789.7000 | 8862.4400 | 75076.6000 | 2.0960 | 0.5000 |
+| One-Class SVM | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 161.2100 | 141.3000 | 318.1900 | 21578.5000 | 0.4780 | 1.4800 |
+| LOF | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1339.5100 | 1220.3500 | 2140.8200 | 45810.6000 | 5.6660 | 0.5300 |
 
 
 - **XGBoost Macro-F1 (95% Bootstrap CI, n=1000):** `0.9603` (`[0.9013, 0.9849]`, bootstrap std=`0.0193`)
@@ -36,26 +36,63 @@
 
 
 
-## 2. Cross-Day Temporal Split Protocol (`by_day`: Mon–Wed Train / Thu Val / Thu–Fri Test)
+## 2. Chronological Drift Evaluation (`time_block`: Per-Class Earliest ~60% Train / Next ~20% Val / Last ~20% Test)
 
-- **Partitions (`split_strategy='by_day'`):** Train pre-SMOTE=`111,814`, Validation (Thursday half)=`15,408`, Test (Thursday remainder + Friday)=`63,207`.
+- **Partitions (`split_strategy='time_block'`):** Train pre-SMOTE=`114,762`, Validation=`37,952`, Test=`37,862` (Ordering=`Capture_Order (capture session schedule + CSV row index; Timestamp column absent in MachineLearningCVE CSVs)`, `leakage_checks.passed=True`).
+
+- **Low-Support / Tiny-Class Chronological Allocations:** `Heartbleed`: Low-support chronological split (n=11): 7 earliest train / 2 middle val / 2 latest test.
+
+- **Protocol Interpretation:** Closed-set temporal drift split where every class is trained on its earliest ~60% of flows and evaluated on its latest ~20%, isolating concept drift over capture time without introducing unseen attack labels.
+
+
+| Model | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro | F1_Macro_CI95_Low | F1_Macro_CI95_High | ROC_AUC_OVR | PR_AUC_OVR |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| XGBoost | 0.9924 | 0.9916 | 0.9924 | 0.9917 | 0.7518 | 0.7098 | 0.8250 | 0.9929 | 0.8049 |
+| 1D-CNN | 0.9521 | 0.9489 | 0.9521 | 0.9456 | 0.4376 | 0.4265 | 0.4787 | 0.9700 | 0.7024 |
+| MLP | 0.9502 | 0.9376 | 0.9502 | 0.9400 | 0.2767 | 0.2752 | 0.3004 | 0.9231 | 0.4422 |
+
+
+- **XGBoost (`time_block`) Macro-F1 (95% Bootstrap CI, n=1000):** `0.7518` (`[0.7098, 0.8250]`, bootstrap std=`0.0273`)
+
+- **1D-CNN (`time_block`) Macro-F1 (95% Bootstrap CI, n=1000):** `0.4376` (`[0.4265, 0.4787]`, bootstrap std=`0.0137`)
+
+- **MLP (`time_block`) Macro-F1 (95% Bootstrap CI, n=1000):** `0.2767` (`[0.2752, 0.3004]`, bootstrap std=`0.0081`)
+
+- **Autoencoder (`time_block`, benign-only binary):** Accuracy=`0.8456`, F1=`0.5003` (`[0.4892, 0.5107]`, n=1000), ROC-AUC=`0.8263`, FPR=`0.0589`.
+
+
+
+### XGBoost Per-Class Metrics (`time_block` Test Partition)
+
+
+| Class | Precision | Recall | F1_Score | Support | Reliability |
+| --- | --- | --- | --- | --- | --- |
+| BENIGN | 0.9914 | 0.9999 | 0.9956 | 30907 | Adequate |
+| Bot | 0.0000 | 0.0000 | 0.0000 | 28 | Statistically Unreliable |
+| DDoS | 1.0000 | 0.9939 | 0.9970 | 1809 | Adequate |
+| DoS GoldenEye | 0.9528 | 0.8288 | 0.8864 | 146 | Adequate |
+| DoS Hulk | 0.9979 | 0.9376 | 0.9668 | 2516 | Adequate |
+| DoS Slowhttptest | 0.9494 | 0.9868 | 0.9677 | 76 | Adequate |
+| DoS slowloris | 1.0000 | 0.7160 | 0.8345 | 81 | Adequate |
+| FTP-Patator | 1.0000 | 0.9785 | 0.9891 | 93 | Adequate |
+| Heartbleed | 0.0000 | 0.0000 | 0.0000 | 2 | Statistically Unreliable |
+| Infiltration | 1.0000 | 0.4286 | 0.6000 | 7 | Statistically Unreliable |
+| PortScan | 1.0000 | 0.9952 | 0.9976 | 2100 | Adequate |
+| SSH-Patator | 1.0000 | 1.0000 | 1.0000 | 62 | Adequate |
+| Web Attack | 0.8235 | 0.4000 | 0.5385 | 35 | Adequate |
+
+
+## 3. Open-Set Cross-Day Protocol (`by_day`: Mon–Wed Train / Thu Val / Thu–Fri Unseen Attacks)
+
+- **Partitions (`split_strategy='by_day'`):** Train pre-SMOTE=`111,814`, Validation (Thursday half)=`15,408`, Test (Thursday remainder + Friday)=`63,207` (`leakage_checks.passed=True`).
 
 - **Thursday–Friday Unseen Attack Classes:** `Bot`, `DDoS`, `Infiltration`, `PortScan`, `Web Attack`.
 
-- **Protocol Interpretation:** In CICIDS2017, all attack families occurring on Thursday and Friday (Bot, DDoS, Infiltration, PortScan, Web Attack) are absent from Monday-Wednesday training data. Closed-set multi-class Macro-F1 therefore cannot attribute unseen Thursday-Friday labels, whereas the Cross-Day Binary table evaluates Benign-vs-Attack generalization directly.
+
+> **Open-Set Interpretation:** Open-set cross-day protocol (by_day): by construction in CICIDS2017, all Thursday and Friday attack families (Bot, DDoS, Infiltration, PortScan, Web Attack) have zero training instances in Monday-Wednesday data. Closed-set multi-class Macro-F1 is therefore near zero by design rather than ordinary generalization degradation. The real empirical finding is that supervised XGBoost misses ~71% of unseen attack flows (binary recall=0.2876, precision=0.9991), which is why benign-only anomaly detectors are kept as a supplementary zero-day signal.
 
 
-### Closed-Set Multi-Class Evaluation (`by_day`)
-
-
-| Model | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro_All | F1_Macro_Present_Test | ROC_AUC_OVR |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| XGBoost | 0.6868 | 0.5185 | 0.6868 | 0.5909 | 0.0860 | 0.1434 | 0.5441 |
-| MLP | 0.6864 | 0.5177 | 0.6864 | 0.5902 | 0.0661 | 0.1432 | 0.4874 |
-| 1D-CNN | 0.6860 | 0.4871 | 0.6860 | 0.5697 | 0.0691 | 0.1382 | 0.6507 |
-
-
-### Cross-Day Binary Intrusion Detection (`by_day`: Benign vs. Attack)
+### Open-Set Cross-Day Binary Detection (`by_day`: Benign vs. Attack)
 
 
 | Model | Accuracy | Precision | Recall | F1 | ROC_AUC | PR_AUC | FPR | FNR |
@@ -67,7 +104,17 @@
 | Autoencoder | 0.7562 | 0.7396 | 0.3419 | 0.4676 | 0.8784 | 0.7022 | 0.0549 | 0.6581 |
 
 
-## 3. Shortcut Feature Ablation (With vs. Without `Destination Port`)
+### Closed-Set Multi-Class Reference Under Open-Set Split (`by_day`)
+
+
+| Model | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro_All | F1_Macro_Present_Test | ROC_AUC_OVR |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| XGBoost | 0.6868 | 0.5185 | 0.6868 | 0.5909 | 0.0860 | 0.1434 | 0.5441 |
+| MLP | 0.6864 | 0.5177 | 0.6864 | 0.5902 | 0.0661 | 0.1432 | 0.4874 |
+| 1D-CNN | 0.6860 | 0.4871 | 0.6860 | 0.5697 | 0.0691 | 0.1382 | 0.6507 |
+
+
+## 4. Shortcut Feature Ablation (With vs. Without `Destination Port`)
 
 | Variant | Features | Test_Rows | Val_Macro_F1 | Test_Accuracy | Test_F1_Weighted | Test_F1_Macro | Test_ROC_AUC |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -83,7 +130,7 @@
 
 
 
-## 4. Per-Class Precision, Recall, F1 & Support (Test Partition)
+## 5. Per-Class Precision, Recall, F1 & Support (Test Partition)
 
 > **Statistical Reliability Note:** Classes marked `Statistically Unreliable` have low held-out test support (`< 30` flows); one or two misclassified flows swing per-class F1 sharply and drive Macro-F1 variance.
 
@@ -148,7 +195,7 @@
 | Web Attack | 0.0000 | 0.0000 | 0.0000 | 26 | Statistically Unreliable |
 
 
-## 5. XGBoost 5-Fold Stratified Cross-Validation
+## 6. XGBoost 5-Fold Stratified Cross-Validation
 
 - **Variant Evaluated:** `baseline` | **Development Pool Rows (Held-Out Test Excluded):** `162,577` | **Imbalance Strategy:** `none`
 - **Macro-F1 (Mean +/- Std):** `0.9535 ± 0.0121`
@@ -164,7 +211,7 @@
 | 5 | 130062 | 32083 | 0.9985 | 0.9985 | 0.9522 | 0.9993 |
 
 
-## 6. Ensemble Strategy Comparison (Test Partition)
+## 7. Ensemble Strategy Comparison (Test Partition)
 
 | Strategy | accuracy | f1_macro | f1_weighted | roc_auc_macro_ovr | ece |
 | --- | --- | --- | --- | --- | --- |
@@ -200,7 +247,7 @@
 - **Empirical Conclusion:** Ensemble fusion 'stacking' (Test Macro-F1=0.9606) is comparable to XGBoost, difference not statistically significant (XGBoost=0.9603; observed delta=+0.0003, paired bootstrap n=1000 mean diff=+0.0004, 95% CI=[-0.0069, +0.0086] includes 0; statistically_significant=False). Standalone XGBoost is kept as the supervised default with the Autoencoder orthogonal.
 
 
-## 7. Unsupervised Anomaly Detector Baselines (Benign-Only Training)
+## 8. Unsupervised Anomaly Detector Baselines (Benign-Only Training)
 
 | Detector | Accuracy | Precision | Recall | F1 | ROC_AUC | PR_AUC | FPR | Holdout_Class_Recall | Holdout_Class_ROC_AUC |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -236,7 +283,7 @@
 | LOF | 99.0000 | 6.2781 | 0.4178 | 0.0351 | 0.0648 | 0.0110 | 0.9649 |
 
 
-## 8. XGBoost Baseline vs. Optuna Hyperparameter Optimization
+## 9. XGBoost Baseline vs. Optuna Hyperparameter Optimization
 
 | Variant | val_macro_f1 | val_weighted_f1 | val_macro_recall | val_mlogloss |
 | --- | --- | --- | --- | --- |
@@ -252,11 +299,11 @@
 
 
 
-## 9. Architectural Notes on 1D-CNN vs. MLP & XGBoost
+## 10. Architectural Notes on 1D-CNN vs. MLP & XGBoost
 
 Tabular CICFlowMeter features do not form a physical time series; 1D convolutions scan adjacent engineered statistics (packet sizes, IATs, flags). Measured validation and test F1/latency above quantify whether 1D-CNN yields measurable benefit over the dense MLP and XGBoost.
 
 
-## 10. Preprocessing vs. Model Inference Latency
+## 11. Preprocessing vs. Model Inference Latency
 
-- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** mean = `838.22 µs`, median = `827.20 µs`, P95 = `953.77 µs` (`1193.0` flows/sec).
+- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** mean = `835.14 µs`, median = `804.20 µs`, P95 = `1023.05 µs` (`1197.4` flows/sec).
