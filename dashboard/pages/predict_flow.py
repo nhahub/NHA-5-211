@@ -20,9 +20,12 @@ def render_predict_flow_page(sidebar_state: dict[str, Any]) -> None:
 
     artifacts = load_cached_artifacts()
     if not artifacts.models or not artifacts.feature_names:
-        st.error(
-            "Trained models and feature schema are not loaded. Run `python scripts/train.py --run-eval` first."
+        hint = (
+            "Un-pulled Git LFS pointer files were detected in `models/` — run `git lfs pull` first."
+            if artifacts.lfs_pointers
+            else "Run `git lfs pull` or `python scripts/train.py --run-eval` first to populate `models/`."
         )
+        st.error(f"Trained models and feature schema are not loaded. {hint}")
         return
 
     engine = get_detection_engine()

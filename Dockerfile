@@ -21,6 +21,8 @@ COPY src/ src/
 COPY dashboard/ dashboard/
 COPY scripts/ scripts/
 COPY docs/ docs/
+# Pull Git LFS model binaries before building (`git lfs pull`) to bundle trained weights;
+# if models are absent or LFS pointers, the dashboard starts cleanly in degraded demo/report mode.
 COPY models/ models/
 COPY reports/ reports/
 

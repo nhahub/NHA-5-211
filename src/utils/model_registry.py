@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -13,6 +13,20 @@ import joblib
 from src.utils.logging import get_logger
 
 logger = get_logger("smart_ids.registry")
+
+_LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+
+
+def is_git_lfs_pointer(path: Path) -> bool:
+    """Return True when ``path`` is an unfetched Git LFS pointer stub instead of raw data."""
+    try:
+        if not path.is_file() or path.stat().st_size > 1024:
+            return False
+        with path.open("rb") as fh:
+            head = fh.read(len(_LFS_POINTER_PREFIX))
+        return head.startswith(_LFS_POINTER_PREFIX)
+    except OSError:
+        return False
 
 
 @dataclass
@@ -31,6 +45,8 @@ class LoadedArtifacts:
     calibrators: dict[str, Any] | None = None
     stacker: Any | None = None
     anomaly_baselines: dict[str, Any] | None = None
+    lfs_pointers: list[str] = field(default_factory=list)
+    missing_artifacts: list[str] = field(default_factory=list)
 
 
 class ModelRegistry:
@@ -97,24 +113,42 @@ class ModelRegistry:
     def load_all(self, load_keras: bool = True) -> LoadedArtifacts:
         """Load all available model and preprocessing artifacts defensively."""
         models: dict[str, Any] = {}
+        lfs_pointers: list[str] = []
+        missing_artifacts: list[str] = []
 
+        keras_targets = {
+            "MLP": self.models_dir / "best_mlp.keras",
+            "CNN": self.models_dir / "best_cnn.keras",
+            "Autoencoder": self.models_dir / "best_autoencoder.keras",
+        }
         if load_keras:
             try:
                 import tensorflow as tf
 
-                keras_targets = {
-                    "MLP": self.models_dir / "best_mlp.keras",
-                    "CNN": self.models_dir / "best_cnn.keras",
-                    "Autoencoder": self.models_dir / "best_autoencoder.keras",
-                }
                 for name, path in keras_targets.items():
-                    if path.exists():
-                        models[name] = tf.keras.models.load_model(path, compile=False)
+                    if not path.exists():
+                        missing_artifacts.append(path.name)
+                    elif is_git_lfs_pointer(path):
+                        lfs_pointers.append(path.name)
+                        logger.warning(
+                            "%s is a Git LFS pointer stub; run 'git lfs pull' or train locally.",
+                            path.name,
+                        )
+                    else:
+                        try:
+                            models[name] = tf.keras.models.load_model(path, compile=False)
+                        except Exception as exc:
+                            logger.warning("Failed loading Keras model '%s': %s", path.name, exc)
             except Exception as exc:
-                logger.warning("Failed loading one or more Keras models: %s", exc)
+                logger.warning("Failed initializing TensorFlow for Keras model loading: %s", exc)
 
         xgb_path = self.models_dir / "xgb_model.json"
-        if xgb_path.exists():
+        if not xgb_path.exists():
+            missing_artifacts.append(xgb_path.name)
+        elif is_git_lfs_pointer(xgb_path):
+            lfs_pointers.append(xgb_path.name)
+            logger.warning("xgb_model.json is a Git LFS pointer stub; run 'git lfs pull' or train locally.")
+        else:
             try:
                 import xgboost as xgb
 
@@ -126,7 +160,18 @@ class ModelRegistry:
 
         def _maybe_joblib(fname: str) -> Any | None:
             p = self.models_dir / fname
-            return joblib.load(p) if p.exists() else None
+            if not p.exists():
+                missing_artifacts.append(fname)
+                return None
+            if is_git_lfs_pointer(p):
+                lfs_pointers.append(fname)
+                logger.warning("%s is a Git LFS pointer stub; run 'git lfs pull' to fetch binary.", fname)
+                return None
+            try:
+                return joblib.load(p)
+            except Exception as exc:
+                logger.warning("Failed loading joblib artifact '%s': %s", fname, exc)
+                return None
 
         scaler = _maybe_joblib("scaler.pkl")
         imputer = _maybe_joblib("imputer.pkl")
@@ -169,4 +214,6 @@ class ModelRegistry:
             calibrators=calibrators,
             stacker=stacker,
             anomaly_baselines=anomaly_baselines,
+            lfs_pointers=sorted(set(lfs_pointers)),
+            missing_artifacts=sorted(set(missing_artifacts)),
         )

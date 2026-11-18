@@ -82,6 +82,20 @@ def test_model_registry_partial_and_corrupt_artifacts(
     assert bare_loaded.feature_names == []
     assert bare_loaded.scaler is not None
 
+    # Unfetched Git LFS pointer stubs and corrupt .pkl files never crash load_all
+    lfs_dir = models_dir / "lfs_stubs"
+    lfs_reg = ModelRegistry(models_dir=lfs_dir, artifacts_dir=lfs_dir)
+    lfs_stub = "version https://git-lfs.github.com/spec/v1\noid sha256:deadbeef\nsize 1024\n"
+    for fname in ("best_mlp.keras", "xgb_model.json", "anomaly_baselines.pkl"):
+        (lfs_dir / fname).write_text(lfs_stub, encoding="utf-8")
+    (lfs_dir / "scaler.pkl").write_text("corrupt-pickle-bytes", encoding="utf-8")
+
+    lfs_loaded = lfs_reg.load_all(load_keras=True)
+    assert lfs_loaded.models == {}
+    assert lfs_loaded.scaler is None
+    assert lfs_loaded.anomaly_baselines is None
+    assert set(lfs_loaded.lfs_pointers) == {"anomaly_baselines.pkl", "best_mlp.keras", "xgb_model.json"}
+
 
 def test_batch_csv_scoring_schema_validation_and_reordering(
     tmp_app_config: AppConfig, small_synthetic_df: pd.DataFrame, tmp_path: Path

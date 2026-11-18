@@ -29,42 +29,51 @@ def render_system_settings_page(sidebar_state: dict[str, Any]) -> None:
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("#### 🧠 Persisted Model & Artifact Inventory")
+        pointer_set = set(artifacts.lfs_pointers)
+
+        def _status(is_loaded: bool, fname: str) -> str:
+            if is_loaded:
+                return "Loaded"
+            if fname in pointer_set:
+                return "LFS Pointer (run git lfs pull)"
+            return "Missing"
+
         inv_rows = [
             {
                 "Artifact": "MLP Classifier (`best_mlp.keras`)",
-                "Status": "Loaded" if "MLP" in artifacts.models else "Missing",
+                "Status": _status("MLP" in artifacts.models, "best_mlp.keras"),
             },
             {
                 "Artifact": "1D-CNN Classifier (`best_cnn.keras`)",
-                "Status": "Loaded" if "CNN" in artifacts.models else "Missing",
+                "Status": _status("CNN" in artifacts.models, "best_cnn.keras"),
             },
             {
                 "Artifact": "Autoencoder (`best_autoencoder.keras`)",
-                "Status": "Loaded" if "Autoencoder" in artifacts.models else "Missing",
+                "Status": _status("Autoencoder" in artifacts.models, "best_autoencoder.keras"),
             },
             {
                 "Artifact": "XGBoost Classifier (`xgb_model.json`)",
-                "Status": "Loaded" if "XGBoost" in artifacts.models else "Missing",
+                "Status": _status("XGBoost" in artifacts.models, "xgb_model.json"),
             },
             {
                 "Artifact": "StandardScaler (`scaler.pkl`)",
-                "Status": "Loaded" if artifacts.scaler is not None else "Missing",
+                "Status": _status(artifacts.scaler is not None, "scaler.pkl"),
             },
             {
                 "Artifact": "MedianImputer (`imputer.pkl`)",
-                "Status": "Loaded" if artifacts.imputer is not None else "Missing",
+                "Status": _status(artifacts.imputer is not None, "imputer.pkl"),
             },
             {
                 "Artifact": "5-Sigma Clipper (`outlier_clipper.pkl`)",
-                "Status": "Loaded" if artifacts.outlier_clipper is not None else "Missing",
+                "Status": _status(artifacts.outlier_clipper is not None, "outlier_clipper.pkl"),
             },
             {
                 "Artifact": "LabelEncoder (`label_encoder.pkl`)",
-                "Status": "Loaded" if artifacts.label_encoder is not None else "Missing",
+                "Status": _status(artifacts.label_encoder is not None, "label_encoder.pkl"),
             },
             {
                 "Artifact": f"Feature Schema (`feature_names.json`, {len(artifacts.feature_names)} cols)",
-                "Status": "Loaded" if artifacts.feature_names else "Missing",
+                "Status": _status(bool(artifacts.feature_names), "feature_names.json"),
             },
         ]
         st.dataframe(pd.DataFrame(inv_rows), use_container_width=True, hide_index=True)

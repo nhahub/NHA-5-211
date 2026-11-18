@@ -66,17 +66,30 @@ def render_sidebar() -> dict[str, Any]:
 
         st.divider()
         st.markdown("#### 🧠 Loaded Models")
-        for m_name in ("MLP", "CNN", "Autoencoder", "XGBoost"):
+        model_files = {
+            "MLP": "best_mlp.keras",
+            "CNN": "best_cnn.keras",
+            "Autoencoder": "best_autoencoder.keras",
+            "XGBoost": "xgb_model.json",
+        }
+        pointer_set = set(artifacts.lfs_pointers)
+        for m_name, m_file in model_files.items():
             if m_name in artifacts.models:
                 st.success(f"✅ {m_name} — Loaded")
+            elif m_file in pointer_set:
+                st.warning(f"⚠️ {m_name} — Git LFS pointer (run `git lfs pull`)")
             else:
                 st.warning(f"⚠️ {m_name} — Not found")
 
         pre_ok = artifacts.scaler is not None and artifacts.label_encoder is not None
         if pre_ok:
             st.caption(f"Scaler & Encoder ready ({len(artifacts.feature_names)} features)")
+        elif pointer_set:
+            st.error(
+                "Preprocessing `.pkl` files are Git LFS pointers. Run `git lfs pull` or `python scripts/train.py`."
+            )
         else:
-            st.error("Preprocessing artifacts missing. Run `python scripts/train.py`.")
+            st.error("Preprocessing artifacts missing. Run `git lfs pull` or `python scripts/train.py`.")
 
         st.divider()
         st.caption(f"Last UI Sync: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

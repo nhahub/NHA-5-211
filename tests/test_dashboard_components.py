@@ -45,3 +45,37 @@ def test_streamlit_apptest_smoke_with_existing_artifacts() -> None:
     at.run()
     assert not at.exception
     assert len(at.tabs) >= 7
+
+
+def test_streamlit_apptest_graceful_degradation_without_models(tmp_path: Path, monkeypatch) -> None:
+    """Dashboard degrades cleanly with a clear banner when models/ is empty or LFS pointers."""
+    from streamlit.testing.v1 import AppTest
+
+    from dashboard.data_access import build_test_detection_logs, load_cached_artifacts
+    from src.config import get_app_config
+
+    empty_models = tmp_path / "empty_models"
+    empty_models.mkdir(parents=True, exist_ok=True)
+    # Place an unfetched Git LFS pointer stub to simulate Docker/clone without git lfs pull
+    (empty_models / "best_mlp.keras").write_text(
+        "version https://git-lfs.github.com/spec/v1\noid sha256:0000\nsize 1234\n",
+        encoding="utf-8",
+    )
+
+    cfg_copy = get_app_config().model_copy(deep=True)
+    cfg_copy.paths.models_dir = str(empty_models)
+    monkeypatch.setattr("dashboard.data_access.get_app_config", lambda *args, **kwargs: cfg_copy)
+    load_cached_artifacts.clear()
+    build_test_detection_logs.clear()
+
+    try:
+        app_path = Path(__file__).resolve().parent.parent / "app.py"
+        at = AppTest.from_file(str(app_path), default_timeout=90)
+        at.run()
+        assert not at.exception
+        assert len(at.tabs) >= 7
+        warnings_text = " ".join(str(w.value) for w in at.warning)
+        assert "Git LFS" in warnings_text or "Absent" in warnings_text
+    finally:
+        load_cached_artifacts.clear()
+        build_test_detection_logs.clear()

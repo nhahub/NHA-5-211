@@ -44,9 +44,23 @@ uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 ### Docker Execution (Dashboard)
 
 ```bash
+# Pull Git LFS model binaries first if building from a fresh clone
+git lfs pull
 docker build -t smart-ids-v3 .
 docker run --rm -p 8501:8501 smart-ids-v3
 ```
+
+## Model Artifacts (Git LFS)
+
+- Large/retrain-volatile model binaries (`*.keras`, `*.pkl`, `models/xgb_model.json`, `*.h5`, `*.onnx`, `*.npz`, `*.parquet`) are tracked via **Git LFS** in [`.gitattributes`](.gitattributes) so retraining never bloats Git object history going forward (historical commits remain untouched).
+- On a fresh clone, fetch the binaries before running inference or building the Docker image:
+
+```bash
+git lfs install
+git lfs pull
+```
+
+- If `models/` is empty or contains unfetched Git LFS pointer stubs (for example, a Docker build without `git lfs pull`), the SOC dashboard degrades gracefully with a clear status banner directing you to run `git lfs pull` or `python scripts/train.py --run-eval` while keeping historical evaluation reports and synthetic SOC demo telemetry accessible. CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) checks out LFS artifacts automatically via `actions/checkout@v4` (`lfs: true`).
 
 ### Independent Evaluation & Optional ONNX Export
 
@@ -114,7 +128,8 @@ All PRs and pushes to `main` run these Ruff and pytest checks automatically via 
 
 ```text
 NHA-5-211/
-├── .github/workflows/ci.yml   # GitHub Actions CI (Ruff + pytest on Python 3.13)
+├── .gitattributes             # Git LFS tracking for *.keras, *.pkl & large model files
+├── .github/workflows/ci.yml   # GitHub Actions CI (Ruff + pytest on Python 3.13, LFS enabled)
 ├── Dockerfile                 # Containerized Streamlit SOC deployment (port 8501)
 ├── LICENSE                    # MIT License
 ├── app.py                     # Streamlit SOC dashboard entrypoint (7 tabs)

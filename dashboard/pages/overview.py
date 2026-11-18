@@ -48,6 +48,13 @@ def render_overview_page(sidebar_state: dict[str, Any]) -> pd.DataFrame:
             )
             df_logs = generate_demo_logs(n_rows=250)
     elif mode == "Upload Flow CSV":
+        artifacts = load_cached_artifacts()
+        if not artifacts.models or not artifacts.feature_names:
+            st.warning(
+                "Trained model binaries are absent or un-pulled Git LFS pointers. Run `git lfs pull` or "
+                "`python scripts/train.py --run-eval` before running live CSV inference."
+            )
+            return pd.DataFrame()
         uploaded = st.file_uploader(
             "Upload CICIDS2017-compatible flow CSV for SOC overview analysis",
             type=["csv"],

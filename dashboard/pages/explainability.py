@@ -26,9 +26,14 @@ def render_explainability_page() -> None:
 
     if not shap_data and not artifacts.models:
         st.warning(
-            "No SHAP explanations or trained models found. Run `python scripts/train.py --run-eval` first."
+            "No SHAP explanations or trained models found. Run `git lfs pull` or `python scripts/train.py --run-eval` first."
         )
         return
+    if not artifacts.models:
+        st.info(
+            "Precomputed SHAP plots/rankings are displayed below; live single-flow SHAP inspection requires "
+            "fetching `models/` via `git lfs pull` or training with `python scripts/train.py --run-eval`."
+        )
 
     if shap_data:
         g1, g2 = st.columns(2)

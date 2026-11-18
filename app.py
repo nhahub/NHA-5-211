@@ -17,7 +17,7 @@ os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
 import streamlit as st
 
 from dashboard.components.sidebar import render_sidebar
-from dashboard.data_access import load_evaluation_summary
+from dashboard.data_access import load_cached_artifacts, load_evaluation_summary
 from dashboard.pages.active_response import render_active_response_page
 from dashboard.pages.dataset_explorer import render_dataset_explorer_page
 from dashboard.pages.explainability import render_explainability_page
@@ -50,6 +50,21 @@ st.markdown(
 )
 
 eval_summary = load_evaluation_summary()
+artifacts = load_cached_artifacts()
+if artifacts.lfs_pointers:
+    st.warning(
+        "**Model Artifacts Not Fetched (Git LFS Pointers):** Detected un-pulled Git LFS pointer stub(s) "
+        f"(`{', '.join(artifacts.lfs_pointers[:5])}`). Run `git lfs pull` (or `python scripts/train.py --run-eval`) "
+        "to enable live detection, batch CSV scoring, and interactive SHAP; evaluation reports and synthetic SOC demo "
+        "telemetry remain available below."
+    )
+elif not artifacts.models:
+    st.warning(
+        "**Model Binaries Absent (`models/`):** No trained detection models are currently loaded. Run `git lfs pull` "
+        "or `python scripts/train.py --run-eval` to populate `models/`. Historical evaluation reports and synthetic SOC "
+        "demo telemetry remain available below."
+    )
+
 src_info = eval_summary.get("dataset_source", {})
 if src_info:
     if src_info.get("is_synthetic"):
