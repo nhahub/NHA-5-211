@@ -16,12 +16,13 @@ def benchmark_preprocessing_latency(
     imputer: Any,
     clipper: Any,
     scaler: Any,
-    n_warmup: int = 5,
+    n_warmup: int = 50,
     n_runs: int = 100,
 ) -> dict[str, float]:
     """Benchmark single-flow preprocessing latency separately from model inference."""
     single_df = raw_df_sample[feature_names].iloc[:1].copy()
 
+    # Explicitly discard the first n_warmup calls before recording timings
     for _ in range(n_warmup):
         x = imputer.transform(single_df)
         x = clipper.transform(x)
@@ -38,9 +39,10 @@ def benchmark_preprocessing_latency(
     arr = np.asarray(times_us, dtype=np.float64)
     mean_us = float(np.mean(arr))
     return {
-        "mean_us": mean_us,
+        "warmup_calls_discarded": int(n_warmup),
         "median_us": float(np.median(arr)),
         "p95_us": float(np.percentile(arr, 95)),
+        "mean_us": mean_us,
         "samples_per_sec": float(1e6 / max(mean_us, 1e-9)),
     }
 
@@ -50,7 +52,7 @@ def benchmark_model_inference(
     X_test: np.ndarray,
     model_type: str,
     model_path: Path | None = None,
-    n_warmup: int = 5,
+    n_warmup: int = 50,
     n_runs: int = 100,
     batch_size: int = 1024,
 ) -> dict[str, float]:
@@ -140,8 +142,10 @@ def benchmark_model_inference(
     arr = np.asarray(times_us, dtype=np.float64)
     mean_us = float(np.mean(arr))
 
-    # Measure batch throughput across 3 repeated calls
-    _ = _infer_batch()
+    # Measure batch throughput across 3 repeated calls after batch warm-up
+    batch_warmup = max(1, min(5, n_warmup // 10))
+    for _ in range(batch_warmup):
+        _ = _infer_batch()
     batch_times: list[float] = []
     for _ in range(3):
         t0 = time.perf_counter()
@@ -155,9 +159,10 @@ def benchmark_model_inference(
         size_mb = float(model_path.stat().st_size / (1024.0 * 1024.0))
 
     return {
-        "single_mean_us": mean_us,
+        "warmup_calls_discarded": int(n_warmup),
         "single_median_us": float(np.median(arr)),
         "single_p95_us": float(np.percentile(arr, 95)),
+        "single_mean_us": mean_us,
         "single_samples_per_sec": float(1e6 / max(mean_us, 1e-9)),
         "batch_samples_per_sec": batch_sps,
         "model_size_mb": round(size_mb, 3),

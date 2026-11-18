@@ -1,5 +1,8 @@
 # SMART IDS v3
 
+[![CI](https://github.com/nhahub/NHA-5-211/actions/workflows/ci.yml/badge.svg)](https://github.com/nhahub/NHA-5-211/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **Multi-Model Network Intrusion Detection with Zero-Day Anomaly Tracking**
 
 Academic Graduation Project — Built to the accompanying project technical specification (provided separately outside this repository) with split-isolated CICIDS2017 preprocessing (post-clipping cross-split deduplication and `strict_leakage_check` enforcement), CUDA/CPU adaptive XGBoost + TensorFlow/Keras models, classical anomaly baselines, SHAP explainability, dry-run active mitigation, CI automation, and a 7-tab Streamlit SOC dashboard.
@@ -65,15 +68,15 @@ docker run --rm -p 8501:8501 smart-ids-v3
 
 > **Dataset Provenance:** All 8 daily CICIDS2017 CSV exports in `data/raw/` (`138,190` train pre-SMOTE [`none` selected on `0.9518` vs `0.9518` tie within `0.0020` tolerance] / `24,112` validation / `28,324` held-out test; `642` post-clipping/scaling cross-split collisions removed; `leakage_checks.passed = true`). Full tables live in [`reports/model_comparison_report.md`](reports/model_comparison_report.md), [`reports/experimental_results.md`](reports/experimental_results.md), and [`reports/model_comparison.csv`](reports/model_comparison.csv).
 
-| Model | Framing | Accuracy | Precision (W) | Recall (W) | F1 (W) | F1 (Macro) | ROC-AUC | Mean / Median Latency (µs) | Batch Throughput (flows/s) |
+| Model | Framing | Accuracy | Precision (W) | Recall (W) | F1 (W) | F1 (Macro) | ROC-AUC | Median / P95 Latency (µs) | Batch Throughput (flows/s) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| **XGBoost (Baseline)** | 13-class supervised | **0.9989** | **0.9989** | **0.9989** | **0.9988** | **0.9603** | **0.9995** | 548.05 / 495.70 | **317,054.0** |
-| **1D-CNN** | 13-class supervised | 0.9946 | 0.9936 | 0.9946 | 0.9940 | 0.8499 | 0.9853 | 708.31 / 689.95 | 17,951.0 |
-| **MLP** | 13-class supervised | 0.9780 | 0.9762 | 0.9780 | 0.9767 | 0.6728 | 0.9905 | 191.41 / 169.80 | 25,016.3 |
-| **Autoencoder** | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.8384 | 242.78 / 208.50 | 24,204.5 |
-| **One-Class SVM** | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.7467 | **161.21** / **141.30** | 21,578.5 |
-| **LOF** | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.8607 | 1,339.51 / 1,220.35 | 45,810.6 |
-| **Isolation Forest** | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.7710 | 7,863.03 / 7,789.70 | 75,076.6 |
+| **XGBoost (Baseline)** | 13-class supervised | **0.9989** | **0.9989** | **0.9989** | **0.9988** | **0.9603** | **0.9995** | 444.40 / 743.52 | **257,069.0** |
+| **1D-CNN** | 13-class supervised | 0.9946 | 0.9936 | 0.9946 | 0.9940 | 0.8499 | 0.9853 | 721.15 / 833.39 | 17,997.8 |
+| **MLP** | 13-class supervised | 0.9780 | 0.9762 | 0.9780 | 0.9767 | 0.6728 | 0.9905 | 169.95 / **247.89** | 24,278.1 |
+| **Autoencoder** | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.8384 | 201.60 / 318.80 | 23,245.0 |
+| **One-Class SVM** | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.7467 | **142.25** / 288.95 | 22,511.5 |
+| **LOF** | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.8607 | 1,122.45 / 1,569.15 | 41,648.9 |
+| **Isolation Forest** | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.7710 | 7,671.55 / 8,682.40 | 63,630.7 |
 
 - **Imbalance Selection, CV & Stacking Significance:** Because unweighted (`none`) and `smote` tied at `0.9518` validation Macro-F1 (within `imbalance_tie_tolerance=0.002`), tie-breaking selected the simplest strategy **`none`** (`1D-CNN` Test Macro-F1 rose to `0.8499`, while `MLP` fell to `0.6728` without oversampling). Under `none`, unified 5-fold stratified CV on the `162,577`-row dev pool yielded `0.9535 ± 0.0121` Macro-F1 for baseline `XGBoost`; Optuna's `+0.0059` val Macro-F1 delta (`0.9504 -> 0.9563`) fell inside `0.0121`, so gating retained `baseline` (`95%` test bootstrap CI `[0.9013, 0.9849]`). Validation temperature scaling found `T = 1.0142` (`MLP`), `0.9210` (`1D-CNN`), and `0.9095` (`XGBoost`). Validation `stacking` (`0.9606`) is comparable to `XGBoost` (`0.9603`), difference not statistically significant (paired bootstrap `n=1000`: observed delta `+0.0003`, mean diff `+0.0004`, `95%` CI `[-0.0069, +0.0086]` includes `0`), while voting variants (`0.8420–0.9271`) scored significantly lower.
 - **Chronological Drift (`time_block`):** Splitting each class chronologically (earliest ~60% train / middle ~20% val / latest ~20% test so every class remains in training, `leakage_checks.passed = true`) shifted `XGBoost` Test Macro-F1 from `0.9603` (`random`) to `0.7518` (`95%` CI `[0.7098, 0.8250]`, Accuracy `0.9924`), `1D-CNN` to `0.4376` (`[0.4265, 0.4787]`, Accuracy `0.9521`), `MLP` to `0.2767` (`[0.2752, 0.3004]`, Accuracy `0.9502`), and benign-only `Autoencoder` to binary `F1 = 0.5003` (ROC-AUC `0.8263`), revealing temporal drift in low-support and multi-phase classes (`Bot`, `Heartbleed`, `Web Attack`).
@@ -93,10 +96,11 @@ docker run --rm -p 8501:8501 smart-ids-v3
 To verify code style, tests, and end-to-end training reproducibility from a clean checkout:
 
 ```powershell
-# Lint, formatting verification, and unit/smoke tests
+# Lint, formatting verification, and unit/smoke tests (or regenerate reports/test_report.md)
 .venv\Scripts\ruff.exe check src dashboard scripts tests app.py
 .venv\Scripts\ruff.exe format --check src dashboard scripts tests app.py
 .venv\Scripts\python.exe -m pytest tests/ -v --tb=short
+.venv\Scripts\python.exe scripts/generate_test_report.py
 
 # End-to-end training + evaluation (synthetic quick sanity run or genuine data/raw/*.csv)
 .venv\Scripts\python.exe scripts/train.py --synthetic --max-rows 20000 --epochs 5 --optuna-trials 3 --run-eval
@@ -119,14 +123,16 @@ NHA-5-211/
 ├── data/                      # raw/ (CICIDS2017 CSVs), processed/, synthetic/
 ├── src/                       # Modular data, models, training, eval, XAI & response
 ├── dashboard/                 # Modular Streamlit pages, components & theme
-├── scripts/                   # train.py, evaluate.py, run_dashboard.py, export_onnx.py
+├── scripts/                   # train.py, evaluate.py, run_dashboard.py, export_onnx.py, generate_test_report.py
 ├── models/ & reports/         # Saved artifacts, CSV/JSON metrics, reports & figures
 └── tests/                     # Pytest suite (pipeline, leakage, models, dashboard, CLI)
 ```
 
 ---
 
-## Limitations & License
+## Limitations, Security & License
+
+- **Artifact Deserialization Security (`*.pkl` via `joblib`):** Serialized model and preprocessing files (`*.pkl` loaded via `joblib`) execute arbitrary code on deserialization and **must only be loaded from trusted sources**.
 
 - **Dry-Run Mitigation Only:** `ActiveResponseEngine` logs simulated `iptables` rules without altering host firewall state.
 - **Offline Batch Telemetry:** Live packet capture (`libpcap`/`eBPF`) and streaming CICFlowMeter extraction are outside project scope.

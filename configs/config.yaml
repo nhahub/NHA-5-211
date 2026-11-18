@@ -86,7 +86,7 @@ data:
     smote_min_real_samples: 50 # Classes with fewer real train rows skip SMOTE and receive class weights instead
 
 evaluation:
-  latency_warmup_runs: 5
+  latency_warmup_calls: 50 # Discard first N warm-up calls before recording single-flow latency
   latency_timed_runs: 100
   batch_benchmark_size: 1024
   shap_xgb_max_samples: 500

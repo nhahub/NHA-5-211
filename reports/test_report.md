@@ -1,41 +1,48 @@
 # SMART IDS v3 — Automated Verification & Test Report
 
-## 1. Static Analysis & Formatting (`Ruff 0.17.5`)
-- **Command:** `.venv\Scripts\ruff.exe check src dashboard scripts tests app.py`
-  - **Result:** `All checks passed!` (`0` errors)
-- **Command:** `.venv\Scripts\ruff.exe format --check src dashboard scripts tests app.py`
-  - **Result:** `59 files already formatted`
+> Generated automatically by `scripts/generate_test_report.py` on `2026-11-18 20:03 UTC`.
+
+## 1. Static Analysis & Formatting (`ruff 0.17.5`)
+- **Command:** `ruff check src dashboard scripts tests app.py`
+  - **Status:** `PASSED` (`exit=0`, `0.11s`) — `All checks passed!`
+- **Command:** `ruff format --check src dashboard scripts tests app.py`
+  - **Status:** `PASSED` (`exit=0`, `0.10s`) — `63 files already formatted`
 
 ---
 
 ## 2. Automated Test Suite (`pytest 9.2.0`)
-- **Command:** `.venv\Scripts\python.exe -m pytest tests/ -v --tb=short`
-- **Result:** **`12 passed in 17.81s`** (0 failed, 0 skipped)
+- **Command:** `pytest tests/ -v --durations=0 --tb=short`
+- **Summary:** **`30` collected — `30 passed, 311 warnings` (`46.46s` total, 30 passed / 0 failed / 0 error / 0 skipped)**
 
-| Test Module | Test Case | Status | Scope Verified |
-|---|---|---|---|
-| `tests/test_dashboard_components.py` | `test_dashboard_charts_and_badges_render_cleanly` | PASSED | All 7 Plotly SOC chart builders & threat badges |
-| `tests/test_dashboard_components.py` | `test_streamlit_apptest_smoke_with_existing_artifacts` | PASSED | End-to-end `AppTest` rendering of `app.py` across all 7 tabs with loaded models |
-| `tests/test_data_pipeline.py` | `test_discover_csv_files_and_whitespace_stripping` | PASSED | CSV auto-discovery & CICFlowMeter header whitespace normalization |
-| `tests/test_data_pipeline.py` | `test_cleaning_inf_nan_duplicates_and_web_attack_mojibake` | PASSED | `±Inf` conversion, non-numeric coercion, deduplication, mojibake label merge, ID removal |
-| `tests/test_data_pipeline.py` | `test_schema_alignment_errors_and_coercion` | PASSED | Empty CSV & missing-feature `SchemaValidationError` messages |
-| `tests/test_data_pipeline.py` | `test_leakage_free_preprocessing_and_dynamic_smote_k` | PASSED | Train-only scaler/imputer/clipper fit, imbalanced val/test, dynamic SMOTE `k_neighbors` |
-| `tests/test_models_and_inference.py` | `test_all_four_models_build_train_save_reload_and_infer` | PASSED | MLP, 1D-CNN, Autoencoder, XGBoost training, saving, independent reload, SHAP & batch inference |
-| `tests/test_models_and_inference.py` | `test_hybrid_ensemble_zero_day_override_and_missing_artifacts` | PASSED | Graceful degradation on missing models & Autoencoder zero-day override logic |
-| `tests/test_response_and_threat.py` | `test_threat_level_boundaries_and_benign_safety` | PASSED | 4-tier threshold boundaries (including `1.0`), `BENIGN` safety guard, anomaly escalation |
-| `tests/test_response_and_threat.py` | `test_ip_validation_prevents_command_injection` | PASSED | IPv4/IPv6 validation & shell injection string rejection |
-| `tests/test_response_and_threat.py` | `test_active_response_dry_run_idempotency_and_audit_log` | PASSED | Dry-run `iptables` simulation, `BLOCKED_IPS` idempotency, `BLOCK_FAILED`, persistent audit logs |
-| `tests/test_response_and_threat.py` | `test_local_shap_explanation_xgboost` | PASSED | `TreeExplainer` local feature attribution & waterfall plot generation |
-
----
-
-## 3. Live Streamlit Server Smoke Verification
-- **Command:** `streamlit run app.py --server.headless true --server.port 8599 --server.address 127.0.0.1`
-- **Health Endpoint (`/_stcore/health`):** HTTP `200 ok`
-- **Root Document (`/`):** HTTP `200` (`7863` bytes served by Uvicorn server on `127.0.0.1:8599`)
-
----
-
-## 4. Independent Evaluation & Artifact Reloading
-- **Command:** `.venv\Scripts\python.exe scripts/evaluate.py`
-- **Result:** Exited `0`. Reloaded all 4 saved models (`best_mlp.keras`, `best_cnn.keras`, `best_autoencoder.keras`, `xgb_model.json`), preprocessing transformers (`scaler.pkl`, `imputer.pkl`, `outlier_clipper.pkl`, `label_encoder.pkl`), and calibrated threshold (`anomaly_threshold.json`) independently from disk to emit `reports/model_comparison.csv`, `reports/evaluation_summary.json`, `reports/model_comparison_report.md`, `reports/experimental_results.md`, and 9 diagnostic figures in `reports/figures/`.
+| # | Test Module | Test Case | Status | Call_Duration_s | Total_Duration_s |
+|---:|---|---|---|---:|---:|
+| 1 | `tests/test_dashboard_components.py` | `test_dashboard_charts_and_badges_render_cleanly` | PASSED | 0.32 | 0.32 |
+| 2 | `tests/test_dashboard_components.py` | `test_streamlit_apptest_smoke_with_existing_artifacts` | PASSED | 3.74 | 3.74 |
+| 3 | `tests/test_data_pipeline.py` | `test_discover_csv_files_and_whitespace_stripping` | PASSED | 0.03 | 0.06 |
+| 4 | `tests/test_data_pipeline.py` | `test_cleaning_inf_nan_duplicates_and_web_attack_mojibake` | PASSED | 0.02 | 0.02 |
+| 5 | `tests/test_data_pipeline.py` | `test_schema_alignment_errors_and_coercion` | PASSED | 0.02 | 0.02 |
+| 6 | `tests/test_data_pipeline.py` | `test_leakage_free_preprocessing_and_dynamic_smote_k` | PASSED | 0.11 | 0.11 |
+| 7 | `tests/test_data_pipeline.py` | `test_post_clip_near_duplicate_removal_and_strict_leakage_error` | PASSED | 0.18 | 0.18 |
+| 8 | `tests/test_data_pipeline.py` | `test_by_day_split_and_drop_features` | PASSED | 0.16 | 0.16 |
+| 9 | `tests/test_data_pipeline.py` | `test_smote_multiplier_cap_and_min_real_samples_threshold` | PASSED | 0.01 | 0.01 |
+| 10 | `tests/test_data_pipeline.py` | `test_time_block_split_timestamp_ordering_no_leakage_and_fallbacks` | PASSED | 0.10 | 0.10 |
+| 11 | `tests/test_models_and_inference.py` | `test_all_four_models_build_train_save_reload_and_infer` | PASSED | 6.08 | 6.08 |
+| 12 | `tests/test_models_and_inference.py` | `test_hybrid_ensemble_zero_day_override_and_missing_artifacts` | PASSED | 0.00 | 0.00 |
+| 13 | `tests/test_models_and_inference.py` | `test_by_day_protocol_feature_ablation_and_report_tables` | PASSED | 14.66 | 14.66 |
+| 14 | `tests/test_models_and_inference.py` | `test_imbalance_selection_bootstrap_ci_per_class_and_xgb_cv` | PASSED | 0.86 | 0.86 |
+| 15 | `tests/test_models_and_inference.py` | `test_temperature_scaler_handles_float32_overconfidence` | PASSED | 0.01 | 0.01 |
+| 16 | `tests/test_models_and_inference.py` | `test_optuna_cv_std_gating_and_stacking_meta_learner` | PASSED | 0.20 | 0.20 |
+| 17 | `tests/test_models_and_inference.py` | `test_classical_anomaly_baselines_and_unified_evaluation` | PASSED | 0.26 | 0.26 |
+| 18 | `tests/test_models_and_inference.py` | `test_paired_bootstrap_significance_and_report_conclusion` | PASSED | 0.03 | 0.03 |
+| 19 | `tests/test_models_and_inference.py` | `test_train_all_models_unified_cv_regression` | PASSED | 12.53 | 12.53 |
+| 20 | `tests/test_models_and_inference.py` | `test_imbalance_tie_breaking_with_synthetic_metric_dicts` | PASSED | 0.00 | 0.00 |
+| 21 | `tests/test_repo_and_edge_cases.py` | `test_model_registry_partial_and_corrupt_artifacts` | PASSED | 0.14 | 0.14 |
+| 22 | `tests/test_repo_and_edge_cases.py` | `test_batch_csv_scoring_schema_validation_and_reordering` | PASSED | 0.22 | 0.22 |
+| 23 | `tests/test_repo_and_edge_cases.py` | `test_split_strategy_validation_and_error_paths` | PASSED | 0.19 | 0.19 |
+| 24 | `tests/test_repo_and_edge_cases.py` | `test_direct_single_flow_benchmark_and_onnx_export_script` | PASSED | 0.97 | 0.97 |
+| 25 | `tests/test_repo_and_edge_cases.py` | `test_ablation_preserves_exact_rows_even_with_port_only_differences` | PASSED | 0.48 | 0.48 |
+| 26 | `tests/test_repo_and_edge_cases.py` | `test_latency_warmup_config_and_test_report_generator_parser` | PASSED | 0.01 | 0.01 |
+| 27 | `tests/test_response_and_threat.py` | `test_threat_level_boundaries_and_benign_safety` | PASSED | 0.00 | 0.00 |
+| 28 | `tests/test_response_and_threat.py` | `test_ip_validation_prevents_command_injection` | PASSED | 0.00 | 0.00 |
+| 29 | `tests/test_response_and_threat.py` | `test_active_response_dry_run_idempotency_and_audit_log` | PASSED | 0.01 | 0.01 |
+| 30 | `tests/test_response_and_threat.py` | `test_local_shap_explanation_xgboost` | PASSED | 0.32 | 0.32 |

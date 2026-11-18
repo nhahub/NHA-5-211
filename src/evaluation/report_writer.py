@@ -493,10 +493,12 @@ def write_academic_reports(
     sec_num += 1
     comp_lines.append(f"## {sec_num}. Preprocessing vs. Model Inference Latency\n")
     if prep_lat:
+        warmup_n = int(prep_lat.get("warmup_calls_discarded", 50))
         comp_lines.append(
             f"- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** "
-            f"mean = `{prep_lat.get('mean_us', 0):.2f} µs`, median = `{prep_lat.get('median_us', 0):.2f} µs`, "
-            f"P95 = `{prep_lat.get('p95_us', 0):.2f} µs` (`{prep_lat.get('samples_per_sec', 0):.1f}` flows/sec).\n"
+            f"median = `{prep_lat.get('median_us', 0):.2f} µs`, P95 = `{prep_lat.get('p95_us', 0):.2f} µs` "
+            f"(mean = `{prep_lat.get('mean_us', 0):.2f} µs`, `{warmup_n}` warm-up calls discarded; "
+            f"`{prep_lat.get('samples_per_sec', 0):.1f}` flows/sec).\n"
         )
 
     cmp_path = reports_dir / "model_comparison_report.md"

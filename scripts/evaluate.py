@@ -133,7 +133,7 @@ def run_evaluation_suite(
             X_test_scaled,
             "keras",
             model_path=models_dir / model_c.mlp.checkpoint_name,
-            n_warmup=app_c.evaluation.latency_warmup_runs,
+            n_warmup=app_c.evaluation.latency_warmup_calls,
             n_runs=app_c.evaluation.latency_timed_runs,
             batch_size=app_c.evaluation.batch_benchmark_size,
         )
@@ -157,7 +157,7 @@ def run_evaluation_suite(
             X_test_scaled,
             "cnn",
             model_path=models_dir / model_c.cnn.checkpoint_name,
-            n_warmup=app_c.evaluation.latency_warmup_runs,
+            n_warmup=app_c.evaluation.latency_warmup_calls,
             n_runs=app_c.evaluation.latency_timed_runs,
             batch_size=app_c.evaluation.batch_benchmark_size,
         )
@@ -181,7 +181,7 @@ def run_evaluation_suite(
             X_test_scaled,
             "xgb",
             model_path=models_dir / model_c.xgboost.model_name,
-            n_warmup=app_c.evaluation.latency_warmup_runs,
+            n_warmup=app_c.evaluation.latency_warmup_calls,
             n_runs=app_c.evaluation.latency_timed_runs,
             batch_size=app_c.evaluation.batch_benchmark_size,
         )
@@ -342,7 +342,7 @@ def run_evaluation_suite(
             X_test_scaled,
             "ae",
             model_path=models_dir / model_c.autoencoder.checkpoint_name,
-            n_warmup=app_c.evaluation.latency_warmup_runs,
+            n_warmup=app_c.evaluation.latency_warmup_calls,
             n_runs=app_c.evaluation.latency_timed_runs,
             batch_size=app_c.evaluation.batch_benchmark_size,
         )
@@ -402,7 +402,7 @@ def run_evaluation_suite(
             X_test_scaled,
             "sklearn_anomaly",
             model_path=None,
-            n_warmup=app_c.evaluation.latency_warmup_runs,
+            n_warmup=app_c.evaluation.latency_warmup_calls,
             n_runs=app_c.evaluation.latency_timed_runs,
             batch_size=app_c.evaluation.batch_benchmark_size,
         )
@@ -480,7 +480,7 @@ def run_evaluation_suite(
         imputer=artifacts.imputer,
         clipper=artifacts.outlier_clipper,
         scaler=artifacts.scaler,
-        n_warmup=app_c.evaluation.latency_warmup_runs,
+        n_warmup=app_c.evaluation.latency_warmup_calls,
         n_runs=app_c.evaluation.latency_timed_runs,
     )
 
@@ -507,9 +507,9 @@ def run_evaluation_suite(
                 "F1_Macro_CI95_High": round(ci.get("ci95_high", ev["f1_macro"]), 4),
                 "ROC_AUC": round(ev["roc_auc_macro_ovr"], 4),
                 "PR_AUC": round(ev["pr_auc_macro_ovr"], 4),
-                "Latency_Mean_us": round(lat.get("single_mean_us", 0.0), 2),
                 "Latency_Median_us": round(lat.get("single_median_us", 0.0), 2),
                 "Latency_P95_us": round(lat.get("single_p95_us", 0.0), 2),
+                "Latency_Mean_us": round(lat.get("single_mean_us", 0.0), 2),
                 "Samples_Per_Sec": round(lat.get("batch_samples_per_sec", 0.0), 1),
                 "Model_Size_MB": lat.get("model_size_mb", 0.0),
                 "Training_Duration_s": round(float(durations.get(key, 0.0)), 2),
@@ -536,9 +536,9 @@ def run_evaluation_suite(
                 "F1_Macro_CI95_High": round(det_ci.get("ci95_high", det_ev["f1"]), 4),
                 "ROC_AUC": round(det_ev["roc_auc"], 4),
                 "PR_AUC": round(det_ev["pr_auc"], 4),
-                "Latency_Mean_us": round(lat_det.get("single_mean_us", 0.0), 2),
                 "Latency_Median_us": round(lat_det.get("single_median_us", 0.0), 2),
                 "Latency_P95_us": round(lat_det.get("single_p95_us", 0.0), 2),
+                "Latency_Mean_us": round(lat_det.get("single_mean_us", 0.0), 2),
                 "Samples_Per_Sec": round(lat_det.get("batch_samples_per_sec", 0.0), 1),
                 "Model_Size_MB": lat_det.get("model_size_mb", 0.0),
                 "Training_Duration_s": round(float(fit_dur), 2),

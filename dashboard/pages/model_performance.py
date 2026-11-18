@@ -66,15 +66,16 @@ def render_model_performance_page() -> None:
             st.plotly_chart(apply_soc_plotly_theme(fig_m, height=380), use_container_width=True)
 
         with c2:
-            if "Latency_Mean_us" in df_cmp.columns:
+            if "Latency_Median_us" in df_cmp.columns or "Latency_Mean_us" in df_cmp.columns:
+                lat_cols = [c for c in ("Latency_Median_us", "Latency_P95_us") if c in df_cmp.columns] or [
+                    "Latency_Mean_us"
+                ]
                 fig_l = px.bar(
                     df_cmp,
                     x="Model",
-                    y=["Latency_Mean_us", "Latency_P95_us"]
-                    if "Latency_P95_us" in df_cmp.columns
-                    else ["Latency_Mean_us"],
+                    y=lat_cols,
                     barmode="group",
-                    title="Single-Flow Inference Latency (µs, lower is faster)",
+                    title="Single-Flow Inference Latency: Median & P95 (µs, lower is faster)",
                 )
                 st.plotly_chart(apply_soc_plotly_theme(fig_l, height=380), use_container_width=True)
 

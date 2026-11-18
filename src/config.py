@@ -123,8 +123,18 @@ class DataConfig(BaseModel):
 class EvaluationConfig(BaseModel):
     """Evaluation, benchmarking, and SHAP configuration."""
 
-    latency_warmup_runs: int = Field(default=5, ge=1)
+    latency_warmup_calls: int = Field(default=50, ge=1)
     latency_timed_runs: int = Field(default=100, ge=5)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_warmup_key(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "latency_warmup_calls" not in data and "latency_warmup_runs" in data:
+            copied = dict(data)
+            copied["latency_warmup_calls"] = copied.pop("latency_warmup_runs")
+            return copied
+        return data
+
     batch_benchmark_size: int = Field(default=1024, ge=16)
     shap_xgb_max_samples: int = Field(default=500, ge=10)
     shap_mlp_background_samples: int = Field(default=50, ge=5)

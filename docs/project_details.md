@@ -62,6 +62,7 @@ See [`docs/model_configuration.md`](model_configuration.md) and [`docs/architect
 - **TensorFlow uses CPU on Windows:** Official TensorFlow builds (`>=2.11`) dropped native Windows GPU support. Use WSL2 Ubuntu with `tensorflow[and-cuda]` if TensorFlow GPU acceleration is required; XGBoost automatically uses CUDA natively on Windows.
 - **Uploaded CSV rejected in Predict Flow:** Ensure all numeric CICFlowMeter feature columns matching `models/feature_names.json` are present (header whitespace and extra metadata columns like `Source IP` / `Label` are handled automatically).
 - **Dashboard shows missing models:** Run `python scripts/train.py --run-eval` first so artifacts populate `models/` and `reports/`.
+- **Artifact Deserialization Security (`*.pkl` via `joblib`):** Model and preprocessing files serialized as `*.pkl` (`joblib`) can execute arbitrary code upon deserialization and **must only be loaded from trusted sources**.
 
 ---
 

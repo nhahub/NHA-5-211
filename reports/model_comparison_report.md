@@ -9,15 +9,15 @@
 - **Unsupervised anomaly detectors (Autoencoder, Isolation Forest, One-Class SVM, LOF):** Trained strictly on benign flows and evaluated under identical binary novelty framing (Benign vs. Anomalous).
 
 
-| Model | Evaluation_Framing | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro | F1_Macro_CI95_Low | F1_Macro_CI95_High | ROC_AUC | PR_AUC | Latency_Mean_us | Latency_Median_us | Latency_P95_us | Samples_Per_Sec | Model_Size_MB | Training_Duration_s |
+| Model | Evaluation_Framing | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro | F1_Macro_CI95_Low | F1_Macro_CI95_High | ROC_AUC | PR_AUC | Latency_Median_us | Latency_P95_us | Latency_Mean_us | Samples_Per_Sec | Model_Size_MB | Training_Duration_s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MLP | 13-class supervised | 0.9780 | 0.9762 | 0.9780 | 0.9767 | 0.6728 | 0.6236 | 0.7067 | 0.9905 | 0.8117 | 191.4100 | 169.8000 | 323.7600 | 25016.3000 | 2.5340 | 33.5500 |
-| 1D-CNN | 13-class supervised | 0.9946 | 0.9936 | 0.9946 | 0.9940 | 0.8499 | 0.7942 | 0.8827 | 0.9853 | 0.8735 | 708.3100 | 689.9500 | 926.4900 | 17951.0000 | 1.3100 | 858.3600 |
-| XGBoost | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9603 | 0.9013 | 0.9849 | 0.9995 | 0.9773 | 548.0500 | 495.7000 | 621.3800 | 317054.0000 | 2.9540 | 119.3100 |
-| Autoencoder | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.5759 | 0.6001 | 0.8384 | 0.6651 | 242.7800 | 208.5000 | 468.4000 | 24204.5000 | 1.5480 | 36.1000 |
-| Isolation Forest | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 7863.0300 | 7789.7000 | 8862.4400 | 75076.6000 | 2.0960 | 0.5000 |
-| One-Class SVM | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 161.2100 | 141.3000 | 318.1900 | 21578.5000 | 0.4780 | 1.4800 |
-| LOF | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1339.5100 | 1220.3500 | 2140.8200 | 45810.6000 | 5.6660 | 0.5300 |
+| MLP | 13-class supervised | 0.9780 | 0.9762 | 0.9780 | 0.9767 | 0.6728 | 0.6236 | 0.7067 | 0.9905 | 0.8117 | 169.9500 | 247.8900 | 173.4200 | 24278.1000 | 2.5340 | 33.5500 |
+| 1D-CNN | 13-class supervised | 0.9946 | 0.9936 | 0.9946 | 0.9940 | 0.8499 | 0.7942 | 0.8827 | 0.9853 | 0.8735 | 721.1500 | 833.3900 | 731.4100 | 17997.8000 | 1.3100 | 858.3600 |
+| XGBoost | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9603 | 0.9013 | 0.9849 | 0.9995 | 0.9773 | 444.4000 | 743.5200 | 481.1200 | 257069.0000 | 2.9540 | 119.3100 |
+| Autoencoder | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.5759 | 0.6001 | 0.8384 | 0.6651 | 201.6000 | 318.8000 | 227.0200 | 23245.0000 | 1.5480 | 36.1000 |
+| Isolation Forest | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 7671.5500 | 8682.4000 | 7802.7600 | 63630.7000 | 2.0960 | 0.5000 |
+| One-Class SVM | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 142.2500 | 288.9500 | 160.2400 | 22511.5000 | 0.4780 | 1.4800 |
+| LOF | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1122.4500 | 1569.1500 | 1186.9700 | 41648.9000 | 5.6660 | 0.5300 |
 
 
 - **XGBoost Macro-F1 (95% Bootstrap CI, n=1000):** `0.9603` (`[0.9013, 0.9849]`, bootstrap std=`0.0193`)
@@ -306,4 +306,4 @@ Tabular CICFlowMeter features do not form a physical time series; 1D convolution
 
 ## 11. Preprocessing vs. Model Inference Latency
 
-- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** mean = `835.14 µs`, median = `804.20 µs`, P95 = `1023.05 µs` (`1197.4` flows/sec).
+- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** median = `812.20 µs`, P95 = `1081.50 µs` (mean = `867.47 µs`, `50` warm-up calls discarded; `1152.8` flows/sec).

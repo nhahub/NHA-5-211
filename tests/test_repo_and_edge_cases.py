@@ -11,9 +11,10 @@ import pandas as pd
 import pytest
 from scripts.export_onnx import check_onnx_environment
 from scripts.export_onnx import main as export_onnx_main
+from scripts.generate_test_report import CommandRun, parse_pytest_output, render_test_report
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-from src.config import AppConfig, DataConfig, ModelConfig, SplitConfig
+from src.config import AppConfig, DataConfig, EvaluationConfig, ModelConfig, SplitConfig
 from src.data.feature_engineering import SchemaValidationError
 from src.data.loader import CICIDS2017_FEATURES, generate_synthetic_cicids2017
 from src.data.preprocessing import (
@@ -270,3 +271,54 @@ def test_ablation_preserves_exact_rows_even_with_port_only_differences(tmp_app_c
         == res["without_features"]["split_sizes"]["train_raw"]
     )
     assert res["with_features"]["test_rows_sha256"] == res["without_features"]["test_rows_sha256"]
+
+
+def test_latency_warmup_config_and_test_report_generator_parser() -> None:
+    """latency_warmup_calls defaults to 50 and generate_test_report parses real pytest output."""
+    assert EvaluationConfig().latency_warmup_calls == 50
+    assert EvaluationConfig(latency_warmup_runs=12).latency_warmup_calls == 12
+
+    rng = np.random.default_rng(11)
+    X = rng.normal(size=(24, 6)).astype(np.float32)
+    y = rng.integers(0, 3, size=24)
+    clf = build_xgboost_classifier(
+        num_classes=3,
+        params_override={"n_estimators": 6, "max_depth": 2},
+        device="cpu",
+        early_stopping_rounds=None,
+    )
+    clf.fit(X, y)
+    bench = benchmark_model_inference(clf, X, model_type="xgb", n_warmup=50, n_runs=10, batch_size=8)
+    assert bench["warmup_calls_discarded"] == 50
+    assert bench["single_median_us"] > 0.0
+    assert bench["single_p95_us"] >= bench["single_median_us"]
+
+    sample_pytest = "\n".join(
+        [
+            "tests/test_a.py::test_one PASSED                                        [ 50%]",
+            "tests/test_b.py::test_two PASSED                                        [100%]",
+            "============================== slowest durations ==============================",
+            "1.25s call     tests/test_a.py::test_one",
+            "0.10s setup    tests/test_a.py::test_one",
+            "0.04s call     tests/test_b.py::test_two",
+            "====================== 2 passed, 1 warning in 1.50s ======================",
+        ]
+    )
+    cases, summary_txt, dur, counts = parse_pytest_output(sample_pytest)
+    assert len(cases) == 2
+    assert cases[0].call_sec == pytest.approx(1.25)
+    assert cases[0].total_sec == pytest.approx(1.35)
+    assert counts["passed"] == 2
+    assert dur == pytest.approx(1.50)
+    assert "2 passed" in summary_txt
+
+    md = render_test_report(
+        ruff_version="ruff 0.17.5",
+        pytest_version="pytest 9.2.0",
+        ruff_check=CommandRun(["ruff"], "ruff check", 0, "All checks passed!", "", 0.2),
+        ruff_format=CommandRun(["ruff"], "ruff format --check", 0, "63 files already formatted", "", 0.1),
+        pytest_run=CommandRun(["pytest"], "pytest tests/ -v", 0, sample_pytest, "", 1.5),
+        generated_utc="2026-11-18 21:00 UTC",
+    )
+    assert "tests/test_a.py" in md and "1.25" in md and "1.35" in md
+    assert "2 passed, 1 warning" in md
