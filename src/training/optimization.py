@@ -10,7 +10,10 @@ import optuna
 from sklearn.metrics import f1_score, log_loss, recall_score
 
 from src.config import XGBoostConfig
-from src.models.xgboost_model import build_xgboost_classifier
+from src.models.xgboost_model import (
+    expand_xgboost_probas,
+    fit_xgboost_safe_multiclass,
+)
 from src.utils.logging import get_logger
 
 logger = get_logger("smart_ids.training.optimization")
@@ -81,44 +84,54 @@ def compare_smote_vs_class_weight(
     probe_override = {"n_estimators": 120, "max_depth": 6, "learning_rate": 0.1}
 
     # 1. Unweighted raw imbalanced baseline
-    clf_raw = build_xgboost_classifier(
-        num_classes=num_classes,
+    clf_raw, cls_raw = fit_xgboost_safe_multiclass(
+        X_train=X_train_scaled,
+        y_train=y_train,
+        X_val=X_val_scaled,
+        y_val=y_val,
+        total_classes=num_classes,
         params_override=probe_override,
         device=xgb_device,
         seed=seed,
         early_stopping_rounds=15,
     )
-    clf_raw.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)], verbose=False)
-    raw_metrics = _eval_val_scores(y_val, clf_raw.predict_proba(X_val_scaled), num_classes)
+    raw_metrics = _eval_val_scores(
+        y_val, expand_xgboost_probas(clf_raw.predict_proba(X_val_scaled), cls_raw, num_classes), num_classes
+    )
 
     # 2. Inverse-frequency class weighting without synthetic oversampling
     sample_weights = np.array([class_weights[int(c)] for c in y_train], dtype=np.float32)
-    clf_cw = build_xgboost_classifier(
-        num_classes=num_classes,
+    clf_cw, cls_cw = fit_xgboost_safe_multiclass(
+        X_train=X_train_scaled,
+        y_train=y_train,
+        X_val=X_val_scaled,
+        y_val=y_val,
+        total_classes=num_classes,
         params_override=probe_override,
         device=xgb_device,
         seed=seed,
+        sample_weight=sample_weights,
         early_stopping_rounds=15,
     )
-    clf_cw.fit(
-        X_train_scaled,
-        y_train,
-        sample_weight=sample_weights,
-        eval_set=[(X_val_scaled, y_val)],
-        verbose=False,
+    cw_metrics = _eval_val_scores(
+        y_val, expand_xgboost_probas(clf_cw.predict_proba(X_val_scaled), cls_cw, num_classes), num_classes
     )
-    cw_metrics = _eval_val_scores(y_val, clf_cw.predict_proba(X_val_scaled), num_classes)
 
     # 3. SMOTE on standardized training split
-    clf_sm = build_xgboost_classifier(
-        num_classes=num_classes,
+    clf_sm, cls_sm = fit_xgboost_safe_multiclass(
+        X_train=X_train_sm,
+        y_train=y_train_sm,
+        X_val=X_val_scaled,
+        y_val=y_val,
+        total_classes=num_classes,
         params_override=probe_override,
         device=xgb_device,
         seed=seed,
         early_stopping_rounds=15,
     )
-    clf_sm.fit(X_train_sm, y_train_sm, eval_set=[(X_val_scaled, y_val)], verbose=False)
-    sm_metrics = _eval_val_scores(y_val, clf_sm.predict_proba(X_val_scaled), num_classes)
+    sm_metrics = _eval_val_scores(
+        y_val, expand_xgboost_probas(clf_sm.predict_proba(X_val_scaled), cls_sm, num_classes), num_classes
+    )
 
     # Select based on validation Macro-F1 (minority sensitivity) with tie-breaker on Weighted-F1
     if sm_metrics["val_macro_f1"] >= cw_metrics["val_macro_f1"] - 0.002:
@@ -161,20 +174,18 @@ def optimize_xgboost_with_optuna(
 ) -> XGBoostOptimizationResult:
     """Compare baseline XGBoost (report spec) against Optuna-tuned XGBoost on validation set."""
     logger.info("Training report baseline XGBoost (300 estimators, depth=6, lr=0.1)...")
-    baseline_model = build_xgboost_classifier(
-        num_classes=num_classes,
+    baseline_model, base_cls = fit_xgboost_safe_multiclass(
+        X_train=X_train,
+        y_train=y_train,
+        X_val=X_val,
+        y_val=y_val,
+        total_classes=num_classes,
         cfg=cfg,
         device=xgb_device,
         seed=seed,
+        sample_weight=sample_weight,
     )
-    baseline_fit_kwargs: dict[str, Any] = {
-        "eval_set": [(X_val, y_val)],
-        "verbose": False,
-    }
-    if sample_weight is not None:
-        baseline_fit_kwargs["sample_weight"] = sample_weight
-    baseline_model.fit(X_train, y_train, **baseline_fit_kwargs)
-    baseline_probs = baseline_model.predict_proba(X_val)
+    baseline_probs = expand_xgboost_probas(baseline_model.predict_proba(X_val), base_cls, num_classes)
     baseline_metrics = _eval_val_scores(y_val, baseline_probs, num_classes)
     logger.info("Baseline XGBoost validation metrics: %s", baseline_metrics)
 
@@ -211,19 +222,20 @@ def optimize_xgboost_with_optuna(
             "reg_alpha": trial.suggest_float("reg_alpha", 1e-3, 1.0, log=True),
             "reg_lambda": trial.suggest_float("reg_lambda", 0.5, 5.0),
         }
-        clf = build_xgboost_classifier(
-            num_classes=num_classes,
+        clf, trial_cls = fit_xgboost_safe_multiclass(
+            X_train=X_tune,
+            y_train=y_tune,
+            X_val=X_val,
+            y_val=y_val,
+            total_classes=num_classes,
             cfg=cfg,
             params_override=params,
             device=xgb_device,
             seed=seed,
+            sample_weight=sw_tune,
             early_stopping_rounds=20,
         )
-        fit_kw: dict[str, Any] = {"eval_set": [(X_val, y_val)], "verbose": False}
-        if sw_tune is not None:
-            fit_kw["sample_weight"] = sw_tune
-        clf.fit(X_tune, y_tune, **fit_kw)
-        val_probs = clf.predict_proba(X_val)
+        val_probs = expand_xgboost_probas(clf.predict_proba(X_val), trial_cls, num_classes)
         return float(log_loss(y_val, val_probs, labels=list(range(num_classes))))
 
     study = optuna.create_study(
@@ -241,16 +253,20 @@ def optimize_xgboost_with_optuna(
     logger.info("Optuna best XGBoost params (%d trials): %s", len(study.trials), best_params)
 
     # Retrain best Optuna config on full training partition
-    tuned_model = build_xgboost_classifier(
-        num_classes=num_classes,
+    tuned_model, tuned_cls = fit_xgboost_safe_multiclass(
+        X_train=X_train,
+        y_train=y_train,
+        X_val=X_val,
+        y_val=y_val,
+        total_classes=num_classes,
         cfg=cfg,
         params_override=best_params,
         device=xgb_device,
         seed=seed,
+        sample_weight=sample_weight,
         early_stopping_rounds=20,
     )
-    tuned_model.fit(X_train, y_train, **baseline_fit_kwargs)
-    tuned_probs = tuned_model.predict_proba(X_val)
+    tuned_probs = expand_xgboost_probas(tuned_model.predict_proba(X_val), tuned_cls, num_classes)
     tuned_metrics = _eval_val_scores(y_val, tuned_probs, num_classes)
     logger.info("Optuna-tuned XGBoost validation metrics: %s", tuned_metrics)
 

@@ -186,3 +186,58 @@ def test_post_clip_near_duplicate_removal_and_strict_leakage_error(tmp_app_confi
     assert non_strict_checks["passed"] is False
     assert non_strict_checks["train_val_exact_overlap"] >= 2
     assert non_strict_checks["train_test_exact_overlap"] >= 2
+
+
+def test_by_day_split_and_drop_features(tmp_app_config: AppConfig) -> None:
+    """by_day split separates Mon-Wed / part of Thu / Thu+Fri while honoring drop_features."""
+    raw_dir = tmp_app_config.paths.resolve("raw_data_dir")
+    generate_synthetic_cicids2017(
+        n_samples=180, seed=11, class_weights={"BENIGN": 1.0}, save_path=raw_dir / "Monday-WorkingHours.csv"
+    )
+    generate_synthetic_cicids2017(
+        n_samples=220,
+        seed=12,
+        class_weights={"BENIGN": 0.70, "DoS Hulk": 0.30},
+        save_path=raw_dir / "Wednesday-workingHours.csv",
+    )
+    generate_synthetic_cicids2017(
+        n_samples=160,
+        seed=13,
+        class_weights={"BENIGN": 0.70, "Web Attack": 0.30},
+        save_path=raw_dir / "Thursday-WorkingHours.csv",
+    )
+    generate_synthetic_cicids2017(
+        n_samples=200,
+        seed=14,
+        class_weights={"BENIGN": 0.60, "DDoS": 0.40},
+        save_path=raw_dir / "Friday-WorkingHours.csv",
+    )
+
+    tmp_app_config.data.split_strategy = "by_day"
+    tmp_app_config.data.drop_features = ["Destination Port"]
+
+    dataset = run_preprocessing_pipeline(tmp_app_config, force_synthetic=False, save_outputs=False)
+    audit = dataset.audit_report
+
+    assert audit["split_strategy"] == "by_day"
+    assert "Destination Port" in audit["dropped_features"]
+    assert "Destination Port" not in dataset.feature_names
+    assert len(dataset.feature_names) == 76
+    # Destination Port stays available in metadata for threat mapping even when excluded from X
+    assert "Destination Port" in dataset.test_metadata.columns
+
+    assert audit["split_day_files"]["train_files"] == [
+        "Monday-WorkingHours.csv",
+        "Wednesday-workingHours.csv",
+    ]
+    assert "Thursday-WorkingHours.csv" in audit["split_day_files"]["val_files"]
+    assert "Friday-WorkingHours.csv" in audit["split_day_files"]["test_files"]
+
+    split_cls = audit["split_classes_present"]
+    assert "DoS Hulk" in split_cls["train"] and "DoS Hulk" not in split_cls["test"]
+    assert "DDoS" in split_cls["test"] and "DDoS" not in split_cls["train"]
+    assert "Web Attack" in split_cls["validation"] and "Web Attack" in split_cls["test"]
+    assert audit["leakage_checks"]["passed"] is True
+    assert audit["leakage_checks"]["train_test_exact_overlap"] == 0
+    assert audit["leakage_checks"]["train_val_exact_overlap"] == 0
+    assert audit["leakage_checks"]["val_test_exact_overlap"] == 0

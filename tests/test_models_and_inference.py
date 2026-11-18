@@ -7,10 +7,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.config import AppConfig
+from src.config import AppConfig, ModelConfig
+from src.data.loader import generate_synthetic_cicids2017
 from src.data.preprocessing import run_preprocessing_pipeline
 from src.detection.anomaly_detection import AnomalyDetector
 from src.detection.inference import UnifiedDetectionEngine
+from src.evaluation.protocols import evaluate_by_day_protocol, evaluate_feature_ablation
+from src.evaluation.report_writer import write_academic_reports
 from src.models.autoencoder import (
     build_autoencoder,
     calibrate_threshold,
@@ -129,3 +132,81 @@ def test_hybrid_ensemble_zero_day_override_and_missing_artifacts(tmp_path: Path)
     assert bool(decision.anomaly_override_flags[0]) is True
     assert decision.predicted_labels[1] == "DDoS"
     assert bool(decision.anomaly_override_flags[1]) is False
+
+
+def test_by_day_protocol_feature_ablation_and_report_tables(tmp_app_config: AppConfig) -> None:
+    """Secondary protocols run without class-mismatch crashes and emit separate report tables."""
+    raw_dir = tmp_app_config.paths.resolve("raw_data_dir")
+    generate_synthetic_cicids2017(
+        n_samples=160, seed=21, class_weights={"BENIGN": 1.0}, save_path=raw_dir / "Monday-WorkingHours.csv"
+    )
+    generate_synthetic_cicids2017(
+        n_samples=220,
+        seed=22,
+        class_weights={"BENIGN": 0.65, "DoS Hulk": 0.25, "FTP-Patator": 0.10},
+        save_path=raw_dir / "Wednesday-workingHours.csv",
+    )
+    generate_synthetic_cicids2017(
+        n_samples=160,
+        seed=23,
+        class_weights={"BENIGN": 0.70, "Web Attack": 0.30},
+        save_path=raw_dir / "Thursday-WorkingHours.csv",
+    )
+    generate_synthetic_cicids2017(
+        n_samples=200,
+        seed=24,
+        class_weights={"BENIGN": 0.55, "DDoS": 0.25, "PortScan": 0.20},
+        save_path=raw_dir / "Friday-WorkingHours.csv",
+    )
+
+    model_cfg = ModelConfig()
+    xgb_fast = {"n_estimators": 8, "max_depth": 3}
+
+    by_day_res = evaluate_by_day_protocol(
+        app_cfg=tmp_app_config,
+        model_cfg=model_cfg,
+        xgb_params=xgb_fast,
+        imbalance_strategy="class_weight",
+        keras_epochs=1,
+        force_synthetic=False,
+    )
+    assert by_day_res["executed"] is True
+    assert by_day_res["leakage_checks"]["passed"] is True
+    assert set(["XGBoost", "MLP", "1D-CNN"]).issubset(by_day_res["multiclass_models"].keys())
+    assert {"XGBoost (Binary)", "XGBoost (1 - P_Benign)", "Autoencoder"}.issubset(
+        by_day_res["binary_cross_day_models"].keys()
+    )
+    assert {"DDoS", "PortScan", "Web Attack"}.issubset(set(by_day_res["unseen_test_classes"]))
+
+    ablation_res = evaluate_feature_ablation(
+        app_cfg=tmp_app_config,
+        model_cfg=model_cfg,
+        drop_features=["Destination Port"],
+        xgb_params=xgb_fast,
+        imbalance_strategy="class_weight",
+        force_synthetic=False,
+        compute_shap=True,
+    )
+    assert ablation_res["executed"] is True
+    assert ablation_res["with_features"]["n_features"] == 77
+    assert ablation_res["without_features"]["n_features"] == 76
+    assert "delta_test_f1_macro" in ablation_res
+    wo_shap_names = {f["feature"] for f in ablation_res["without_features"]["top_shap_features"]}
+    assert "Destination Port" not in wo_shap_names
+
+    reports_dir = tmp_app_config.paths.resolve("reports_dir")
+    cmp_df = pd.DataFrame([{"Model": "XGBoost", "Accuracy": 0.99, "F1_Weighted": 0.99, "F1_Macro": 0.95}])
+    summary = {
+        "dataset_source": {"is_synthetic": False},
+        "split_strategy": "random",
+        "by_day_protocol": by_day_res,
+        "feature_ablation": ablation_res,
+        "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+        "training_diagnostics": {},
+    }
+    cmp_path, _ = write_academic_reports(summary, cmp_df, reports_dir)
+    md_text = cmp_path.read_text(encoding="utf-8")
+    assert "Cross-Day Temporal Split Protocol (`by_day`" in md_text
+    assert "Cross-Day Binary Intrusion Detection (`by_day`: Benign vs. Attack)" in md_text
+    assert "Shortcut Feature Ablation (With vs. Without `Destination Port`)" in md_text
+    assert "Delta Test Macro-F1 (without - with):" in md_text

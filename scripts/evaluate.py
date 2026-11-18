@@ -22,6 +22,7 @@ from src.evaluation.metrics import (
     evaluate_supervised_model,
     evaluate_unseen_attack_protocol,
 )
+from src.evaluation.protocols import evaluate_by_day_protocol, evaluate_feature_ablation
 from src.evaluation.report_writer import write_academic_reports
 from src.evaluation.visualizations import (
     plot_autoencoder_diagnostics,
@@ -40,6 +41,7 @@ from src.models.autoencoder import (
     find_benign_class_index,
 )
 from src.models.ensemble import HybridEnsembleEngine
+from src.models.xgboost_model import expand_xgboost_probas
 from src.utils.logging import get_logger
 from src.utils.model_registry import ModelRegistry
 
@@ -51,6 +53,7 @@ def run_evaluation_suite(
     model_cfg: ModelConfig | None = None,
     skip_unseen: bool = False,
     skip_shap: bool = False,
+    skip_protocols: bool = False,
 ) -> dict[str, Any]:
     """Evaluate all persisted models independently from training memory."""
     app_c = app_cfg or get_app_config()
@@ -126,7 +129,8 @@ def run_evaluation_suite(
         )
 
     if "XGBoost" in artifacts.models:
-        p_xgb = np.asarray(artifacts.models["XGBoost"].predict_proba(X_test_scaled))
+        xgb_raw_proba = np.asarray(artifacts.models["XGBoost"].predict_proba(X_test_scaled))
+        p_xgb = expand_xgboost_probas(xgb_raw_proba, np.unique(y_train).astype(np.int64), len(class_names))
         supervised_probas["XGBoost"] = p_xgb
         supervised_evals["XGBoost"] = evaluate_supervised_model(y_test, p_xgb, class_names, "XGBoost")
         cm_norm_dict["XGBoost"] = np.asarray(supervised_evals["XGBoost"]["confusion_matrix_normalized"])
@@ -371,14 +375,48 @@ def run_evaluation_suite(
         with (artifacts_dir / "shap_summary.json").open("w", encoding="utf-8") as fh:
             json.dump(shap_summary, fh, indent=2)
 
+    # 8. Secondary Evaluation Protocols (Cross-Day by_day & Shortcut Feature Ablation)
+    is_synth = bool(prep_audit.get("source", {}).get("is_synthetic", False))
+    xgb_opt_diag = train_diag.get("xgboost_optimization", {})
+    selected_xgb_params = (
+        xgb_opt_diag.get("best_params") if xgb_opt_diag.get("selected_variant") == "tuned" else None
+    )
+    imb_strategy = train_diag.get("imbalance_experiment", {}).get("selected_strategy", "smote")
+
+    by_day_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
+    ablation_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
+    if not skip_protocols:
+        if app_c.evaluation.run_by_day_comparison:
+            by_day_res = evaluate_by_day_protocol(
+                app_cfg=app_c,
+                model_cfg=model_c,
+                xgb_params=selected_xgb_params,
+                imbalance_strategy=imb_strategy,
+                keras_epochs=app_c.evaluation.by_day_keras_epochs,
+                force_synthetic=is_synth,
+            )
+        if app_c.evaluation.run_feature_ablation:
+            ablation_res = evaluate_feature_ablation(
+                app_cfg=app_c,
+                model_cfg=model_c,
+                drop_features=app_c.evaluation.ablation_drop_features,
+                xgb_params=selected_xgb_params,
+                imbalance_strategy=imb_strategy,
+                force_synthetic=is_synth,
+                compute_shap=not skip_shap,
+            )
+
     full_summary = {
         "dataset_source": prep_audit.get("source", {}),
+        "split_strategy": prep_audit.get("split_strategy", app_c.data.split_strategy),
         "preprocessing_audit": prep_audit,
         "training_diagnostics": train_diag,
         "supervised_evaluations": supervised_evals,
         "ensemble_comparison": ensemble_comparison,
         "autoencoder_evaluation": ae_eval,
         "unseen_attack_protocol": unseen_res,
+        "by_day_protocol": by_day_res,
+        "feature_ablation": ablation_res,
         "preprocessing_latency": prep_latency,
         "inference_latency": latency_table,
         "shap_summary": shap_summary,
@@ -400,8 +438,17 @@ def main() -> None:
         "--skip-unseen", action="store_true", help="Skip leave-one-attack-out retraining protocol."
     )
     parser.add_argument("--skip-shap", action="store_true", help="Skip SHAP generation.")
+    parser.add_argument(
+        "--skip-protocols",
+        action="store_true",
+        help="Skip secondary by_day and feature ablation evaluation protocols.",
+    )
     args = parser.parse_args()
-    run_evaluation_suite(skip_unseen=args.skip_unseen, skip_shap=args.skip_shap)
+    run_evaluation_suite(
+        skip_unseen=args.skip_unseen,
+        skip_shap=args.skip_shap,
+        skip_protocols=args.skip_protocols,
+    )
 
 
 if __name__ == "__main__":

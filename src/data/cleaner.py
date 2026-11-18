@@ -13,6 +13,8 @@ from src.utils.logging import get_logger
 
 logger = get_logger("smart_ids.data.cleaner")
 
+SOURCE_FILE_COLUMN = "__source_file__"
+
 
 @dataclass
 class CleaningReport:
@@ -27,6 +29,7 @@ class CleaningReport:
     nans_before_split: int = 0
     id_columns_removed: list[str] = field(default_factory=list)
     duplicate_columns_removed: list[str] = field(default_factory=list)
+    dropped_features_removed: list[str] = field(default_factory=list)
     rare_classes_dropped: dict[str, int] = field(default_factory=dict)
     label_mapping_applied: dict[str, str] = field(default_factory=dict)
 
@@ -84,6 +87,7 @@ def clean_cicids_dataframe(
     label_col: str = "Label",
     identifier_keywords: list[str] | None = None,
     preserve_features: list[str] | None = None,
+    drop_features: list[str] | None = None,
     merge_web_attacks: bool = True,
     drop_ultra_rare_below: int = 10,
 ) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, CleaningReport]:
@@ -92,7 +96,8 @@ def clean_cicids_dataframe(
     Note: Imputation (median) and outlier clipping (5-sigma) are deliberately NOT
     executed here; they are fit exclusively on the training partition after splitting.
     """
-    report = CleaningReport(initial_rows=len(df), initial_cols=df.shape[1])
+    raw_col_count = df.shape[1] - (1 if SOURCE_FILE_COLUMN in df.columns else 0)
+    report = CleaningReport(initial_rows=len(df), initial_cols=raw_col_count)
     work = normalize_column_names(df)
 
     if label_col not in work.columns:
@@ -131,28 +136,44 @@ def clean_cicids_dataframe(
                 report.rare_classes_dropped,
             )
 
-    # Remove exact duplicate rows before separating metadata and features
+    # Remove exact duplicate rows (excluding internal provenance column) before separating metadata
     before_dedup = len(work)
-    work = work.drop_duplicates().reset_index(drop=True)
+    dedup_cols = [c for c in work.columns if c != SOURCE_FILE_COLUMN]
+    work = work.drop_duplicates(subset=dedup_cols).reset_index(drop=True)
     report.duplicates_removed = before_dedup - len(work)
     report.rows_after_dedup = len(work)
 
-    # Extract SOC metadata prior to dropping structural identifiers
+    # Extract SOC metadata prior to dropping structural identifiers or ablated features
     metadata = extract_flow_metadata(work)
     metadata["True_Label"] = work[label_col].values
+    if SOURCE_FILE_COLUMN in work.columns:
+        metadata["Source_File"] = work[SOURCE_FILE_COLUMN].astype(str).values
 
-    # Remove structural identifiers
+    # Remove structural identifiers (never include internal provenance tag in id_columns_removed)
     kw_list = identifier_keywords or ["ip", "timestamp", "flow id", "src", "dst", "source port"]
     preserve = preserve_features or ["Destination Port"]
-    id_cols = identify_structural_columns(work.columns, kw_list, preserve, label_col=label_col)
+    feature_candidates = [c for c in work.columns if c != SOURCE_FILE_COLUMN]
+    id_cols = identify_structural_columns(feature_candidates, kw_list, preserve, label_col=label_col)
     report.id_columns_removed = id_cols
 
     # Drop duplicate CICFlowMeter header column 'Fwd Header Length.1' if present
     dup_cols = [c for c in ("Fwd Header Length.1",) if c in work.columns]
     report.duplicate_columns_removed = dup_cols
 
+    # Explicit user/experiment feature ablation list (overrides preserve_features)
+    drop_feat_lower = {str(c).strip().lower() for c in (drop_features or []) if str(c).strip()}
+    explicit_drops = [
+        c
+        for c in feature_candidates
+        if c != label_col
+        and c not in id_cols
+        and c not in dup_cols
+        and str(c).strip().lower() in drop_feat_lower
+    ]
+    report.dropped_features_removed = explicit_drops
+
     y_series = work[label_col].copy()
-    drop_set = set(id_cols) | set(dup_cols) | {label_col}
+    drop_set = set(id_cols) | set(dup_cols) | set(explicit_drops) | {label_col, SOURCE_FILE_COLUMN}
     X_df = work.drop(columns=[c for c in work.columns if c in drop_set]).copy()
 
     # Coerce all remaining features to numeric, tracking coerced NaNs and Inf replacements

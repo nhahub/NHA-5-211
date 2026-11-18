@@ -1,0 +1,459 @@
+"""Secondary evaluation protocols: cross-day splitting (by_day) and feature shortcut ablation."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+from sklearn.metrics import f1_score
+from sklearn.model_selection import train_test_split
+import xgboost as xgb
+
+from src.config import AppConfig, ModelConfig
+from src.data.loader import discover_csv_files
+from src.data.preprocessing import (
+    PreparedDataset,
+    _classify_day_bucket,
+    run_preprocessing_pipeline,
+)
+from src.evaluation.metrics import (
+    _binary_metrics,
+    evaluate_autoencoder,
+    evaluate_supervised_model,
+)
+from src.explainability.shap_explainer import compute_xgboost_global_shap
+from src.models.autoencoder import (
+    build_autoencoder,
+    calibrate_threshold,
+    compute_reconstruction_error,
+    extract_benign_subset,
+    find_benign_class_index,
+)
+from src.models.cnn import build_cnn1d
+from src.models.mlp import build_mlp
+from src.models.xgboost_model import expand_xgboost_probas, fit_xgboost_safe_multiclass
+from src.training.callbacks import build_keras_callbacks
+from src.utils.logging import get_logger
+from src.utils.reproducibility import configure_hardware, set_global_seed
+
+logger = get_logger("smart_ids.evaluation.protocols")
+
+
+def _select_supervised_train_arrays(
+    dataset: PreparedDataset,
+    imbalance_strategy: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, dict[int, float] | None]:
+    """Select standardized or SMOTE training arrays and matching weights for a strategy."""
+    if imbalance_strategy == "smote":
+        return dataset.X_train_sm, dataset.y_train_sm, None, None
+    if imbalance_strategy == "class_weight":
+        sample_w = np.array([dataset.class_weights[int(c)] for c in dataset.y_train], dtype=np.float32)
+        return dataset.X_train_scaled, dataset.y_train, sample_w, dataset.class_weights
+    return dataset.X_train_scaled, dataset.y_train, None, None
+
+
+def _internal_train_es_split(
+    X: np.ndarray,
+    y: np.ndarray,
+    sample_weight: np.ndarray | None,
+    seed: int,
+    es_fraction: float = 0.12,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, np.ndarray, np.ndarray]:
+    """Hold out an internal stratified validation slice from training rows for early stopping."""
+    counts = np.bincount(y)
+    nz = counts[counts > 0]
+    can_stratify = len(nz) > 1 and int(nz.min()) >= 2 and int(len(y) * es_fraction) >= len(nz)
+    idx = np.arange(len(y))
+    i_tr, i_es = train_test_split(
+        idx,
+        test_size=es_fraction,
+        stratify=y if can_stratify else None,
+        random_state=seed,
+    )
+    sw_tr = sample_weight[i_tr] if sample_weight is not None else None
+    return X[i_tr], y[i_tr], sw_tr, X[i_es], y[i_es]
+
+
+def _can_run_by_day_split(app_cfg: AppConfig) -> tuple[bool, str]:
+    """Check whether raw_data_dir has CSVs covering Monday-Wednesday, Thursday, and Friday."""
+    raw_dir = app_cfg.paths.resolve("raw_data_dir")
+    csv_files = discover_csv_files(raw_dir)
+    if not csv_files:
+        return False, "No raw CICIDS2017 CSV files found in raw_data_dir."
+    buckets: set[str] = set()
+    try:
+        for path in csv_files:
+            buckets.add(_classify_day_bucket(path.name))
+    except ValueError as exc:
+        return False, str(exc)
+    required = {"train_mon_wed", "thursday", "friday"}
+    if not required.issubset(buckets):
+        missing = sorted(required - buckets)
+        return False, f"Raw CSVs do not cover required by_day buckets: missing {missing}."
+    return True, "ok"
+
+
+def _summarize_multiclass_by_day(
+    eval_dict: dict[str, Any],
+    y_true: np.ndarray,
+    proba: np.ndarray,
+) -> dict[str, Any]:
+    """Extract compact closed-set multi-class metrics including present-class Macro-F1."""
+    y_pred = np.argmax(proba, axis=1)
+    present_idx = [int(c) for c in np.unique(y_true)]
+    f1_macro_present = float(f1_score(y_true, y_pred, labels=present_idx, average="macro", zero_division=0))
+    return {
+        "accuracy": float(eval_dict["accuracy"]),
+        "precision_weighted": float(eval_dict["precision_weighted"]),
+        "recall_weighted": float(eval_dict["recall_weighted"]),
+        "f1_weighted": float(eval_dict["f1_weighted"]),
+        "f1_macro": float(eval_dict["f1_macro"]),
+        "f1_macro_present_test_classes": f1_macro_present,
+        "roc_auc_macro_ovr": float(eval_dict["roc_auc_macro_ovr"]),
+    }
+
+
+def evaluate_by_day_protocol(
+    app_cfg: AppConfig,
+    model_cfg: ModelConfig,
+    xgb_params: dict[str, Any] | None = None,
+    imbalance_strategy: str = "class_weight",
+    keras_epochs: int | None = None,
+    force_synthetic: bool = False,
+) -> dict[str, Any]:
+    """Run temporal cross-day evaluation: Mon-Wed train, part of Thu val, Thu-Fri test."""
+    if force_synthetic:
+        return {
+            "executed": False,
+            "reason": "Skipped by_day evaluation under synthetic mode (requires Monday-Friday CICIDS2017 CSVs).",
+        }
+
+    ok, reason = _can_run_by_day_split(app_cfg)
+    if not ok:
+        logger.warning("Skipping by_day comparison: %s", reason)
+        return {"executed": False, "reason": reason}
+
+    seed = app_cfg.project.random_seed
+    set_global_seed(seed)
+    hardware = configure_hardware(
+        use_gpu=model_cfg.hardware.use_gpu,
+        memory_growth=model_cfg.hardware.memory_growth,
+        mixed_precision=model_cfg.hardware.mixed_precision,
+    )
+
+    by_day_cfg = app_cfg.model_copy(deep=True)
+    by_day_cfg.data.split_strategy = "by_day"
+    dataset = run_preprocessing_pipeline(by_day_cfg, force_synthetic=False, save_outputs=False)
+
+    num_features = dataset.X_train_scaled.shape[1]
+    num_classes = len(dataset.class_names)
+    benign_idx, benign_name = find_benign_class_index(dataset.label_encoder)
+    y_test_bin = (dataset.y_test != benign_idx).astype(np.int64)
+
+    X_sup_train, y_sup_train, sample_w, keras_cw = _select_supervised_train_arrays(
+        dataset, imbalance_strategy
+    )
+    # Supervise Keras early stopping exclusively on an internal Mon-Wed holdout slice so
+    # unseen Thursday attack classes cannot distort validation loss tracking.
+    X_fit, y_fit, sw_fit, X_es, y_es = _internal_train_es_split(X_sup_train, y_sup_train, sample_w, seed=seed)
+
+    multiclass_table: dict[str, dict[str, Any]] = {}
+    binary_table: dict[str, dict[str, Any]] = {}
+
+    # 1. XGBoost Multi-Class (Mon-Wed classes projected onto full class space)
+    xgb_clf, present_cls = fit_xgboost_safe_multiclass(
+        X_train=X_sup_train,
+        y_train=y_sup_train,
+        X_val=dataset.X_val_scaled,
+        y_val=dataset.y_val,
+        total_classes=num_classes,
+        cfg=model_cfg.xgboost,
+        params_override=xgb_params,
+        device=hardware.xgb_device,
+        seed=seed,
+        sample_weight=sample_w,
+    )
+    p_xgb = expand_xgboost_probas(xgb_clf.predict_proba(dataset.X_test_scaled), present_cls, num_classes)
+    xgb_mc_eval = evaluate_supervised_model(dataset.y_test, p_xgb, dataset.class_names, "XGBoost")
+    multiclass_table["XGBoost"] = _summarize_multiclass_by_day(xgb_mc_eval, dataset.y_test, p_xgb)
+    binary_table["XGBoost (1 - P_Benign)"] = _binary_metrics(
+        y_test_bin, 1.0 - p_xgb[:, benign_idx], threshold=0.5
+    )
+
+    # 2. Dedicated Binary XGBoost (Benign vs Attack trained on Mon-Wed attacks, tested Thu-Fri)
+    y_bin_tr = (y_fit != benign_idx).astype(np.int64)
+    y_bin_es = (y_es != benign_idx).astype(np.int64)
+    bin_params = {
+        k: v
+        for k, v in (model_cfg.xgboost.baseline | (xgb_params or {})).items()
+        if k not in {"num_class", "objective", "eval_metric"}
+    }
+    xgb_bin = xgb.XGBClassifier(
+        **bin_params,
+        objective="binary:logistic",
+        eval_metric="logloss",
+        random_state=seed,
+        device=hardware.xgb_device,
+        early_stopping_rounds=20,
+    )
+    fit_bin_kw: dict[str, Any] = {"eval_set": [(X_es, y_bin_es)], "verbose": False}
+    if sw_fit is not None:
+        # Balanced binary weight for Attack vs Benign when using class_weight
+        n_pos = max(1, int(np.sum(y_bin_tr == 1)))
+        n_neg = max(1, int(np.sum(y_bin_tr == 0)))
+        w_pos = float(n_neg / n_pos)
+        fit_bin_kw["sample_weight"] = np.where(y_bin_tr == 1, w_pos, 1.0).astype(np.float32)
+    xgb_bin.fit(X_fit, y_bin_tr, **fit_bin_kw)
+    p_xgb_bin = np.asarray(xgb_bin.predict_proba(dataset.X_test_scaled)[:, 1], dtype=np.float64)
+    binary_table["XGBoost (Binary)"] = _binary_metrics(y_test_bin, p_xgb_bin, threshold=0.5)
+
+    # 3. MLP & 1D-CNN in-memory training (no checkpoint overwrite in models/)
+    ep = int(keras_epochs or app_cfg.evaluation.by_day_keras_epochs)
+    mlp = build_mlp(num_features, num_classes, cfg=model_cfg.mlp)
+    mlp_cb = build_keras_callbacks(
+        checkpoint_path=None,
+        early_stopping_patience=model_cfg.mlp.early_stopping_patience,
+        reduce_lr_patience=model_cfg.mlp.reduce_lr_patience,
+        reduce_lr_factor=model_cfg.mlp.reduce_lr_factor,
+        min_lr=model_cfg.mlp.min_lr,
+    )
+    mlp.fit(
+        X_fit,
+        y_fit,
+        validation_data=(X_es, y_es),
+        epochs=ep,
+        batch_size=model_cfg.mlp.batch_size,
+        callbacks=mlp_cb,
+        class_weight=keras_cw,
+        verbose=0,
+    )
+    p_mlp = np.asarray(mlp.predict(dataset.X_test_scaled, batch_size=1024, verbose=0), dtype=np.float64)
+    mlp_mc_eval = evaluate_supervised_model(dataset.y_test, p_mlp, dataset.class_names, "MLP")
+    multiclass_table["MLP"] = _summarize_multiclass_by_day(mlp_mc_eval, dataset.y_test, p_mlp)
+    binary_table["MLP (1 - P_Benign)"] = _binary_metrics(
+        y_test_bin, 1.0 - p_mlp[:, benign_idx], threshold=0.5
+    )
+
+    cnn = build_cnn1d(num_features, num_classes, cfg=model_cfg.cnn)
+    cnn_cb = build_keras_callbacks(
+        checkpoint_path=None,
+        early_stopping_patience=model_cfg.cnn.early_stopping_patience,
+        reduce_lr_patience=model_cfg.cnn.reduce_lr_patience,
+        reduce_lr_factor=model_cfg.cnn.reduce_lr_factor,
+        min_lr=model_cfg.cnn.min_lr,
+    )
+    cnn.fit(
+        X_fit.reshape(-1, num_features, 1),
+        y_fit,
+        validation_data=(X_es.reshape(-1, num_features, 1), y_es),
+        epochs=ep,
+        batch_size=model_cfg.cnn.batch_size,
+        callbacks=cnn_cb,
+        class_weight=keras_cw,
+        verbose=0,
+    )
+    p_cnn = np.asarray(
+        cnn.predict(dataset.X_test_scaled.reshape(-1, num_features, 1), batch_size=1024, verbose=0),
+        dtype=np.float64,
+    )
+    cnn_mc_eval = evaluate_supervised_model(dataset.y_test, p_cnn, dataset.class_names, "1D-CNN")
+    multiclass_table["1D-CNN"] = _summarize_multiclass_by_day(cnn_mc_eval, dataset.y_test, p_cnn)
+    binary_table["1D-CNN (1 - P_Benign)"] = _binary_metrics(
+        y_test_bin, 1.0 - p_cnn[:, benign_idx], threshold=0.5
+    )
+
+    # 4. Autoencoder (BENIGN Mon-Wed train, threshold strictly calibrated on Thursday BENIGN val)
+    X_benign_train, _, _ = extract_benign_subset(
+        dataset.X_train_scaled, dataset.y_train, dataset.label_encoder
+    )
+    X_benign_val, _, _ = extract_benign_subset(dataset.X_val_scaled, dataset.y_val, dataset.label_encoder)
+    ae_model, _, _ = build_autoencoder(num_features, cfg=model_cfg.autoencoder)
+    ae_cb = build_keras_callbacks(
+        checkpoint_path=None,
+        early_stopping_patience=model_cfg.autoencoder.early_stopping_patience,
+        reduce_lr_patience=model_cfg.autoencoder.reduce_lr_patience,
+        reduce_lr_factor=model_cfg.autoencoder.reduce_lr_factor,
+        min_lr=model_cfg.autoencoder.min_lr,
+    )
+    ae_model.fit(
+        X_benign_train,
+        X_benign_train,
+        validation_data=(X_benign_val, X_benign_val),
+        epochs=ep,
+        batch_size=model_cfg.autoencoder.batch_size,
+        callbacks=ae_cb,
+        verbose=0,
+    )
+    benign_val_errors = compute_reconstruction_error(ae_model, X_benign_val)
+    ae_threshold, _ = calibrate_threshold(
+        benign_val_errors, percentile=model_cfg.autoencoder.threshold_percentile
+    )
+    ae_test_errors = compute_reconstruction_error(ae_model, dataset.X_test_scaled)
+    ae_eval = evaluate_autoencoder(
+        y_test_multiclass=dataset.y_test,
+        recon_errors_test=ae_test_errors,
+        benign_val_errors=benign_val_errors,
+        threshold=ae_threshold,
+        class_names=dataset.class_names,
+        benign_index=benign_idx,
+        percentiles=app_cfg.evaluation.autoencoder_percentiles,
+    )
+    binary_table["Autoencoder"] = {
+        k: float(ae_eval[k])
+        for k in ("accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc", "fpr", "fnr")
+    }
+
+    split_cls = dataset.audit_report.get("split_classes_present", {})
+    train_cls = split_cls.get("train", [])
+    test_cls = split_cls.get("test", [])
+    unseen_test_cls = sorted(c for c in set(test_cls) - set(train_cls) if c != benign_name)
+
+    return {
+        "executed": True,
+        "split_strategy": "by_day",
+        "imbalance_strategy": imbalance_strategy,
+        "keras_epochs": ep,
+        "split_sizes": dataset.audit_report["split_sizes"],
+        "split_day_files": dataset.audit_report.get("split_day_files", {}),
+        "leakage_checks": dataset.audit_report["leakage_checks"],
+        "train_classes": train_cls,
+        "val_classes": split_cls.get("validation", []),
+        "test_classes": test_cls,
+        "unseen_test_classes": unseen_test_cls,
+        "multiclass_models": multiclass_table,
+        "binary_cross_day_models": binary_table,
+        "autoencoder_threshold": float(ae_threshold),
+        "caveat_note": (
+            "In CICIDS2017, all attack families occurring on Thursday and Friday "
+            f"({', '.join(unseen_test_cls)}) are absent from Monday-Wednesday training data. "
+            "Closed-set multi-class Macro-F1 therefore cannot attribute unseen Thursday-Friday labels, "
+            "whereas the Cross-Day Binary table evaluates Benign-vs-Attack generalization directly."
+        ),
+    }
+
+
+def _train_and_eval_xgb_for_ablation(
+    dataset: PreparedDataset,
+    model_cfg: ModelConfig,
+    xgb_params: dict[str, Any] | None,
+    imbalance_strategy: str,
+    seed: int,
+    xgb_device: str,
+    compute_shap: bool,
+) -> dict[str, Any]:
+    """Fit matched XGBoost classifier cleanly on a preprocessed dataset variant and evaluate val/test."""
+    num_classes = len(dataset.class_names)
+    X_sup_train, y_sup_train, sample_w, _ = _select_supervised_train_arrays(dataset, imbalance_strategy)
+    clf, present_cls = fit_xgboost_safe_multiclass(
+        X_train=X_sup_train,
+        y_train=y_sup_train,
+        X_val=dataset.X_val_scaled,
+        y_val=dataset.y_val,
+        total_classes=num_classes,
+        cfg=model_cfg.xgboost,
+        params_override=xgb_params,
+        device=xgb_device,
+        seed=seed,
+        sample_weight=sample_w,
+    )
+    p_val = expand_xgboost_probas(clf.predict_proba(dataset.X_val_scaled), present_cls, num_classes)
+    p_test = expand_xgboost_probas(clf.predict_proba(dataset.X_test_scaled), present_cls, num_classes)
+
+    val_eval = evaluate_supervised_model(dataset.y_val, p_val, dataset.class_names, "XGBoost")
+    test_eval = evaluate_supervised_model(dataset.y_test, p_test, dataset.class_names, "XGBoost")
+
+    top_shap: list[dict[str, Any]] = []
+    if compute_shap and len(dataset.X_test_scaled) > 0:
+        shap_cls_names = [dataset.class_names[int(i)] for i in present_cls]
+        shap_res, _, _ = compute_xgboost_global_shap(
+            xgb_model=clf,
+            X_test=dataset.X_test_scaled,
+            feature_names=dataset.feature_names,
+            class_names=shap_cls_names,
+            max_samples=min(250, len(dataset.X_test_scaled)),
+            summary_fig_path=None,
+        )
+        top_shap = shap_res.feature_importance[:10]
+
+    def _compact(ev: dict[str, Any]) -> dict[str, float]:
+        return {
+            "accuracy": float(ev["accuracy"]),
+            "precision_weighted": float(ev["precision_weighted"]),
+            "recall_weighted": float(ev["recall_weighted"]),
+            "f1_weighted": float(ev["f1_weighted"]),
+            "f1_macro": float(ev["f1_macro"]),
+            "roc_auc_macro_ovr": float(ev["roc_auc_macro_ovr"]),
+        }
+
+    return {
+        "n_features": int(len(dataset.feature_names)),
+        "dropped_features": list(dataset.audit_report.get("dropped_features", [])),
+        "split_sizes": dataset.audit_report["split_sizes"],
+        "leakage_checks": dataset.audit_report["leakage_checks"],
+        "val": _compact(val_eval),
+        "test": _compact(test_eval),
+        "top_shap_features": top_shap,
+    }
+
+
+def evaluate_feature_ablation(
+    app_cfg: AppConfig,
+    model_cfg: ModelConfig,
+    drop_features: list[str] | None = None,
+    xgb_params: dict[str, Any] | None = None,
+    imbalance_strategy: str = "smote",
+    force_synthetic: bool = False,
+    compute_shap: bool = True,
+) -> dict[str, Any]:
+    """Compare XGBoost with and without shortcut feature(s) such as Destination Port."""
+    target_drops = list(drop_features or app_cfg.evaluation.ablation_drop_features or ["Destination Port"])
+    seed = app_cfg.project.random_seed
+    set_global_seed(seed)
+    hardware = configure_hardware(
+        use_gpu=model_cfg.hardware.use_gpu,
+        memory_growth=model_cfg.hardware.memory_growth,
+        mixed_precision=model_cfg.hardware.mixed_precision,
+    )
+
+    cfg_with = app_cfg.model_copy(deep=True)
+    cfg_with.data.drop_features = []
+    cfg_without = app_cfg.model_copy(deep=True)
+    cfg_without.data.drop_features = target_drops
+
+    ds_with = run_preprocessing_pipeline(cfg_with, force_synthetic=force_synthetic, save_outputs=False)
+    ds_without = run_preprocessing_pipeline(cfg_without, force_synthetic=force_synthetic, save_outputs=False)
+
+    res_with = _train_and_eval_xgb_for_ablation(
+        ds_with, model_cfg, xgb_params, imbalance_strategy, seed, hardware.xgb_device, compute_shap
+    )
+    res_without = _train_and_eval_xgb_for_ablation(
+        ds_without, model_cfg, xgb_params, imbalance_strategy, seed, hardware.xgb_device, compute_shap
+    )
+
+    delta_test_f1_macro = res_without["test"]["f1_macro"] - res_with["test"]["f1_macro"]
+    delta_val_f1_macro = res_without["val"]["f1_macro"] - res_with["val"]["f1_macro"]
+    delta_test_f1_weighted = res_without["test"]["f1_weighted"] - res_with["test"]["f1_weighted"]
+    delta_test_acc = res_without["test"]["accuracy"] - res_with["test"]["accuracy"]
+    delta_test_roc = res_without["test"]["roc_auc_macro_ovr"] - res_with["test"]["roc_auc_macro_ovr"]
+
+    logger.info(
+        "Feature ablation (%s): Test Macro-F1 %.4f -> %.4f (delta=%+.4f)",
+        target_drops,
+        res_with["test"]["f1_macro"],
+        res_without["test"]["f1_macro"],
+        delta_test_f1_macro,
+    )
+
+    return {
+        "executed": True,
+        "split_strategy": app_cfg.data.split_strategy,
+        "imbalance_strategy": imbalance_strategy,
+        "dropped_features": target_drops,
+        "with_features": res_with,
+        "without_features": res_without,
+        "delta_test_f1_macro": round(float(delta_test_f1_macro), 6),
+        "delta_val_f1_macro": round(float(delta_val_f1_macro), 6),
+        "delta_test_f1_weighted": round(float(delta_test_f1_weighted), 6),
+        "delta_test_accuracy": round(float(delta_test_acc), 6),
+        "delta_test_roc_auc_macro_ovr": round(float(delta_test_roc), 6),
+    }

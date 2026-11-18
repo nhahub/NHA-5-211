@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import DataConfig
+from src.data.cleaner import SOURCE_FILE_COLUMN
 from src.utils.logging import get_logger
 
 logger = get_logger("smart_ids.data.loader")
@@ -441,6 +442,7 @@ def load_cicids2017_corpus(
         for csv_path in csv_files:
             part = _read_single_csv(csv_path)
             logger.info("Loaded %-55s -> %d rows x %d cols", csv_path.name, len(part), part.shape[1])
+            part[SOURCE_FILE_COLUMN] = csv_path.name
             frames.append(part)
 
         df = pd.concat(frames, ignore_index=True)

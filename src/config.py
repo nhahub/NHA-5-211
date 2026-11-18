@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 import yaml
@@ -68,10 +68,11 @@ class SyntheticFallbackConfig(BaseModel):
 
 
 class SplitConfig(BaseModel):
-    """Stratified train/validation/test split ratios."""
+    """Train/validation/test split ratios."""
 
     test_size: float = Field(default=0.15, gt=0.0, lt=0.5)
     val_size_of_remainder: float = Field(default=0.15, gt=0.0, lt=0.5)
+    thursday_val_fraction: float = Field(default=0.5, gt=0.0, lt=1.0)
     stratify: bool = True
 
 
@@ -101,7 +102,9 @@ class DataConfig(BaseModel):
         default_factory=lambda: ["ip", "timestamp", "flow id", "src", "dst", "source port"]
     )
     preserve_features: list[str] = Field(default_factory=lambda: ["Destination Port"])
+    drop_features: list[str] = Field(default_factory=list)
     strict_leakage_check: bool = True
+    split_strategy: Literal["random", "by_day"] = "random"
     split: SplitConfig = Field(default_factory=SplitConfig)
     imbalance: ImbalanceConfig = Field(default_factory=ImbalanceConfig)
 
@@ -117,6 +120,10 @@ class EvaluationConfig(BaseModel):
     shap_mlp_explain_samples: int = Field(default=20, ge=1)
     autoencoder_percentiles: list[float] = Field(default_factory=lambda: [90.0, 95.0, 97.0, 99.0])
     unseen_attack_holdout_class: str = "Web Attack"
+    run_by_day_comparison: bool = True
+    by_day_keras_epochs: int = Field(default=20, ge=1)
+    run_feature_ablation: bool = True
+    ablation_drop_features: list[str] = Field(default_factory=lambda: ["Destination Port"])
 
 
 class ResponseConfig(BaseModel):

@@ -21,6 +21,7 @@ from src.models.autoencoder import (
 from src.models.cnn import build_cnn1d
 from src.models.ensemble import TemperatureScaler, compute_ece, compute_multiclass_brier
 from src.models.mlp import build_mlp
+from src.models.xgboost_model import expand_xgboost_probas
 from src.training.callbacks import build_keras_callbacks
 from src.training.optimization import (
     ImbalanceExperimentResult,
@@ -284,10 +285,13 @@ def train_all_models(
     trained_models["XGBoost"] = xgb_model
 
     # 6. Probability calibration analysis & Temperature Scaling fit strictly on validation probabilities
+    xgb_present_cls = np.unique(y_sup_train).astype(np.int64)
     val_probas = {
         "MLP": mlp.predict(dataset.X_val_scaled, batch_size=1024, verbose=0),
         "CNN": cnn.predict(X_val_cnn, batch_size=1024, verbose=0),
-        "XGBoost": xgb_model.predict_proba(dataset.X_val_scaled),
+        "XGBoost": expand_xgboost_probas(
+            xgb_model.predict_proba(dataset.X_val_scaled), xgb_present_cls, num_classes
+        ),
     }
     calibration_report: dict[str, dict[str, float]] = {}
     calibrators: dict[str, TemperatureScaler] = {}

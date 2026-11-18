@@ -35,8 +35,11 @@ def write_academic_reports(
     ens = summary.get("ensemble_comparison", {})
     ae = summary.get("autoencoder_evaluation", {})
     unseen = summary.get("unseen_attack_protocol", {})
+    by_day = summary.get("by_day_protocol", {})
+    ablation = summary.get("feature_ablation", {})
     prep_lat = summary.get("preprocessing_latency", {})
     shap_sum = summary.get("shap_summary", {})
+    split_strat = summary.get("split_strategy") or audit.get("split_strategy", "random")
 
     is_synth = bool(src.get("is_synthetic", False))
     mode_banner = (
@@ -52,20 +55,117 @@ def write_academic_reports(
     cmp_md = _df_to_markdown(comparison_df)
 
     # 1. Model Comparison Report
+    sec_num = 1
     comp_lines = [
         "# SMART IDS v3 — Model Comparison Report\n",
         mode_banner,
-        "## 1. Unified Four-Model Benchmark\n",
+        f"## {sec_num}. Unified Four-Model Benchmark (Primary Split: `{split_strat}`)\n",
         "- **Supervised models (MLP, 1D-CNN, XGBoost):** Evaluated on multi-class attack attribution using weighted and macro metrics.\n",
         "- **Unsupervised Autoencoder:** Evaluated separately under binary novelty framing (Benign vs. Anomalous).\n\n",
         cmp_md + "\n\n",
-        "## 2. Ensemble Strategy Comparison (Test Partition)\n",
     ]
+
+    if by_day.get("executed"):
+        sec_num += 1
+        bd_sizes = by_day.get("split_sizes", {})
+        unseen_cls = ", ".join(f"`{c}`" for c in by_day.get("unseen_test_classes", [])) or "None"
+        comp_lines.append(
+            f"## {sec_num}. Cross-Day Temporal Split Protocol (`by_day`: Mon–Wed Train / Thu Val / Thu–Fri Test)\n"
+        )
+        comp_lines.append(
+            f"- **Partitions (`split_strategy='by_day'`):** Train pre-SMOTE=`{bd_sizes.get('train_raw', 0):,}`, "
+            f"Validation (Thursday half)=`{bd_sizes.get('validation', 0):,}`, "
+            f"Test (Thursday remainder + Friday)=`{bd_sizes.get('test', 0):,}`.\n"
+        )
+        comp_lines.append(f"- **Thursday–Friday Unseen Attack Classes:** {unseen_cls}.\n")
+        if by_day.get("caveat_note"):
+            comp_lines.append(f"- **Protocol Interpretation:** {by_day['caveat_note']}\n")
+        comp_lines.append("\n### Closed-Set Multi-Class Evaluation (`by_day`)\n\n")
+        mc_rows = [
+            {
+                "Model": name,
+                "Accuracy": vals.get("accuracy", 0.0),
+                "Precision_Weighted": vals.get("precision_weighted", 0.0),
+                "Recall_Weighted": vals.get("recall_weighted", 0.0),
+                "F1_Weighted": vals.get("f1_weighted", 0.0),
+                "F1_Macro_All": vals.get("f1_macro", 0.0),
+                "F1_Macro_Present_Test": vals.get("f1_macro_present_test_classes", 0.0),
+                "ROC_AUC_OVR": vals.get("roc_auc_macro_ovr", 0.0),
+            }
+            for name, vals in by_day.get("multiclass_models", {}).items()
+        ]
+        comp_lines.append(_df_to_markdown(pd.DataFrame(mc_rows)) + "\n\n")
+        comp_lines.append("### Cross-Day Binary Intrusion Detection (`by_day`: Benign vs. Attack)\n\n")
+        bin_rows = [
+            {
+                "Model": name,
+                "Accuracy": vals.get("accuracy", 0.0),
+                "Precision": vals.get("precision", 0.0),
+                "Recall": vals.get("recall", 0.0),
+                "F1": vals.get("f1", 0.0),
+                "ROC_AUC": vals.get("roc_auc", 0.0),
+                "PR_AUC": vals.get("pr_auc", 0.0),
+                "FPR": vals.get("fpr", 0.0),
+                "FNR": vals.get("fnr", 0.0),
+            }
+            for name, vals in by_day.get("binary_cross_day_models", {}).items()
+        ]
+        comp_lines.append(_df_to_markdown(pd.DataFrame(bin_rows)) + "\n\n")
+
+    if ablation.get("executed"):
+        sec_num += 1
+        w = ablation.get("with_features", {})
+        wo = ablation.get("without_features", {})
+        dropped_str = ", ".join(ablation.get("dropped_features", ["Destination Port"]))
+        comp_lines.append(f"## {sec_num}. Shortcut Feature Ablation (With vs. Without `{dropped_str}`)\n")
+        abl_df = pd.DataFrame(
+            [
+                {
+                    "Variant": f"XGBoost (With {dropped_str})",
+                    "Features": w.get("n_features", 0),
+                    "Test_Rows": w.get("split_sizes", {}).get("test", 0),
+                    "Val_Macro_F1": w.get("val", {}).get("f1_macro", 0.0),
+                    "Test_Accuracy": w.get("test", {}).get("accuracy", 0.0),
+                    "Test_F1_Weighted": w.get("test", {}).get("f1_weighted", 0.0),
+                    "Test_F1_Macro": w.get("test", {}).get("f1_macro", 0.0),
+                    "Test_ROC_AUC": w.get("test", {}).get("roc_auc_macro_ovr", 0.0),
+                },
+                {
+                    "Variant": f"XGBoost (Without {dropped_str})",
+                    "Features": wo.get("n_features", 0),
+                    "Test_Rows": wo.get("split_sizes", {}).get("test", 0),
+                    "Val_Macro_F1": wo.get("val", {}).get("f1_macro", 0.0),
+                    "Test_Accuracy": wo.get("test", {}).get("accuracy", 0.0),
+                    "Test_F1_Weighted": wo.get("test", {}).get("f1_weighted", 0.0),
+                    "Test_F1_Macro": wo.get("test", {}).get("f1_macro", 0.0),
+                    "Test_ROC_AUC": wo.get("test", {}).get("roc_auc_macro_ovr", 0.0),
+                },
+            ]
+        )
+        comp_lines.append(_df_to_markdown(abl_df) + "\n\n")
+        comp_lines.append(
+            f"- **Delta Test Macro-F1 (without - with):** `{ablation.get('delta_test_f1_macro', 0.0):+.4f}` "
+            f"| **Delta Val Macro-F1:** `{ablation.get('delta_val_f1_macro', 0.0):+.4f}` "
+            f"| **Delta Test Weighted-F1:** `{ablation.get('delta_test_f1_weighted', 0.0):+.4f}`.\n"
+        )
+        wo_top = ", ".join(
+            f"`{item['feature']}` ({item['mean_abs_shap']:.4f})"
+            for item in wo.get("top_shap_features", [])[:5]
+        )
+        if wo_top:
+            comp_lines.append(
+                f"- **Top-5 XGBoost SHAP Features After Removing `{dropped_str}`:** {wo_top}.\n"
+            )
+        comp_lines.append("\n")
+
+    sec_num += 1
+    comp_lines.append(f"## {sec_num}. Ensemble Strategy Comparison (Test Partition)\n")
     if ens:
         ens_df = pd.DataFrame(ens).T.reset_index(names="Strategy")
         comp_lines.append(_df_to_markdown(ens_df) + "\n\n")
 
-    comp_lines.append("## 3. XGBoost Baseline vs. Optuna Hyperparameter Optimization\n")
+    sec_num += 1
+    comp_lines.append(f"## {sec_num}. XGBoost Baseline vs. Optuna Hyperparameter Optimization\n")
     xgb_opt = diag.get("xgboost_optimization", {})
     if xgb_opt:
         opt_df = pd.DataFrame(
@@ -83,14 +183,16 @@ def write_academic_reports(
         comp_lines.append(_df_to_markdown(opt_df) + "\n")
         comp_lines.append(f"\n- **Selected Variant:** `{xgb_opt.get('selected_variant', 'baseline')}`\n\n")
 
-    comp_lines.append("## 4. Architectural Notes on 1D-CNN vs. MLP & XGBoost\n")
+    sec_num += 1
+    comp_lines.append(f"## {sec_num}. Architectural Notes on 1D-CNN vs. MLP & XGBoost\n")
     comp_lines.append(
         "Tabular CICFlowMeter features do not form a physical time series; 1D convolutions scan "
         "adjacent engineered statistics (packet sizes, IATs, flags). Measured validation and test "
         "F1/latency above quantify whether 1D-CNN yields measurable benefit over the dense MLP and XGBoost.\n\n"
     )
 
-    comp_lines.append("## 5. Preprocessing vs. Model Inference Latency\n")
+    sec_num += 1
+    comp_lines.append(f"## {sec_num}. Preprocessing vs. Model Inference Latency\n")
     if prep_lat:
         comp_lines.append(
             f"- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** "
@@ -106,6 +208,8 @@ def write_academic_reports(
         "# SMART IDS v3 — Experimental Results Report\n",
         mode_banner,
         "## 1. Data Engineering & Leakage Safeguard Audit\n",
+        f"- **Split Strategy:** `{audit.get('split_strategy', split_strat)}`\n",
+        f"- **Explicitly Dropped Features (`drop_features`):** `{audit.get('dropped_features', [])}`\n",
         f"- **Original Dataset Dimensions:** `{audit.get('original_shape', [])}`\n",
         f"- **Rows After Exact Deduplication:** `{audit.get('rows_after_deduplication', 0):,}` (removed `{audit.get('duplicates_removed', 0):,}` duplicates)\n",
         f"- **Infinity Values Converted to NaN:** `{audit.get('inf_values_converted', 0):,}`\n",

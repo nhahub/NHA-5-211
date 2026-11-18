@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from pathlib import Path
 from typing import Any
 
 from imblearn.over_sampling import SMOTE
@@ -209,11 +210,13 @@ def verify_no_leakage(
     train_val_overlap = len(train_hashes & val_hashes)
     val_test_overlap = len(val_hashes & test_hashes)
 
-    # Confirm val and test remain imbalanced (non-uniform counts)
+    # Confirm val and test remain imbalanced (ignoring classes absent in a split, e.g. by_day)
     val_counts = np.bincount(y_val) if len(y_val) else np.array([1])
     test_counts = np.bincount(y_test) if len(y_test) else np.array([1])
-    val_imbalance_ratio = float(val_counts.max() / max(1, val_counts.min()))
-    test_imbalance_ratio = float(test_counts.max() / max(1, test_counts.min()))
+    nz_val = val_counts[val_counts > 0]
+    nz_test = test_counts[test_counts > 0]
+    val_imbalance_ratio = float(nz_val.max() / max(1, nz_val.min())) if len(nz_val) else 1.0
+    test_imbalance_ratio = float(nz_test.max() / max(1, nz_test.min())) if len(nz_test) else 1.0
 
     checks = {
         "train_standardized_max_abs_mean": round(max_train_mean, 6),
@@ -325,6 +328,86 @@ def apply_smote_safely(
     return X_res.astype(np.float32), y_res.astype(np.int64), smote_info
 
 
+def _classify_day_bucket(filename: str) -> str:
+    """Map a CICIDS2017 CSV filename to train (Mon-Wed), Thursday (val/test), or Friday (test)."""
+    name = Path(str(filename)).name.lower()
+    if any(day in name for day in ("monday", "tuesday", "wednesday")):
+        return "train_mon_wed"
+    if "thursday" in name:
+        return "thursday"
+    if "friday" in name:
+        return "friday"
+    raise ValueError(
+        f"Unable to map source file '{filename}' to Monday-Friday schedule for split_strategy='by_day'."
+    )
+
+
+def _split_indices_by_day(
+    metadata: pd.DataFrame,
+    y_all: np.ndarray,
+    thursday_val_fraction: float,
+    stratify: bool,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+    """Split CICIDS2017 rows chronologically by capture day (Mon-Wed / part of Thu / Thu+Fri)."""
+    if "Source_File" not in metadata.columns:
+        raise ValueError(
+            "split_strategy='by_day' requires raw CSV filenames ('Source_File' metadata) identifying "
+            "Monday-Wednesday, Thursday, and Friday files."
+        )
+
+    src_files = metadata["Source_File"].astype(str).tolist()
+    buckets = [_classify_day_bucket(fname) for fname in src_files]
+    idx_train = np.array([i for i, b in enumerate(buckets) if b == "train_mon_wed"], dtype=np.int64)
+    idx_thu = np.array([i for i, b in enumerate(buckets) if b == "thursday"], dtype=np.int64)
+    idx_fri = np.array([i for i, b in enumerate(buckets) if b == "friday"], dtype=np.int64)
+
+    if len(idx_train) == 0 or len(idx_thu) == 0 or len(idx_fri) == 0:
+        raise ValueError(
+            "split_strategy='by_day' requires non-empty Monday-Wednesday train, Thursday validation, "
+            f"and Friday test partitions (got train={len(idx_train)}, thursday={len(idx_thu)}, friday={len(idx_fri)})."
+        )
+
+    y_thu = y_all[idx_thu]
+    thu_counts = np.bincount(y_thu)
+    nz_thu = thu_counts[thu_counts > 0]
+    n_val_approx = int(round(len(idx_thu) * thursday_val_fraction))
+    n_test_approx = len(idx_thu) - n_val_approx
+    can_stratify = (
+        stratify
+        and len(nz_thu) > 1
+        and int(nz_thu.min()) >= 2
+        and min(n_val_approx, n_test_approx) >= len(nz_thu)
+    )
+    if stratify and not can_stratify:
+        logger.warning(
+            "Thursday validation split falling back to unstratified split (class counts=%s).",
+            nz_thu.tolist(),
+        )
+
+    idx_val, idx_thu_test = train_test_split(
+        idx_thu,
+        train_size=thursday_val_fraction,
+        random_state=seed,
+        stratify=y_thu if can_stratify else None,
+    )
+    idx_test = np.sort(np.concatenate([idx_thu_test, idx_fri]))
+    split_details = {
+        "train_files": sorted({src_files[i] for i in idx_train}),
+        "val_files": sorted({src_files[i] for i in idx_val}),
+        "test_files": sorted({src_files[i] for i in idx_test}),
+    }
+    logger.info(
+        "Applied split_strategy='by_day': train=%d (%s) | val=%d (Thu split %.2f) | test=%d (Thu+Fri)",
+        len(idx_train),
+        split_details["train_files"],
+        len(idx_val),
+        thursday_val_fraction,
+        len(idx_test),
+    )
+    return np.sort(idx_train), np.sort(idx_val), idx_test, split_details
+
+
 def run_preprocessing_pipeline(
     cfg: AppConfig,
     force_synthetic: bool = False,
@@ -351,6 +434,7 @@ def run_preprocessing_pipeline(
         label_col=cfg.data.label_column,
         identifier_keywords=cfg.data.identifier_keywords,
         preserve_features=cfg.data.preserve_features,
+        drop_features=cfg.data.drop_features,
         merge_web_attacks=cfg.data.merge_web_attacks,
         drop_ultra_rare_below=cfg.data.drop_ultra_rare_classes_below,
     )
@@ -366,22 +450,32 @@ def run_preprocessing_pipeline(
         for idx, cnt in zip(*np.unique(y_all, return_counts=True), strict=False)
     }
 
-    # STEP 1 OF LEAKAGE PREVENTION: Stratified split BEFORE fitting imputer, clipper, or scaler
-    strat = y_all if cfg.data.split.stratify else None
-    idx_all = np.arange(len(X_df))
-    idx_train_val, idx_test = train_test_split(
-        idx_all,
-        test_size=cfg.data.split.test_size,
-        random_state=seed,
-        stratify=strat,
-    )
-    strat_tv = y_all[idx_train_val] if cfg.data.split.stratify else None
-    idx_train, idx_val = train_test_split(
-        idx_train_val,
-        test_size=cfg.data.split.val_size_of_remainder,
-        random_state=seed,
-        stratify=strat_tv,
-    )
+    # STEP 1 OF LEAKAGE PREVENTION: Split BEFORE fitting imputer, clipper, or scaler
+    by_day_files: dict[str, Any] = {}
+    if cfg.data.split_strategy == "by_day":
+        idx_train, idx_val, idx_test, by_day_files = _split_indices_by_day(
+            metadata=metadata,
+            y_all=y_all,
+            thursday_val_fraction=cfg.data.split.thursday_val_fraction,
+            stratify=cfg.data.split.stratify,
+            seed=seed,
+        )
+    else:
+        strat = y_all if cfg.data.split.stratify else None
+        idx_all = np.arange(len(X_df))
+        idx_train_val, idx_test = train_test_split(
+            idx_all,
+            test_size=cfg.data.split.test_size,
+            random_state=seed,
+            stratify=strat,
+        )
+        strat_tv = y_all[idx_train_val] if cfg.data.split.stratify else None
+        idx_train, idx_val = train_test_split(
+            idx_train_val,
+            test_size=cfg.data.split.val_size_of_remainder,
+            random_state=seed,
+            stratify=strat_tv,
+        )
 
     X_train_raw = X_df.iloc[idx_train].reset_index(drop=True)
     X_val_raw = X_df.iloc[idx_val].reset_index(drop=True)
@@ -515,15 +609,24 @@ def run_preprocessing_pipeline(
         "outlier_values_clipped_val": clipped_val,
         "outlier_values_clipped_test": clipped_test,
         "post_clip_dedup_removed": post_clip_dedup_removed,
+        "split_strategy": cfg.data.split_strategy,
+        "split_day_files": by_day_files,
+        "dropped_features": clean_report.dropped_features_removed,
         "removed_columns": (
             clean_report.id_columns_removed
             + clean_report.duplicate_columns_removed
+            + clean_report.dropped_features_removed
             + col_dropper.cols_to_drop_
         ),
         "id_columns_removed": clean_report.id_columns_removed,
         "high_nan_columns_dropped": col_dropper.cols_to_drop_,
         "final_feature_count": len(feature_names),
         "class_names": class_names,
+        "split_classes_present": {
+            "train": [class_names[int(c)] for c in np.unique(y_train)],
+            "validation": [class_names[int(c)] for c in np.unique(y_val)],
+            "test": [class_names[int(c)] for c in np.unique(y_test)],
+        },
         "original_class_distribution": orig_counts,
         "train_pre_smote_distribution": pre_smote_named,
         "train_post_smote_distribution": post_smote_named,
