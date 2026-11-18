@@ -67,13 +67,13 @@ docker run --rm -p 8501:8501 smart-ids-v3
 
 | Model | Framing | Accuracy | Precision (W) | Recall (W) | F1 (W) | F1 (Macro) | ROC-AUC | Mean / Median Latency (µs) | Batch Throughput (flows/s) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| **XGBoost (Baseline)** | 13-class supervised | **0.9989** | **0.9989** | **0.9989** | **0.9988** | **0.9594** | **0.9996** | 2,301.30 / **514.00** | **234,907.3** |
-| **1D-CNN** | 13-class supervised | 0.9904 | 0.9925 | 0.9904 | 0.9913 | 0.8447 | 0.9933 | 978.05 / 943.45 | 9,001.1 |
-| **MLP** | 13-class supervised | 0.9767 | 0.9784 | 0.9767 | 0.9772 | 0.7592 | 0.9942 | **281.89** / **240.75** | 15,585.5 |
-| **Autoencoder** | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.8384 | 693.31 / 671.85 | 16,344.5 |
-| **One-Class SVM** | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.7467 | 251.27 / 164.10 | 18,114.6 |
-| **LOF** | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.8607 | 1,598.18 / 1,401.95 | 35,777.2 |
-| **Isolation Forest** | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.7710 | 9,790.02 / 9,254.10 | 65,464.5 |
+| **XGBoost (Baseline)** | 13-class supervised | **0.9989** | **0.9989** | **0.9989** | **0.9988** | **0.9594** | **0.9996** | 2,153.79 / 578.30 | **205,731.3** |
+| **1D-CNN** | 13-class supervised | 0.9904 | 0.9925 | 0.9904 | 0.9913 | 0.8447 | 0.9933 | 1,036.03 / 967.70 | 11,091.3 |
+| **MLP** | 13-class supervised | 0.9767 | 0.9784 | 0.9767 | 0.9772 | 0.7592 | 0.9942 | **314.57** / **270.70** | 13,175.8 |
+| **Autoencoder** | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.8384 | 336.88 / **270.20** | 14,135.2 |
+| **One-Class SVM** | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.7467 | **314.68** / 298.35 | 16,024.8 |
+| **LOF** | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.8607 | 1,743.21 / 1,683.65 | 34,474.6 |
+| **Isolation Forest** | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.7710 | 13,371.07 / 12,691.25 | 42,900.5 |
 
 - **Cross-Validation, Calibration & Stacking:** 5-fold stratified CV on `162,577` dev rows gave `0.9670 ± 0.0076` Macro-F1 for `XGBoost` (`95%` test bootstrap CI `[0.9000, 0.9833]`). Optuna tuning (`+0.0120` val Macro-F1) stayed within baseline CV std (`0.0470`), so CV-std gating retained `baseline`. Validation temperature scaling found `T = 0.8777` (`MLP`), `0.8749` (`1D-CNN`), and `0.9429` (`XGBoost`); validation log-probability `stacking` reached Test Macro-F1 **`0.9661`** (`+0.0067` over `XGBoost`), while unweighted/weighted probability voting trailed standalone `XGBoost` (`0.9000–0.9284`).
 - **Temporal Generalization (`by_day`):** With Mon–Wed training and Thu–Fri unseen attack classes (`Bot`, `DDoS`, `Infiltration`, `PortScan`, `Web Attack`), closed-set multi-class Macro-F1 dropped to `0.0782` (`XGBoost`), while cross-day binary detection reached `F1 = 0.4676` (`Autoencoder`, ROC-AUC `0.8784`) and `0.4435` (`XGBoost 1 - P_Benign`, precision `0.9989`, recall `0.2851`).
@@ -81,7 +81,7 @@ docker run --rm -p 8501:8501 smart-ids-v3
 ### Evaluation Caveats
 
 - **Random Flow-Level Split Optimism (`random` vs. `by_day`):** Random flow splitting (`data.split_strategy: random`) shares flows from the same capture sessions across splits, yielding optimistic supervised metrics. `configs/config.yaml` supports chronological `split_strategy: by_day` (Mon–Wed train, part of Thu val, Thu+Fri test), reported separately alongside `random` in `reports/model_comparison_report.md`.
-- **Shortcut-Feature Risk (`Destination Port`):** Baseline XGBoost global SHAP is dominated by `Destination Port` (`1.0796` vs. `0.3769` for runner-up `min_seg_size_forward`). Setting `data.drop_features: ["Destination Port"]` tests generalization without port memorization while preserving port metadata for the SOC map (ablating it shifts XGBoost Test Macro-F1 from `0.9594` to `0.9500`, `delta = -0.0094`).
+- **Shortcut-Feature Risk (`Destination Port`):** Baseline XGBoost global SHAP is dominated by `Destination Port` (`1.0796` vs. `0.3769` for runner-up `min_seg_size_forward`). Setting `data.drop_features: ["Destination Port"]` tests generalization without port memorization while preserving port metadata for the SOC map. When evaluated apples-to-apples on the identical `28,324` held-out test rows (verified via `sha256` row-index parity after full 77-feature deduplication), removing `Destination Port` shifts XGBoost Test Macro-F1 from `0.9594` to `0.9540` (`delta = -0.0054`).
 - **Statistically Unreliable Rare Classes:** `Heartbleed` (`2` test / `11` total), `Infiltration` (`5` test / `36` total), `Bot` (`21` test / `137` total), and `Web Attack` (`26` test / `176` total) have `< 30` held-out test flows and are flagged `Statistically Unreliable` alongside per-class support, 95% bootstrap CIs, and 5-fold stratified CV in `reports/model_comparison_report.md`.
 - **Known CICIDS2017 Labeling Issues (Engelen et al.):** Standard CICIDS2017 CSVs contain upstream flow-construction and labeling artifacts; treat cross-benchmark generalization cautiously without validating on corrected releases.
 

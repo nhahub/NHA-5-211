@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.config import (
     AnomalyBaselinesConfig,
@@ -17,7 +19,7 @@ from src.config import (
     XGBoostOptunaConfig,
 )
 from src.data.loader import generate_synthetic_cicids2017
-from src.data.preprocessing import run_preprocessing_pipeline
+from src.data.preprocessing import drop_features_from_prepared_dataset, run_preprocessing_pipeline
 from src.detection.anomaly_detection import AnomalyDetector, fit_classical_anomaly_baselines
 from src.detection.inference import UnifiedDetectionEngine
 from src.evaluation.metrics import (
@@ -26,6 +28,7 @@ from src.evaluation.metrics import (
     evaluate_supervised_model,
 )
 from src.evaluation.protocols import (
+    assert_ablation_row_parity,
     evaluate_by_day_protocol,
     evaluate_feature_ablation,
     run_xgboost_stratified_cv,
@@ -211,11 +214,38 @@ def test_by_day_protocol_feature_ablation_and_report_tables(tmp_app_config: AppC
         compute_shap=True,
     )
     assert ablation_res["executed"] is True
+    assert ablation_res["identical_test_rows_verified"] is True
     assert ablation_res["with_features"]["n_features"] == 77
     assert ablation_res["without_features"]["n_features"] == 76
+    assert (
+        ablation_res["with_features"]["split_sizes"]["test"]
+        == ablation_res["without_features"]["split_sizes"]["test"]
+    )
+    assert ablation_res["with_features"]["test_rows_sha256"] != ""
+    assert (
+        ablation_res["with_features"]["test_rows_sha256"]
+        == ablation_res["without_features"]["test_rows_sha256"]
+    )
     assert "delta_test_f1_macro" in ablation_res
     wo_shap_names = {f["feature"] for f in ablation_res["without_features"]["top_shap_features"]}
     assert "Destination Port" not in wo_shap_names
+
+    # Verify exact row indices & Test_Rows count survive flows that differ ONLY by Destination Port
+    ds_base = run_preprocessing_pipeline(tmp_app_config, force_synthetic=False, save_outputs=False)
+    ds_no_port = drop_features_from_prepared_dataset(ds_base, ["Destination Port"], tmp_app_config)
+    assert_ablation_row_parity(ds_base, ds_no_port)
+    assert ds_no_port.audit_report["leakage_checks"]["passed"] is True
+
+    # Loud failure checks when test indices or test row counts diverge
+    bad_idx = copy.copy(ds_no_port)
+    bad_idx.test_row_indices = ds_no_port.test_row_indices[::-1].copy()
+    with pytest.raises(AssertionError, match="test split row mismatch"):
+        assert_ablation_row_parity(ds_base, bad_idx)
+
+    bad_len = copy.copy(ds_no_port)
+    bad_len.X_test_scaled = ds_no_port.X_test_scaled[:-1].copy()
+    with pytest.raises(AssertionError, match="Test_Rows mismatch"):
+        assert_ablation_row_parity(ds_base, bad_len)
 
     reports_dir = tmp_app_config.paths.resolve("reports_dir")
     cmp_df = pd.DataFrame([{"Model": "XGBoost", "Accuracy": 0.99, "F1_Weighted": 0.99, "F1_Macro": 0.95}])

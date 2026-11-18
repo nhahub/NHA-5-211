@@ -174,6 +174,13 @@ def write_academic_reports(
             ]
         )
         comp_lines.append(_df_to_markdown(abl_df) + "\n\n")
+        if ablation.get("identical_test_rows_verified"):
+            comp_lines.append(
+                f"- **Apples-to-Apples Row Parity Verified:** Identical post-deduplication train/val/test rows "
+                f"(`Test_Rows={w.get('split_sizes', {}).get('test', 0):,}`, "
+                f"`sha256={str(w.get('test_rows_sha256', ''))[:12]}...`) evaluated after full 77-feature "
+                "leakage verification.\n"
+            )
         comp_lines.append(
             f"- **Delta Test Macro-F1 (without - with):** `{ablation.get('delta_test_f1_macro', 0.0):+.4f}` "
             f"| **Delta Val Macro-F1:** `{ablation.get('delta_val_f1_macro', 0.0):+.4f}` "

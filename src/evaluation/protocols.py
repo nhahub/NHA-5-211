@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 import numpy as np
@@ -26,6 +27,7 @@ from src.data.preprocessing import (
     _row_hash_list,
     apply_smote_safely,
     compute_hybrid_smote_class_weights,
+    drop_features_from_prepared_dataset,
     run_preprocessing_pipeline,
 )
 from src.evaluation.metrics import (
@@ -349,6 +351,40 @@ def evaluate_by_day_protocol(
     }
 
 
+def _indices_sha256(indices: np.ndarray | None) -> str:
+    """Compute canonical SHA-256 hex digest of integer row indices."""
+    if indices is None:
+        return ""
+    arr = np.ascontiguousarray(indices, dtype=np.int64)
+    return hashlib.sha256(arr.tobytes()).hexdigest()
+
+
+def assert_ablation_row_parity(ds_with: PreparedDataset, ds_without: PreparedDataset) -> None:
+    """Fail loudly unless full-feature and ablated splits evaluate identical row indices and targets."""
+    if not ds_with.audit_report.get("leakage_checks", {}).get("passed", False):
+        raise AssertionError("Ablation baseline dataset failed full-feature zero-leakage verification.")
+    for split_name, arr_w, arr_wo in (
+        ("train", ds_with.train_row_indices, ds_without.train_row_indices),
+        ("validation", ds_with.val_row_indices, ds_without.val_row_indices),
+        ("test", ds_with.test_row_indices, ds_without.test_row_indices),
+    ):
+        if arr_w is None or arr_wo is None:
+            raise AssertionError(
+                f"Missing {split_name}_row_indices required to verify apples-to-apples ablation parity."
+            )
+        if len(arr_w) != len(arr_wo) or not np.array_equal(arr_w, arr_wo):
+            raise AssertionError(
+                f"Ablation {split_name} split row mismatch: with={len(arr_w)} vs without={len(arr_wo)}."
+            )
+    if len(ds_with.X_test_scaled) != len(ds_without.X_test_scaled):
+        raise AssertionError(
+            f"Ablation Test_Rows mismatch: with={len(ds_with.X_test_scaled)} "
+            f"vs without={len(ds_without.X_test_scaled)}."
+        )
+    if not np.array_equal(ds_with.y_test, ds_without.y_test):
+        raise AssertionError("Ablation y_test label sequence differs between variants.")
+
+
 def _train_and_eval_xgb_for_ablation(
     dataset: PreparedDataset,
     model_cfg: ModelConfig,
@@ -406,6 +442,7 @@ def _train_and_eval_xgb_for_ablation(
         "n_features": int(len(dataset.feature_names)),
         "dropped_features": list(dataset.audit_report.get("dropped_features", [])),
         "split_sizes": dataset.audit_report["split_sizes"],
+        "test_rows_sha256": _indices_sha256(dataset.test_row_indices),
         "leakage_checks": dataset.audit_report["leakage_checks"],
         "val": _compact(val_eval),
         "test": _compact(test_eval),
@@ -422,7 +459,7 @@ def evaluate_feature_ablation(
     force_synthetic: bool = False,
     compute_shap: bool = True,
 ) -> dict[str, Any]:
-    """Compare XGBoost with and without shortcut feature(s) such as Destination Port."""
+    """Compare XGBoost with and without shortcut feature(s) on identical train/val/test rows."""
     target_drops = list(drop_features or app_cfg.evaluation.ablation_drop_features or ["Destination Port"])
     seed = app_cfg.project.random_seed
     set_global_seed(seed)
@@ -437,8 +474,11 @@ def evaluate_feature_ablation(
     cfg_without = app_cfg.model_copy(deep=True)
     cfg_without.data.drop_features = target_drops
 
+    # Run full pipeline (split, clip, scale, dedup, leakage check) on all features first,
+    # then drop target_drops from the final matrices of those exact same rows.
     ds_with = run_preprocessing_pipeline(cfg_with, force_synthetic=force_synthetic, save_outputs=False)
-    ds_without = run_preprocessing_pipeline(cfg_without, force_synthetic=force_synthetic, save_outputs=False)
+    ds_without = drop_features_from_prepared_dataset(ds_with, target_drops, cfg_without)
+    assert_ablation_row_parity(ds_with, ds_without)
 
     res_with = _train_and_eval_xgb_for_ablation(
         ds_with, model_cfg, xgb_params, imbalance_strategy, seed, hardware.xgb_device, compute_shap
@@ -454,8 +494,9 @@ def evaluate_feature_ablation(
     delta_test_roc = res_without["test"]["roc_auc_macro_ovr"] - res_with["test"]["roc_auc_macro_ovr"]
 
     logger.info(
-        "Feature ablation (%s): Test Macro-F1 %.4f -> %.4f (delta=%+.4f)",
+        "Feature ablation (%s) on identical %d test rows: Test Macro-F1 %.4f -> %.4f (delta=%+.4f)",
         target_drops,
+        len(ds_with.X_test_scaled),
         res_with["test"]["f1_macro"],
         res_without["test"]["f1_macro"],
         delta_test_f1_macro,
@@ -466,6 +507,8 @@ def evaluate_feature_ablation(
         "split_strategy": app_cfg.data.split_strategy,
         "imbalance_strategy": imbalance_strategy,
         "dropped_features": target_drops,
+        "identical_test_rows_verified": True,
+        "test_rows": int(len(ds_with.X_test_scaled)),
         "with_features": res_with,
         "without_features": res_without,
         "delta_test_f1_macro": round(float(delta_test_f1_macro), 6),

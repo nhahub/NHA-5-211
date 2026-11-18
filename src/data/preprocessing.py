@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -52,6 +53,9 @@ class PreparedDataset:
     source_info: DatasetSourceInfo
     audit_report: dict[str, Any]
     smote_class_weights: dict[int, float] | None = None
+    train_row_indices: np.ndarray | None = None
+    val_row_indices: np.ndarray | None = None
+    test_row_indices: np.ndarray | None = None
 
     def summary_dict(self) -> dict[str, Any]:
         return self.audit_report
@@ -82,6 +86,9 @@ def _deduplicate_post_clip_splits(
     X_test_clip: pd.DataFrame,
     y_test: np.ndarray,
     test_metadata: pd.DataFrame,
+    train_row_indices: np.ndarray | None = None,
+    val_row_indices: np.ndarray | None = None,
+    test_row_indices: np.ndarray | None = None,
 ) -> tuple[
     pd.DataFrame,
     np.ndarray,
@@ -92,6 +99,9 @@ def _deduplicate_post_clip_splits(
     np.ndarray,
     pd.DataFrame,
     dict[str, int],
+    np.ndarray | None,
+    np.ndarray | None,
+    np.ndarray | None,
 ]:
     """Deduplicate clipped splits and remove val/test feature vectors that exist in train."""
     train_hashes = _row_hash_list(X_train_clip.to_numpy(dtype=np.float64, copy=False))
@@ -141,6 +151,9 @@ def _deduplicate_post_clip_splits(
         y_test[test_keep],
         test_metadata.loc[test_keep].reset_index(drop=True),
         stats,
+        train_row_indices[train_keep] if train_row_indices is not None else None,
+        val_row_indices[val_keep] if val_row_indices is not None else None,
+        test_row_indices[test_keep] if test_row_indices is not None else None,
     )
 
 
@@ -153,6 +166,8 @@ def _drop_scaled_cross_split_collisions(
     y_test: np.ndarray,
     test_metadata: pd.DataFrame,
     decimals: int = 6,
+    val_row_indices: np.ndarray | None = None,
+    test_row_indices: np.ndarray | None = None,
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -161,6 +176,8 @@ def _drop_scaled_cross_split_collisions(
     np.ndarray,
     pd.DataFrame,
     dict[str, int],
+    np.ndarray | None,
+    np.ndarray | None,
 ]:
     """Remove any residual float32/rounding collisions in val/test against earlier splits."""
     train_set = set(_row_hash_list(X_train_scaled, decimals=decimals))
@@ -184,6 +201,8 @@ def _drop_scaled_cross_split_collisions(
         y_test[test_keep],
         test_metadata.loc[test_keep].reset_index(drop=True),
         stats,
+        val_row_indices[val_keep] if val_row_indices is not None else None,
+        test_row_indices[test_keep] if test_row_indices is not None else None,
     )
 
 
@@ -593,6 +612,9 @@ def run_preprocessing_pipeline(
         y_test,
         test_metadata,
         post_clip_stats,
+        idx_train,
+        idx_val,
+        idx_test,
     ) = _deduplicate_post_clip_splits(
         X_train_clip,
         y_train,
@@ -602,6 +624,9 @@ def run_preprocessing_pipeline(
         X_test_clip,
         y_test,
         test_metadata,
+        train_row_indices=np.asarray(idx_train, dtype=np.int64),
+        val_row_indices=np.asarray(idx_val, dtype=np.int64),
+        test_row_indices=np.asarray(idx_test, dtype=np.int64),
     )
 
     scaler = StandardScaler()
@@ -617,6 +642,8 @@ def run_preprocessing_pipeline(
         y_test,
         test_metadata,
         scaled_collision_stats,
+        idx_val,
+        idx_test,
     ) = _drop_scaled_cross_split_collisions(
         X_train_scaled,
         X_val_scaled,
@@ -626,6 +653,8 @@ def run_preprocessing_pipeline(
         y_test,
         test_metadata,
         decimals=6,
+        val_row_indices=idx_val,
+        test_row_indices=idx_test,
     )
     post_clip_dedup_removed = {
         **post_clip_stats,
@@ -772,4 +801,107 @@ def run_preprocessing_pipeline(
         source_info=source_info,
         audit_report=audit_report,
         smote_class_weights=smote_class_weights,
+        train_row_indices=idx_train,
+        val_row_indices=idx_val,
+        test_row_indices=idx_test,
+    )
+
+
+def drop_features_from_prepared_dataset(
+    dataset: PreparedDataset,
+    drop_features: list[str],
+    cfg: AppConfig,
+) -> PreparedDataset:
+    """Create an apples-to-apples ablated PreparedDataset by dropping columns after full-feature checks.
+
+    Preserves the exact post-deduplication train/validation/test row indices from the verified
+    full-feature dataset so feature ablation evaluates identical samples across variants.
+    """
+    full_checks = dataset.audit_report.get("leakage_checks", {})
+    if not full_checks.get("passed", False):
+        raise DataLeakageError(
+            "Source dataset must pass full-feature zero-leakage checks before dropping ablated features."
+        )
+
+    drop_lower = {str(col).strip().lower() for col in drop_features if str(col).strip()}
+    if not drop_lower:
+        raise ValueError("drop_features must contain at least one non-empty feature name.")
+
+    dropped_names = [f for f in dataset.feature_names if f.strip().lower() in drop_lower]
+    if not dropped_names:
+        raise ValueError(f"None of drop_features={drop_features} matched dataset features.")
+
+    keep_mask = np.array([f.strip().lower() not in drop_lower for f in dataset.feature_names], dtype=bool)
+    if not np.any(keep_mask):
+        raise ValueError("Cannot drop every feature from the prepared dataset.")
+
+    new_feature_names = [f for f, keep in zip(dataset.feature_names, keep_mask, strict=True) if keep]
+    X_train_sub = dataset.X_train_scaled[:, keep_mask].copy()
+    X_val_sub = dataset.X_val_scaled[:, keep_mask].copy()
+    X_test_sub = dataset.X_test_scaled[:, keep_mask].copy()
+
+    seed = cfg.project.random_seed
+    X_train_sm_sub, y_train_sm_sub, smote_info = apply_smote_safely(
+        X_train_sub,
+        dataset.y_train,
+        max_k_neighbors=cfg.data.imbalance.smote_max_k_neighbors,
+        sampling_strategy=cfg.data.imbalance.smote_sampling_strategy,
+        cap_per_class=cfg.data.imbalance.smote_cap_per_class,
+        max_multiplier=cfg.data.imbalance.smote_max_multiplier,
+        min_real_samples=cfg.data.imbalance.smote_min_real_samples,
+        seed=seed,
+    )
+    smote_info["skipped_classes_named"] = {
+        dataset.class_names[int(k)]: int(v) for k, v in smote_info.get("skipped_classes", {}).items()
+    }
+    post_smote_named = {
+        dataset.class_names[int(k)]: int(v) for k, v in smote_info.get("post_counts", {}).items()
+    }
+    smote_class_weights = compute_hybrid_smote_class_weights(smote_info, dataset.class_weights)
+    if smote_class_weights:
+        smote_info["hybrid_class_weights_named"] = {
+            dataset.class_names[int(k)]: round(float(v), 4)
+            for k, v in smote_class_weights.items()
+            if k in map(int, smote_info.get("skipped_classes", {}))
+        }
+
+    audit_sub = copy.deepcopy(dataset.audit_report)
+    audit_sub["dropped_features"] = dropped_names
+    audit_sub["removed_columns"] = list(audit_sub.get("removed_columns", [])) + dropped_names
+    audit_sub["final_feature_count"] = len(new_feature_names)
+    audit_sub["train_post_smote_distribution"] = post_smote_named
+    audit_sub["split_sizes"] = {
+        "train_raw": int(len(X_train_sub)),
+        "train_smote": int(len(X_train_sm_sub)),
+        "validation": int(len(X_val_sub)),
+        "test": int(len(X_test_sub)),
+    }
+    audit_sub["smote"] = smote_info
+    audit_sub["full_feature_leakage_checks"] = copy.deepcopy(full_checks)
+    audit_sub["ablation_exact_row_preservation"] = True
+
+    return PreparedDataset(
+        X_train_scaled=X_train_sub,
+        y_train=dataset.y_train.copy(),
+        X_train_sm=X_train_sm_sub,
+        y_train_sm=y_train_sm_sub,
+        X_val_scaled=X_val_sub,
+        y_val=dataset.y_val.copy(),
+        X_test_scaled=X_test_sub,
+        y_test=dataset.y_test.copy(),
+        feature_names=new_feature_names,
+        class_names=list(dataset.class_names),
+        class_weights=dict(dataset.class_weights),
+        scaler=dataset.scaler,
+        imputer=dataset.imputer,
+        outlier_clipper=dataset.outlier_clipper,
+        label_encoder=dataset.label_encoder,
+        test_metadata=dataset.test_metadata.copy(),
+        val_metadata=dataset.val_metadata.copy(),
+        source_info=dataset.source_info,
+        audit_report=audit_sub,
+        smote_class_weights=smote_class_weights,
+        train_row_indices=dataset.train_row_indices.copy() if dataset.train_row_indices is not None else None,
+        val_row_indices=dataset.val_row_indices.copy() if dataset.val_row_indices is not None else None,
+        test_row_indices=dataset.test_row_indices.copy() if dataset.test_row_indices is not None else None,
     )

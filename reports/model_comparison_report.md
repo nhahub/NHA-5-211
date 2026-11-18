@@ -11,13 +11,13 @@
 
 | Model | Evaluation_Framing | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro | F1_Macro_CI95_Low | F1_Macro_CI95_High | ROC_AUC | PR_AUC | Latency_Mean_us | Latency_Median_us | Latency_P95_us | Samples_Per_Sec | Model_Size_MB | Training_Duration_s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MLP | 13-class supervised | 0.9767 | 0.9784 | 0.9767 | 0.9772 | 0.7592 | 0.6849 | 0.7923 | 0.9942 | 0.8421 | 281.8900 | 240.7500 | 540.7900 | 15585.5000 | 2.5340 | 121.9000 |
-| 1D-CNN | 13-class supervised | 0.9904 | 0.9925 | 0.9904 | 0.9913 | 0.8447 | 0.7649 | 0.8819 | 0.9933 | 0.8752 | 978.0500 | 943.4500 | 1245.5000 | 9001.1000 | 1.3100 | 1031.3800 |
-| XGBoost | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9594 | 0.9000 | 0.9833 | 0.9996 | 0.9939 | 2301.3000 | 514.0000 | 1358.5000 | 234907.3000 | 3.3380 | 224.9200 |
-| Autoencoder | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.5759 | 0.6001 | 0.8384 | 0.6651 | 693.3100 | 671.8500 | 875.9300 | 16344.5000 | 1.5480 | 73.8500 |
-| Isolation Forest | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 9790.0200 | 9254.1000 | 12453.3900 | 65464.5000 | 2.0960 | 0.8100 |
-| One-Class SVM | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 251.2700 | 164.1000 | 543.0700 | 18114.6000 | 0.4780 | 2.5200 |
-| LOF | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1598.1800 | 1401.9500 | 2408.7500 | 35777.2000 | 5.6660 | 0.5700 |
+| MLP | 13-class supervised | 0.9767 | 0.9784 | 0.9767 | 0.9772 | 0.7592 | 0.6849 | 0.7923 | 0.9942 | 0.8421 | 314.5700 | 270.7000 | 581.8300 | 13175.8000 | 2.5340 | 121.9000 |
+| 1D-CNN | 13-class supervised | 0.9904 | 0.9925 | 0.9904 | 0.9913 | 0.8447 | 0.7649 | 0.8819 | 0.9933 | 0.8752 | 1036.0300 | 967.7000 | 1366.2800 | 11091.3000 | 1.3100 | 1031.3800 |
+| XGBoost | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9594 | 0.9000 | 0.9833 | 0.9996 | 0.9939 | 2153.7900 | 578.3000 | 1586.6400 | 205731.3000 | 3.3380 | 224.9200 |
+| Autoencoder | Binary anomaly (Benign vs Anomalous) | 0.8678 | 0.6890 | 0.5130 | 0.5881 | 0.5881 | 0.5759 | 0.6001 | 0.8384 | 0.6651 | 336.8800 | 270.2000 | 683.4700 | 14135.2000 | 1.5480 | 73.8500 |
+| Isolation Forest | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 13371.0700 | 12691.2500 | 18341.9800 | 42900.5000 | 2.0960 | 0.8100 |
+| One-Class SVM | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 314.6800 | 298.3500 | 574.6100 | 16024.8000 | 0.4780 | 2.5200 |
+| LOF | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1743.2100 | 1683.6500 | 2470.7600 | 34474.6000 | 5.6660 | 0.5700 |
 
 
 - **XGBoost Macro-F1 (95% Bootstrap CI, n=1000):** `0.9594` (`[0.9000, 0.9833]`, bootstrap std=`0.0192`)
@@ -72,12 +72,14 @@
 | Variant | Features | Test_Rows | Val_Macro_F1 | Test_Accuracy | Test_F1_Weighted | Test_F1_Macro | Test_ROC_AUC |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | XGBoost (With Destination Port) | 77 | 28324 | 0.9505 | 0.9989 | 0.9988 | 0.9594 | 0.9996 |
-| XGBoost (Without Destination Port) | 76 | 25067 | 0.9448 | 0.9990 | 0.9989 | 0.9500 | 0.9995 |
+| XGBoost (Without Destination Port) | 76 | 28324 | 0.9500 | 0.9987 | 0.9986 | 0.9540 | 0.9992 |
 
 
-- **Delta Test Macro-F1 (without - with):** `-0.0094` | **Delta Val Macro-F1:** `-0.0056` | **Delta Test Weighted-F1:** `+0.0001`.
+- **Apples-to-Apples Row Parity Verified:** Identical post-deduplication train/val/test rows (`Test_Rows=28,324`, `sha256=85c3896d03d7...`) evaluated after full 77-feature leakage verification.
 
-- **Top-5 XGBoost SHAP Features After Removing `Destination Port`:** `Init_Win_bytes_forward` (0.5423), `min_seg_size_forward` (0.4709), `Init_Win_bytes_backward` (0.4384), `Flow IAT Min` (0.3576), `Bwd Packet Length Mean` (0.2977).
+- **Delta Test Macro-F1 (without - with):** `-0.0054` | **Delta Val Macro-F1:** `-0.0005` | **Delta Test Weighted-F1:** `-0.0002`.
+
+- **Top-5 XGBoost SHAP Features After Removing `Destination Port`:** `min_seg_size_forward` (0.5056), `Init_Win_bytes_forward` (0.4793), `Init_Win_bytes_backward` (0.4162), `Flow IAT Min` (0.2998), `Fwd IAT Min` (0.2803).
 
 
 
@@ -233,4 +235,4 @@ Tabular CICFlowMeter features do not form a physical time series; 1D convolution
 
 ## 10. Preprocessing vs. Model Inference Latency
 
-- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** mean = `1529.51 µs`, median = `1212.45 µs`, P95 = `2530.64 µs` (`653.8` flows/sec).
+- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** mean = `1464.69 µs`, median = `1184.80 µs`, P95 = `2666.32 µs` (`682.7` flows/sec).

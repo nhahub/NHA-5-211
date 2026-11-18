@@ -13,7 +13,7 @@ from scripts.export_onnx import check_onnx_environment
 from scripts.export_onnx import main as export_onnx_main
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-from src.config import AppConfig, DataConfig
+from src.config import AppConfig, DataConfig, ModelConfig
 from src.data.feature_engineering import SchemaValidationError
 from src.data.loader import CICIDS2017_FEATURES, generate_synthetic_cicids2017
 from src.data.preprocessing import (
@@ -23,6 +23,7 @@ from src.data.preprocessing import (
 )
 from src.detection.inference import UnifiedDetectionEngine
 from src.evaluation.benchmarking import benchmark_model_inference
+from src.evaluation.protocols import evaluate_feature_ablation
 from src.models.mlp import build_mlp
 from src.models.xgboost_model import build_xgboost_classifier
 from src.response.response_engine import ActiveResponseEngine
@@ -229,3 +230,37 @@ def test_direct_single_flow_benchmark_and_onnx_export_script(tmp_path: Path) -> 
     assert exit_non_strict == (0 if missing_req else 1)  # empty models_dir fails only if deps exist
     if missing_req:
         assert export_onnx_main(["--models-dir", str(tmp_path), "--strict"]) == 1
+
+
+def test_ablation_preserves_exact_rows_even_with_port_only_differences(tmp_app_config: AppConfig) -> None:
+    """Flows that differ solely on Destination Port keep identical train/val/test rows in ablation."""
+    base_df = generate_synthetic_cicids2017(n_samples=240, seed=99, save_path=None)
+    # Inject 40 flows whose 76 non-port features are identical and only Destination Port differs.
+    port_clones = base_df.iloc[:40].copy().reset_index(drop=True)
+    port_clones["Destination Port"] = np.arange(10000, 10040, dtype=np.int64)
+    for col in port_clones.columns:
+        if col not in ("Destination Port", "Label", "Source IP", "Destination IP", "Timestamp"):
+            port_clones[col] = base_df.loc[0, col]
+
+    combined = pd.concat([base_df, port_clones], ignore_index=True)
+    raw_dir = tmp_app_config.paths.resolve("raw_data_dir")
+    combined.to_csv(raw_dir / "Friday-PortOverlap-Test.csv", index=False)
+
+    model_cfg = ModelConfig()
+    res = evaluate_feature_ablation(
+        app_cfg=tmp_app_config,
+        model_cfg=model_cfg,
+        drop_features=["Destination Port"],
+        xgb_params={"n_estimators": 8, "max_depth": 3},
+        imbalance_strategy="none",
+        force_synthetic=False,
+        compute_shap=False,
+    )
+    assert res["executed"] is True
+    assert res["identical_test_rows_verified"] is True
+    assert res["with_features"]["split_sizes"]["test"] == res["without_features"]["split_sizes"]["test"]
+    assert (
+        res["with_features"]["split_sizes"]["train_raw"]
+        == res["without_features"]["split_sizes"]["train_raw"]
+    )
+    assert res["with_features"]["test_rows_sha256"] == res["without_features"]["test_rows_sha256"]
