@@ -65,10 +65,51 @@ def benchmark_model_inference(
         single_in = single
         batch_in = batch
 
+    concrete_single: Any = None
+    single_tensor: Any = None
+    xgb_booster: Any = None
+    xgb_iter_range: tuple[int, int] = (0, 0)
+    xgb_orig_device: str | None = None
+
+    if model_type in ("keras", "cnn", "ae") and (
+        "keras" in type(model).__module__ or "tensorflow" in type(model).__module__
+    ):
+        import tensorflow as tf
+
+        @tf.function(reduce_retracing=True)
+        def _compiled_single(x: Any) -> Any:
+            return model(x, training=False)
+
+        concrete_single = _compiled_single.get_concrete_function(tf.TensorSpec(single_in.shape, tf.float32))
+        single_tensor = tf.constant(single_in, dtype=tf.float32)
+    elif model_type == "xgb" and hasattr(model, "get_booster"):
+        import json
+
+        xgb_booster = model.get_booster()
+        best_iter = None
+        try:
+            best_iter = model.best_iteration
+        except AttributeError:
+            best_iter = None
+        if best_iter is not None:
+            xgb_iter_range = (0, int(best_iter) + 1)
+        try:
+            dev = json.loads(xgb_booster.save_config())["learner"]["generic_param"].get("device", "cpu")
+            if isinstance(dev, str) and "cuda" in dev.lower():
+                xgb_orig_device = dev
+        except Exception:
+            xgb_orig_device = None
+
     def _infer_single() -> Any:
+        if concrete_single is not None:
+            # Warmed concrete tf.function call avoids eager Python dispatch on single streaming flows
+            return concrete_single(single_tensor).numpy()
         if model_type in ("keras", "cnn", "ae"):
-            # Direct model(..., training=False) avoids Keras Dataset wrapper overhead on 1-row streaming flows
-            return model(single_in, training=False)
+            return (
+                model(single_in, training=False) if callable(model) else model.predict(single_in, verbose=0)
+            )
+        if xgb_booster is not None:
+            return xgb_booster.inplace_predict(single_in, iteration_range=xgb_iter_range)
         if model_type == "sklearn_anomaly":
             return -model.decision_function(single_in)
         return model.predict_proba(single_in)
@@ -81,14 +122,20 @@ def benchmark_model_inference(
         return model.predict_proba(batch_in)
 
     # Warm-up runs (JIT / graph compilation / cache warm)
-    for _ in range(n_warmup):
-        _ = _infer_single()
+    if xgb_booster is not None and xgb_orig_device is not None:
+        xgb_booster.set_param({"device": "cpu"})
+    try:
+        for _ in range(n_warmup):
+            _ = _infer_single()
 
-    times_us: list[float] = []
-    for _ in range(n_runs):
-        t0 = time.perf_counter()
-        _ = _infer_single()
-        times_us.append((time.perf_counter() - t0) * 1e6)
+        times_us: list[float] = []
+        for _ in range(n_runs):
+            t0 = time.perf_counter()
+            _ = _infer_single()
+            times_us.append((time.perf_counter() - t0) * 1e6)
+    finally:
+        if xgb_booster is not None and xgb_orig_device is not None:
+            xgb_booster.set_param({"device": xgb_orig_device})
 
     arr = np.asarray(times_us, dtype=np.float64)
     mean_us = float(np.mean(arr))

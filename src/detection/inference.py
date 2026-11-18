@@ -104,11 +104,63 @@ class UnifiedDetectionEngine:
         model = self.artifacts.models.get(model_name)
         if model is None:
             raise KeyError(f"Requested model '{model_name}' is not loaded.")
-        if model_name == "CNN":
-            X_in = X_scaled.reshape(-1, X_scaled.shape[1], 1)
+        if model_name in ("CNN", "MLP"):
+            X_in = X_scaled.reshape(-1, X_scaled.shape[1], 1) if model_name == "CNN" else X_scaled
+            if len(X_scaled) <= 32 and (
+                "keras" in type(model).__module__ or "tensorflow" in type(model).__module__
+            ):
+                import tensorflow as tf
+
+                cache = getattr(self, "_tf_callable_cache", None)
+                if cache is None:
+                    cache = {}
+                    self._tf_callable_cache = cache
+                fn = cache.get(model_name)
+                if fn is None:
+                    sig_shape = (
+                        (None, X_scaled.shape[1], 1) if model_name == "CNN" else (None, X_scaled.shape[1])
+                    )
+
+                    @tf.function(
+                        input_signature=[tf.TensorSpec(sig_shape, tf.float32)],
+                        reduce_retracing=True,
+                    )
+                    def _direct_keras_fn(x: Any) -> Any:
+                        return model(x, training=False)
+
+                    fn = _direct_keras_fn
+                    cache[model_name] = fn
+                preds = fn(tf.constant(np.asarray(X_in, dtype=np.float32))).numpy()
+                return np.asarray(preds, dtype=np.float64)
             return np.asarray(model.predict(X_in, batch_size=512, verbose=0), dtype=np.float64)
-        if model_name == "MLP":
-            return np.asarray(model.predict(X_scaled, batch_size=512, verbose=0), dtype=np.float64)
+
+        if len(X_scaled) <= 32 and hasattr(model, "get_booster"):
+            import json
+
+            booster = model.get_booster()
+            best_iter = None
+            try:
+                best_iter = model.best_iteration
+            except AttributeError:
+                best_iter = None
+            iter_range = (0, int(best_iter) + 1) if best_iter is not None else (0, 0)
+            orig_device: str | None = None
+            try:
+                dev = json.loads(booster.save_config())["learner"]["generic_param"].get("device", "cpu")
+                if isinstance(dev, str) and "cuda" in dev.lower():
+                    orig_device = dev
+                    booster.set_param({"device": "cpu"})
+            except Exception:
+                orig_device = None
+            try:
+                preds = booster.inplace_predict(
+                    np.asarray(X_scaled, dtype=np.float32),
+                    iteration_range=iter_range,
+                )
+            finally:
+                if orig_device is not None:
+                    booster.set_param({"device": orig_device})
+            return np.asarray(preds, dtype=np.float64)
         return np.asarray(model.predict_proba(X_scaled), dtype=np.float64)
 
     def predict_batch(

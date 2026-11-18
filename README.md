@@ -2,130 +2,68 @@
 
 **An Intelligent, Multi-Modal Hybrid Ensemble Architecture for Network Intrusion Detection and Zero-Day Anomaly Tracking**
 
-Academic Graduation Project — Built strictly to the specification in `Smart_IDS_v3_Technical_Report.pdf` (Chapters 1–10) with split-isolated preprocessing (post-clipping cross-split deduplication and `strict_leakage_check` enforcement), GPU/CPU adaptive acceleration, Optuna optimization, SHAP explainability, dry-run active mitigation, automated testing, and a Security Operations Center (SOC) dashboard.
+Academic Graduation Project — Built to the accompanying project technical specification (provided separately outside this repository) with split-isolated CICIDS2017 preprocessing (post-clipping cross-split deduplication and `strict_leakage_check` enforcement), CUDA/CPU adaptive XGBoost + TensorFlow/Keras models, classical anomaly baselines, SHAP explainability, dry-run active mitigation, CI automation, and a 7-tab Streamlit SOC dashboard.
 
 ---
 
-## 1. Project Overview
+## Summary & Architecture
 
-**SMART IDS v3** is an end-to-end network intrusion detection, zero-day anomaly tracking, explainable AI (XAI), and automated active-response prototype. Instead of relying on static byte signatures or a single classifier, SMART IDS v3 combines four distinct machine learning and deep learning paradigms:
+**SMART IDS v3** integrates supervised intrusion attribution, unsupervised novelty tracking, explainable AI (XAI), and safe dry-run mitigation across modular packages:
 
-1. **Multi-Layer Perceptron (MLP)** — Deep tabular classifier (`512 → 256 → 128 → 64`) regularized with Batch Normalization, LeakyReLU (`negative_slope=0.1`), Dropout (`0.4`), L2 decay (`1e-4`), and gradient clipping (`clipnorm=1.0`).
-2. **One-Dimensional Convolutional Neural Network (1D-CNN)** — Dual Conv1D blocks (`64` and `128` filters, kernel size `3`), MaxPooling1D, GlobalAveragePooling1D, and dense classification head.
-3. **Undercomplete Autoencoder (Unsupervised Zero-Day Tracker)** — Symmetric `256 → 128 → 64 → 32 → 64 → 128 → 256` reconstruction network trained **exclusively on `BENIGN` flows** under MSE loss, calibrated at the 95th percentile of benign validation reconstruction error.
-4. **XGBoost Classifier (Baseline & Optuna-Tuned)** — Regularized gradient-boosted decision trees (`hist`, `multi:softprob`) optimized via Optuna TPE trials and accelerated on NVIDIA CUDA when available.
+- **Supervised Models:** `XGBoost` (CUDA/CPU, Optuna TPE), `MLP` (`512→256→128→64`), and `1D-CNN` evaluated independently and via calibration-aware ensembling (`best_single`, `val_weighted_voting`, validation `stacking`, and `hybrid_anomaly_override`).
+- **Orthogonal Zero-Day Tracking:** `Autoencoder` trained exclusively on `BENIGN` traffic and benchmarked against **Isolation Forest**, **One-Class SVM**, and **Local Outlier Factor** across identical benign validation percentiles (`90, 95, 97, 99`) plus a Leave-One-Attack-Out unseen-attack protocol.
+- **Zero-Leakage Pipeline:** Stateless cleaning precedes stratified (`random`) or temporal (`by_day`) splitting; imputers, 5-sigma clippers, scalers, and SMOTE fit strictly on `train`, followed by post-clipping/post-scaling overlap removal enforced by `strict_leakage_check`.
+- **Canonical Response & SOC UI:** Shared dry-run `ActiveResponseEngine` with `ipaddress` validation and append-only audit logs surfaced through `app.py`.
 
----
-
-## 2. Problem Statement
-
-Traditional signature-based Intrusion Detection Systems (e.g., Snort, Suricata) fail against polymorphic payloads and zero-day attacks lacking prior rules. Conversely, naive ML classifiers trained on heavily imbalanced network flow corpora (where benign flows dominate >80% of traffic) optimize overall accuracy by ignoring rare, high-impact attack categories (`Web Attack`, `FTP-Patator`, `SSH-Patator`), while closed-set supervised classifiers alone cannot detect novel unseen attacks.
+See [`docs/architecture.md`](docs/architecture.md), [`docs/dataset_and_methodology.md`](docs/dataset_and_methodology.md), [`docs/model_configuration.md`](docs/model_configuration.md), and [`docs/project_details.md`](docs/project_details.md) for detailed layer specs, dependency compatibility notes (`Python 3.13.12`), troubleshooting, and future roadmap.
 
 ---
 
-## 3. Objectives
+## Quick Start
 
-1. **Zero-Leakage Cyber-Data Engineering:** Ingest raw CICFlowMeter CSVs, eliminate `±Inf`, `NaN`, duplicate rows, and structural identifiers (`Flow ID`, `Source IP`, `Destination IP`, `Source Port`, `Timestamp`), split **before** fitting imputers/clippers/scalers, deduplicate again after imputation and outlier clipping so cross-split feature collisions cannot enter validation/test or SMOTE, enforce disjointness via `strict_leakage_check`, and experimentally validate SMOTE vs. class weighting strictly on the training split.
-2. **Multi-Paradigm Benchmarking:** Implement, train, tune, and rigorously evaluate MLP, 1D-CNN, Autoencoder, XGBoost, and hybrid ensemble decision logic across accuracy, Macro/Weighted F1, ROC-AUC, PR-AUC, calibration (ECE/Brier), and single-flow latency.
-3. **Orthogonal Zero-Day Novelty Tracking:** Separate closed-set multi-class classification from open-set benign-only reconstruction error, evaluating threshold percentile trade-offs (`90, 95, 97, 99`) and a Leave-One-Attack-Out unseen-attack protocol.
-4. **Explainability & Safe Mitigation:** Provide game-theoretic SHAP attributions (`TreeExplainer` + `GradientExplainer`/`KernelExplainer` comparison) and a canonical 4-tier Active Response Engine operating in safe **DRY-RUN** simulation mode with strict `ipaddress` validation and append-only audit logging.
-5. **SOC Operational Dashboard:** Deliver a 7-tab dark-navy Streamlit SOC platform supporting live single-flow inference, schema-validated batch CSV scoring, interactive SHAP drill-downs, and incident exports.
-
----
-
-## 4. Architecture
-
-See [`docs/architecture.md`](docs/architecture.md) for full Mermaid system and data-pipeline diagrams.
-
-- **Supervised Attribution & Honest Ensembling:** XGBoost, MLP, and 1D-CNN are benchmarked individually and combined via `best_single`, `soft_voting`, `confidence_weighted`, `val_weighted_voting`, `stacking` (validation-only `LogisticRegression` meta-learner in log-probability space), and `hybrid_anomaly_override` (which delegates supervised attribution to `best_single` by default unless multi-model fusion outperforms it). Multi-model probability blending does **not** automatically improve over standalone `XGBoost` on tabular flows and is evaluated strictly on held-out test Macro-F1.
-- **Supplementary Unsupervised Anomaly Signal:** The Autoencoder reconstruction error (`MSE > threshold`) is kept orthogonal to supervised class probabilities and benchmarked under identical benign-only training and percentile calibration alongside classical baselines (**Isolation Forest**, **One-Class SVM**, and **Local Outlier Factor**). Because benign-only anomaly detectors exhibit lower precision/recall than supervised `XGBoost` on stealthy attack flows, the Autoencoder serves strictly as a **supplementary anomaly signal** (`Zero-Day Anomaly (Novel)` flag when breaching calibrated thresholds) rather than a standalone replacement.
-- **Canonical Response Layer:** Shared across CLI, notebooks, and dashboard via [`src/response/response_engine.py`](src/response/response_engine.py).
-
----
-
-## 5. Dataset Information
-
-- **Primary Target Dataset:** **CICIDS2017** (Canadian Institute for Cybersecurity), comprising 8 daily CICFlowMeter CSV captures covering `BENIGN`, `DoS Hulk`, `PortScan`, `DDoS`, `DoS GoldenEye`, `FTP-Patator`, `SSH-Patator`, and `Web Attack` (plus rare classes merged/handled cleanly).
-- **Cleaned Feature Schema:** **77** non-redundant numeric features (`Destination Port` + 76 CICFlowMeter flow, packet-length, IAT, TCP-flag, subflow, and active/idle statistics).
-- **Synthetic Demonstration Mode:** When `data/raw/` contains no CSVs, [`src/data/loader.py`](src/data/loader.py) generates a schema-faithful synthetic demonstration dataset (`data/synthetic/cicids2017_synthetic_demo.csv`) mirroring CICIDS2017 class imbalance weights (`0.83 / 0.06 / 0.04 / 0.03 / 0.01 × 4`), `Inf`, `NaN`, duplicates, and extreme rate spikes. Synthetic runs are explicitly labeled everywhere and never conflated with real CICIDS2017 experimental results.
-
----
-
-## 6. Technologies & Selected Versions
-
-> **Python Compatibility Decision:** At development time, Python `3.14.5` and `3.13.12` were available on the host. Because the latest stable PyPI release of TensorFlow (**`2.21.0`**) supports Python `3.10–3.13` (while `2.22.0` remains a pre-release `rc0`), **Python `3.13.12`** was selected as the newest stable Python release supported reliably by the entire ML/DL stack. On native Windows, TensorFlow (`>=2.11`) executes on CPU while **XGBoost `3.4.1`** automatically utilizes **NVIDIA CUDA** (verified on the host RTX 3050 6GB GPU) with seamless CPU fallback.
-
-| Component | Version | Role |
-|---|---|---|
-| Python | `3.13.12` | Runtime interpreter |
-| TensorFlow / Keras | `2.21.0` / `3.15.1` | MLP, 1D-CNN, Autoencoder |
-| XGBoost | `3.4.1` | Gradient-boosted baseline & CUDA-accelerated Optuna tuning |
-| Scikit-learn | `1.9.1` | Splitting, StandardScaler, LabelEncoder, metrics, ROC/PR |
-| Imbalanced-learn | `0.14.2` | Train-only SMOTE resampling |
-| SHAP | `0.54.1` | `TreeExplainer`, `GradientExplainer`, `KernelExplainer`, waterfall plots |
-| Optuna | `5.1.0` | TPE hyperparameter optimization |
-| Pandas / NumPy / PyArrow | `3.1.1` / `2.5.5` / `26.0.1` | Vectorized tabular processing |
-| Streamlit / Plotly | `1.67.0` / `7.1.0` | Interactive SOC dashboard |
-| Matplotlib / Seaborn | `3.11.2` / `0.13.2` | Publication-grade figures |
-| Pydantic / PyYAML / Joblib | `2.14.3` / `6.0.3` / `1.6.0` | Validated configuration & artifact persistence |
-| pytest / Ruff | `9.2.0` / `0.17.5` | Automated testing, linting, and formatting |
-
----
-
-## 7. Installation Instructions
+### Local Setup (Python 3.13)
 
 ```powershell
-# 1. Create a Python 3.13 virtual environment
+# 1. Create and populate Python 3.13 virtual environment
 uv venv --python 3.13 .venv
-# Or: py -3.13 -m venv .venv
-
-# 2. Install locked compatible dependencies
 uv pip install --python .venv\Scripts\python.exe -r requirements.txt
-# Or: .venv\Scripts\pip.exe install -r requirements.txt
 
-# 3. Copy environment template (optional)
-copy .env.example .env
-```
+# 2. Place official CICIDS2017 CSVs into data/raw/ (or omit for explicit synthetic demo mode)
+# Source: https://www.unb.ca/cic/datasets/ids-2017.html
 
----
-
-## 8. Dataset Preparation
-
-1. Download the official **CICIDS2017** CSV archive (`MachineLearningCSV.zip` or `TrafficLabelling`) from:
-   `https://www.unb.ca/cic/datasets/ids-2017.html`
-2. Extract the 8 CSV exports into `data/raw/`.
-3. If `data/raw/` is left empty, training and exploration automatically enter **Explicit Synthetic Demonstration Mode**.
-
----
-
-## 9. Model Training
-
-```powershell
-# Train on raw CICIDS2017 CSVs in data/raw/ (or synthetic fallback if empty) and run full evaluation:
+# 3. Train all models and regenerate evaluation reports & figures
 .venv\Scripts\python.exe scripts/train.py --run-eval
 
-# Explicitly force synthetic demonstration mode with custom limits:
-.venv\Scripts\python.exe scripts/train.py --synthetic --max-rows 60000 --epochs 50 --optuna-trials 12 --run-eval
+# 4. Launch the SOC dashboard
+.venv\Scripts\streamlit.exe run app.py
 ```
 
-Artifacts produced in `models/` and `data/processed/`:
-- `best_mlp.keras`, `best_cnn.keras`, `best_autoencoder.keras`, `xgb_model.json`
-- `scaler.pkl`, `imputer.pkl`, `outlier_clipper.pkl`, `label_encoder.pkl`, `calibrators.pkl`
-- `feature_names.json`, `anomaly_threshold.json`, `training_histories.json`, `preprocessing_audit.json`
+### Docker Execution (Dashboard)
+
+```bash
+docker build -t smart-ids-v3 .
+docker run --rm -p 8501:8501 smart-ids-v3
+```
+
+### Independent Evaluation & Optional ONNX Export
+
+```powershell
+# Re-evaluate persisted models on disk and regenerate reports/
+.venv\Scripts\python.exe scripts/evaluate.py
+
+# Optional ONNX export check (skips gracefully if optional tf2onnx/onnx are not installed)
+.venv\Scripts\python.exe scripts/export_onnx.py --verify
+```
+
+> **ONNX Export Feasibility:** `onnx` and `tf2onnx` are omitted from `requirements.txt` to avoid resolver conflicts on Python 3.13 + TensorFlow `2.21.0` + NumPy `2.x`. Single-flow latency paths in [`src/evaluation/benchmarking.py`](src/evaluation/benchmarking.py) and [`src/detection/inference.py`](src/detection/inference.py) instead use warmed concrete `tf.function` graphs (Keras) and `booster.inplace_predict(...)` (XGBoost). See [`docs/project_details.md`](docs/project_details.md#4-onnx-export-feasibility-notes).
 
 ---
 
-## 10. Model Evaluation & Measured Experimental Results
-
-Run independent evaluation (reloading persisted models from disk) anytime via:
-
-```powershell
-.venv\Scripts\python.exe scripts/evaluate.py
-```
+## Measured Experimental Results & Evaluation Caveats
 
 ### Measured Results (Genuine CICIDS2017 Benchmark Run: 2,830,743 raw rows → 200,000 stratified sample → 191,268 deduplicated rows; 77 features, 13 classes)
 
-> **Dataset Provenance:** All 8 daily CICIDS2017 CSV exports in `data/raw/` (`138,190` train pre-SMOTE / `413,056` train post-SMOTE with `smote_cap_per_class=25,000` / `24,387` validation / `28,691` held-out test).
+> **Dataset Provenance:** All 8 daily CICIDS2017 CSV exports in `data/raw/` (`138,190` train pre-SMOTE / `413,056` train post-SMOTE / `24,387` validation / `28,691` held-out test). Full tables (per-class precision/recall/F1 + support, 95% bootstrap CIs, 5-fold XGBoost CV, `by_day` temporal protocol, and `Destination Port` ablation) live in [`reports/model_comparison_report.md`](reports/model_comparison_report.md) and [`reports/experimental_results.md`](reports/experimental_results.md).
 
 | Model | Framing | Accuracy | Precision (W) | Recall (W) | F1 (W) | F1 (Macro) | ROC-AUC | Mean Latency (µs) | Batch Throughput (flows/s) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -134,93 +72,56 @@ Run independent evaluation (reloading persisted models from disk) anytime via:
 | **MLP** | 13-class supervised | 0.9633 | 0.9785 | 0.9633 | 0.9692 | 0.8076 | 0.9965 | 5,054.23 | 23,584.7 |
 | **Autoencoder** | Binary anomaly (Benign vs Anomalous) | 0.8688 | 0.6863 | 0.5132 | 0.5873 | 0.5873 | 0.8393 | 6,335.78 | 24,713.7 |
 
-Additional verified findings (details in [`reports/experimental_results.md`](reports/experimental_results.md) and [`reports/model_comparison_report.md`](reports/model_comparison_report.md)):
-- **Isolated Single-Flow Preprocessing Latency:** `867.52 µs` mean (`820.70 µs` median, `1,052.05 µs` P95; `1,152.7` flows/sec).
-- **Imbalance Experiment (Validation Split):** SMOTE (`Macro-F1 = 0.9432`, `Weighted-F1 = 0.9986`) vs. Class Weighting (`Macro-F1 = 0.9446`) vs. Unweighted (`Macro-F1 = 0.9518`).
-- **XGBoost Optuna HPO (12 trials):** Improved validation `mlogloss` from `0.0052` to `0.0048` and `Macro-F1` from `0.9458` to `0.9465`.
-- **1D-CNN vs. MLP & XGBoost:** On tabular flow statistics without genuine temporal sequence order, 1D-CNN required substantially higher training time (`2,604.57s` vs `361.81s` MLP / `149.38s` XGBoost) and inference latency (`10.13 ms` vs `0.52 ms` XGBoost) while trailing XGBoost by `14.23` Macro-F1 points (`0.8281` vs `0.9704`).
-- **SHAP Trade-Off:** `TreeExplainer` explained 500 flows in `0.28s`; MLP `GradientExplainer` ran `2.83x` faster than `KernelExplainer` with `0.7860` Spearman rank agreement.
-
 ### Evaluation Caveats
 
-- **Random Flow-Level Split Optimism (`random` vs. `by_day`):** Standard stratified random flow splitting (`data.split_strategy: random`) mixes closely correlated flows from the same attack session/burst across training, validation, and test partitions, yielding optimistic supervised metrics. To measure stricter cross-day generalization, [`configs/config.yaml`](configs/config.yaml) supports `split_strategy: by_day` (training on Monday–Wednesday captures, validating on half of Thursday, and testing on Thursday remainder + Friday), and [`scripts/evaluate.py`](scripts/evaluate.py) reports both protocols as separate tables in [`reports/model_comparison_report.md`](reports/model_comparison_report.md). Note that in CICIDS2017, attack families on Thursday–Friday (`Web Attack`, `Infiltration`, `Bot`, `PortScan`, `DDoS`) never occur on Monday–Wednesday, making `by_day` multi-class attribution an unseen-class regime while cross-day binary intrusion detection (`BENIGN` vs. `Attack`) tests generalization across days.
-- **Shortcut-Feature Risk (`Destination Port`):** Baseline XGBoost global SHAP attribution is dominated by `Destination Port` (`1.93` mean `|SHAP|` vs. `0.55` for the runner-up feature), indicating that tree splits can memorize service ports rather than behavioral flow dynamics. Setting `data.drop_features: ["Destination Port"]` removes it cleanly from the model feature matrix while retaining flow metadata for the SOC map, and an automated with/without `Destination Port` ablation reports the measured Macro-F1 delta.
-- **Statistically Unreliable Rare-Class Support:** Several CICIDS2017 attack categories have extremely few flows (`Heartbleed`: 11 total; `Infiltration`: 36 total), leaving tiny held-out test supports where one or two misclassified flows sharply alter recall, precision, and unweighted `Macro-F1`. Any class with low test support (`< 30` flows in [`reports/model_comparison_report.md`](reports/model_comparison_report.md)) should therefore be treated as **statistically unreliable** on its own and interpreted alongside per-class support counts, 95% bootstrap confidence intervals, and 5-fold stratified cross-validation (`mean ± std`).
-- **Known CICIDS2017 Labeling Issues (Engelen et al.):** This repository ingests the standard UNB/Kaggle CICIDS2017 CSV exports. Prior forensic audits (Engelen et al., *"Troubleshooting an Intrusion Detection Dataset: the CICIDS2017 Case Study"*) documented flow-construction bugs, duplicated/mis-attributed TCP teardown packets, and label assignment errors in the original CSVs; results should be interpreted with those upstream dataset artifacts in mind and validated against the corrected CICIDS2017 version in future work.
+- **Random Flow-Level Split Optimism (`random` vs. `by_day`):** Random flow splitting (`data.split_strategy: random`) shares flows from the same capture sessions across splits, yielding optimistic supervised metrics. `configs/config.yaml` supports chronological `split_strategy: by_day` (Mon–Wed train, part of Thu val, Thu+Fri test), reported separately alongside `random` in `reports/model_comparison_report.md`.
+- **Shortcut-Feature Risk (`Destination Port`):** Baseline XGBoost global SHAP is dominated by `Destination Port` (`1.93` vs. `0.55` runner-up). Setting `data.drop_features: ["Destination Port"]` tests generalization without port memorization while preserving port metadata for the SOC map.
+- **Statistically Unreliable Rare Classes:** `Heartbleed` (11 total) and `Infiltration` (36 total) yield tiny test supports (`< 30` flows); inspect per-class support, 95% bootstrap CIs, and 5-fold stratified CV in `reports/model_comparison_report.md`.
+- **Known CICIDS2017 Labeling Issues (Engelen et al.):** Standard CICIDS2017 CSVs contain upstream flow-construction and labeling artifacts; treat cross-benchmark generalization cautiously without validating on corrected releases.
 
 ---
 
-## 11. Dashboard Execution
+## How to Reproduce
+
+To verify code style, tests, and end-to-end training reproducibility from a clean checkout:
 
 ```powershell
-.venv\Scripts\python.exe scripts/run_dashboard.py
-# Or directly:
-.venv\Scripts\streamlit.exe run app.py
+# Lint, formatting verification, and unit/smoke tests
+.venv\Scripts\ruff.exe check src dashboard scripts tests app.py
+.venv\Scripts\ruff.exe format --check src dashboard scripts tests app.py
+.venv\Scripts\python.exe -m pytest tests/ -v --tb=short
+
+# End-to-end training + evaluation (synthetic quick sanity run or genuine data/raw/*.csv)
+.venv\Scripts\python.exe scripts/train.py --synthetic --max-rows 20000 --epochs 5 --optuna-trials 3 --run-eval
 ```
 
-The 7 SOC tabs include: **Overview** (KPIs, Detection Log, Analytics, Threat Map), **Dataset Explorer**, **Model Performance**, **Predict Flow** (single-flow + schema-validated batch CSV), **Explainability** (global + live local SHAP), **Active Response** (dry-run simulator + incident export), and **System Settings**.
+All PRs and pushes to `main` run these Ruff and pytest checks automatically via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ---
 
-## 12. Project Structure
+## Repository Layout
 
 ```text
-IDS_Final/
-├── app.py                          # Streamlit SOC dashboard entrypoint
-├── pyproject.toml                  # Build metadata, Ruff & pytest configuration
-├── requirements.txt                # Locked compatible dependency versions
-├── .env.example                    # Environment configuration template
-├── configs/
-│   ├── config.yaml                 # Data, evaluation, response & UI config
-│   └── model_config.yaml           # Model architectures, Optuna & ensemble config
-├── docs/
-│   ├── architecture.md             # Mermaid architecture & pipeline diagrams
-│   ├── dataset_and_methodology.md  # Stack compatibility & scientific methodology
-│   └── model_configuration.md      # Configuration schema reference
-├── data/
-│   ├── raw/                        # Place genuine CICIDS2017 CSVs here
-│   ├── processed/                  # Preprocessed splits & preprocessing_audit.json
-│   └── synthetic/                  # Explicitly labeled synthetic demo CSV
-├── notebooks/                      # Modular notebooks 01 through 05
-├── src/
-│   ├── config.py                   # Pydantic configuration loader
-│   ├── data/                       # loader, cleaner, feature_engineering, preprocessing
-│   ├── models/                     # mlp, cnn, autoencoder, xgboost_model, ensemble
-│   ├── training/                   # trainer, callbacks, optimization
-│   ├── evaluation/                 # metrics, benchmarking, visualizations, report_writer
-│   ├── explainability/             # shap_explainer
-│   ├── detection/                  # inference, anomaly_detection, threat_scoring
-│   ├── response/                   # response_engine (canonical shared mitigation)
-│   └── utils/                      # logging, reproducibility, model_registry
-├── dashboard/                      # Modular Streamlit components, pages & CSS theme
-├── models/                         # Saved .keras, .json, .pkl model artifacts
-├── artifacts/                      # Run manifest, training diagnostics & SHAP JSON
-├── reports/                        # model_comparison.csv, evaluation_summary.json & figures/
-├── scripts/                        # train.py, evaluate.py, run_dashboard.py
-└── tests/                          # Comprehensive pytest suite
+NHA-5-211/
+├── .github/workflows/ci.yml   # GitHub Actions CI (Ruff + pytest on Python 3.13)
+├── Dockerfile                 # Containerized Streamlit SOC deployment (port 8501)
+├── LICENSE                    # MIT License
+├── app.py                     # Streamlit SOC dashboard entrypoint (7 tabs)
+├── configs/                   # YAML pipeline & hyperparameter configs
+├── docs/                      # Architecture, methodology, specs & extended notes
+├── data/                      # raw/ (CICIDS2017 CSVs), processed/, synthetic/
+├── src/                       # Modular data, models, training, eval, XAI & response
+├── dashboard/                 # Modular Streamlit pages, components & theme
+├── scripts/                   # train.py, evaluate.py, run_dashboard.py, export_onnx.py
+├── models/ & reports/         # Saved artifacts, CSV/JSON metrics, reports & figures
+└── tests/                     # Pytest suite (pipeline, leakage, models, dashboard, CLI)
 ```
 
 ---
 
-## 13. Troubleshooting
+## Limitations & License
 
-- **TensorFlow uses CPU on Windows:** Official TensorFlow builds (`>=2.11`) dropped native Windows GPU support. Use WSL2 Ubuntu with `tensorflow[and-cuda]` if TensorFlow GPU acceleration is required; XGBoost automatically uses CUDA natively on Windows.
-- **Uploaded CSV rejected in Predict Flow:** Ensure all 77 numeric CICFlowMeter columns are present (header whitespace and extra metadata columns like `Source IP` / `Label` are handled automatically).
-- **Dashboard shows "Not found" for models:** Run `.venv\Scripts\python.exe scripts/train.py --run-eval` first so artifacts populate `models/` and `reports/`.
-
----
-
-## 14. Limitations
-
-- **Academic Dry-Run Firewall Scope:** Active response executes strictly in dry-run simulation mode (`iptables` rules are logged, never applied to the host kernel).
+- **Dry-Run Mitigation Only:** `ActiveResponseEngine` logs simulated `iptables` rules without altering host firewall state.
 - **Offline Batch Telemetry:** Live packet capture (`libpcap`/`eBPF`) and streaming CICFlowMeter extraction are outside project scope.
-- **Supplementary Role of Unsupervised Anomaly Detection:** The Autoencoder (and classical benign-only baselines: Isolation Forest, One-Class SVM, LOF) relies purely on deviation from normal traffic patterns; stealthy application-layer attacks whose flow statistics resemble benign HTTP requests (`Web Attack`) exhibit low recall without supervised signatures. The Autoencoder is therefore positioned strictly as a supplementary zero-day signal alongside supervised `XGBoost` attribution (`reports/model_comparison_report.md` reports exact per-detector scores across identical percentile thresholds).
-
----
-
-## 15. Future Improvements
-
-1. Streaming ingestion via Kafka/eBPF flow collectors.
-2. Platform-agnostic SOAR/cloud security-group mitigation adapters.
-3. Continual online drift monitoring and threshold recalibration.
-4. ONNX Runtime / TensorRT export for sub-millisecond neural inference.
+- **Supplementary Anomaly Detection:** Unsupervised detectors (`Autoencoder`, `IsolationForest`, `OneClassSVM`, `LOF`) struggle on stealthy application-layer flows mimicking benign HTTP statistics and act purely as supplementary zero-day alerts alongside supervised `XGBoost`.
+- **License:** Distributed under the terms of the [MIT License](LICENSE).
