@@ -87,3 +87,14 @@ ensemble:
   anomaly_override_min_confidence: 0.65
   calibrate_probabilities: true
   stacker_file: "stacking_meta.pkl"
+
+anomaly_baselines:
+  enabled: true
+  isolation_forest_n_estimators: 200
+  isolation_forest_max_samples: 512
+  ocsvm_nu: 0.05
+  ocsvm_gamma: "scale"
+  ocsvm_max_train_samples: 15000
+  lof_n_neighbors: 20
+  lof_max_train_samples: 15000
+  baselines_file: "anomaly_baselines.pkl"

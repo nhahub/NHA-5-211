@@ -12,6 +12,7 @@ import numpy as np
 
 from src.config import AppConfig, ModelConfig
 from src.data.preprocessing import PreparedDataset
+from src.detection.anomaly_detection import fit_classical_anomaly_baselines
 from src.models.autoencoder import (
     build_autoencoder,
     calibrate_threshold,
@@ -273,6 +274,19 @@ def train_all_models(
         anomaly_threshold,
     )
 
+    anomaly_baselines: dict[str, Any] = {}
+    if model_cfg.anomaly_baselines.enabled:
+        anomaly_baselines = fit_classical_anomaly_baselines(
+            X_benign_train=X_benign_train,
+            X_benign_val=X_benign_val,
+            cfg=model_cfg.anomaly_baselines,
+            percentile=model_cfg.autoencoder.threshold_percentile,
+            seed=seed,
+        )
+        for b_name, base_obj in anomaly_baselines.items():
+            durations[b_name] = float(base_obj.fit_duration_sec)
+        joblib.dump(anomaly_baselines, models_dir / model_cfg.anomaly_baselines.baselines_file)
+
     # 5. Train Baseline + Optuna-Tuned XGBoost
     xgb_cfg = model_cfg.xgboost.model_copy(deep=True)
     if optuna_trials_override is not None:
@@ -368,6 +382,10 @@ def train_all_models(
                 "calibration_report": calibration_report,
                 "stacking_summary": stacker.to_summary_dict(),
                 "best_supervised_model": best_sup_model,
+                "anomaly_baselines_meta": {
+                    k: {"threshold": float(v.threshold), "train_samples": int(v.train_samples_used)}
+                    for k, v in anomaly_baselines.items()
+                },
                 "hardware": {
                     "tf_device": hardware.tf_device,
                     "xgb_device": hardware.xgb_device,

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 from pathlib import Path
 import sys
 from typing import Any
 
+import joblib
 import numpy as np
 import pandas as pd
 
@@ -16,8 +18,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import AppConfig, ModelConfig, get_app_config, get_model_config
+from src.detection.anomaly_detection import fit_classical_anomaly_baselines
 from src.evaluation.benchmarking import benchmark_model_inference, benchmark_preprocessing_latency
 from src.evaluation.metrics import (
+    _binary_metrics,
+    evaluate_anomaly_detector,
     evaluate_autoencoder,
     evaluate_supervised_model,
     evaluate_unseen_attack_protocol,
@@ -271,13 +276,18 @@ def run_evaluation_suite(
         "honest_verdict": honest_verdict,
     }
 
-    # 3. Evaluate Autoencoder Binary Anomaly & Unseen-Attack Protocol
+    # 3. Evaluate Autoencoder & Classical Benign-Only Anomaly Baselines + Unseen-Attack Protocol
     ae_eval: dict[str, Any] = {}
     ae_test_errors = np.zeros(len(X_test_scaled), dtype=np.float64)
+    anomaly_evals: dict[str, dict[str, Any]] = {}
+    baseline_anomaly_scores: dict[str, np.ndarray] = {}
     unseen_res: dict[str, Any] = {"executed": False}
+    holdout_name = app_c.evaluation.unseen_attack_holdout_class
+    holdout_idx = class_names.index(holdout_name) if holdout_name in class_names else None
+
+    X_benign_val, _, _ = extract_benign_subset(X_val_scaled, y_val, artifacts.label_encoder)
     if "Autoencoder" in artifacts.models:
         ae_model = artifacts.models["Autoencoder"]
-        X_benign_val, _, _ = extract_benign_subset(X_val_scaled, y_val, artifacts.label_encoder)
         benign_val_errors = compute_reconstruction_error(ae_model, X_benign_val)
         ae_test_errors = compute_reconstruction_error(ae_model, X_test_scaled)
         ae_eval = evaluate_autoencoder(
@@ -291,6 +301,7 @@ def run_evaluation_suite(
             bootstrap_n=boot_n,
             seed=eval_seed,
         )
+        anomaly_evals["Autoencoder"] = ae_eval
         cm_norm_dict["Autoencoder"] = np.asarray(ae_eval["confusion_matrix_normalized"])
         latency_table["Autoencoder"] = benchmark_model_inference(
             ae_model,
@@ -317,10 +328,115 @@ def run_evaluation_suite(
                 X_test_scaled=X_test_scaled,
                 y_test=y_test,
                 label_encoder=artifacts.label_encoder,
-                holdout_class_name=app_c.evaluation.unseen_attack_holdout_class,
+                holdout_class_name=holdout_name,
                 epochs=10,
-                seed=app_c.project.random_seed,
+                seed=eval_seed,
             )
+
+    # Evaluate Classical Benign-Only Anomaly Baselines (Isolation Forest, One-Class SVM, LOF)
+    anomaly_baselines = artifacts.anomaly_baselines or {}
+    if not anomaly_baselines and model_c.anomaly_baselines.enabled and len(X_train_scaled) > 0:
+        X_benign_train, _, _ = extract_benign_subset(X_train_scaled, y_train, artifacts.label_encoder)
+        anomaly_baselines = fit_classical_anomaly_baselines(
+            X_benign_train=X_benign_train,
+            X_benign_val=X_benign_val,
+            cfg=model_c.anomaly_baselines,
+            percentile=model_c.autoencoder.threshold_percentile,
+            seed=eval_seed,
+        )
+
+    baseline_model_sizes: dict[str, float] = {}
+    for b_name, base_obj in anomaly_baselines.items():
+        val_scores = base_obj.score(X_benign_val)
+        test_scores = base_obj.score(X_test_scaled)
+        baseline_anomaly_scores[b_name] = test_scores
+        anomaly_evals[b_name] = evaluate_anomaly_detector(
+            model_name=b_name,
+            y_test_multiclass=y_test,
+            anomaly_scores_test=test_scores,
+            benign_val_scores=val_scores,
+            threshold=base_obj.threshold,
+            class_names=class_names,
+            benign_index=benign_idx,
+            percentiles=app_c.evaluation.autoencoder_percentiles,
+            bootstrap_n=boot_n,
+            seed=eval_seed,
+        )
+        anomaly_evals[b_name]["fit_duration_sec"] = float(getattr(base_obj, "fit_duration_sec", 0.0))
+        lat_b = benchmark_model_inference(
+            base_obj.estimator,
+            X_test_scaled,
+            "sklearn_anomaly",
+            model_path=None,
+            n_warmup=app_c.evaluation.latency_warmup_runs,
+            n_runs=app_c.evaluation.latency_timed_runs,
+            batch_size=app_c.evaluation.batch_benchmark_size,
+        )
+        buf = io.BytesIO()
+        joblib.dump(base_obj, buf)
+        baseline_model_sizes[b_name] = round(len(buf.getvalue()) / (1024.0 * 1024.0), 3)
+        lat_b["model_size_mb"] = baseline_model_sizes[b_name]
+        latency_table[b_name] = lat_b
+
+    # Summarize comparison across all benign-only anomaly detectors
+    anomaly_detector_comparison: dict[str, Any] = {}
+    if anomaly_evals:
+        comp_rows = []
+        for det_name, det_ev in anomaly_evals.items():
+            holdout_rec = None
+            holdout_auc = None
+            if holdout_idx is not None:
+                hold_cls_stats = det_ev.get("per_class_anomaly_detection_rate", {}).get(holdout_name)
+                if hold_cls_stats:
+                    holdout_rec = float(hold_cls_stats["flagged_rate"])
+                eval_m = (y_test == benign_idx) | (y_test == holdout_idx)
+                scores_for_auc = (
+                    ae_test_errors if det_name == "Autoencoder" else baseline_anomaly_scores[det_name]
+                )
+                y_nov = (y_test[eval_m] == holdout_idx).astype(np.int64)
+                if len(np.unique(y_nov)) > 1:
+                    holdout_auc = float(
+                        _binary_metrics(y_nov, scores_for_auc[eval_m], det_ev["threshold"])["roc_auc"]
+                    )
+            comp_rows.append(
+                {
+                    "Detector": det_name,
+                    "Accuracy": float(det_ev["accuracy"]),
+                    "Precision": float(det_ev["precision"]),
+                    "Recall": float(det_ev["recall"]),
+                    "F1": float(det_ev["f1"]),
+                    "ROC_AUC": float(det_ev["roc_auc"]),
+                    "PR_AUC": float(det_ev["pr_auc"]),
+                    "FPR": float(det_ev["fpr"]),
+                    "Holdout_Class_Recall": holdout_rec,
+                    "Holdout_Class_ROC_AUC": holdout_auc,
+                }
+            )
+        best_f1_det = max(comp_rows, key=lambda r: r["F1"])
+        best_auc_det = max(comp_rows, key=lambda r: r["ROC_AUC"])
+        ae_row = next((r for r in comp_rows if r["Detector"] == "Autoencoder"), None)
+        verdict = (
+            f"Best binary F1 at {model_c.autoencoder.threshold_percentile:.0f}th-pct threshold: "
+            f"{best_f1_det['Detector']} (F1={best_f1_det['F1']:.4f}, Recall={best_f1_det['Recall']:.4f}, FPR={best_f1_det['FPR']:.4f}); "
+            f"best overall ROC-AUC ranking: {best_auc_det['Detector']} (ROC-AUC={best_auc_det['ROC_AUC']:.4f})."
+        )
+        if ae_row and best_f1_det["Detector"] != "Autoencoder":
+            verdict += (
+                f" Autoencoder achieved F1={ae_row['F1']:.4f} / ROC-AUC={ae_row['ROC_AUC']:.4f}, confirming it works "
+                "best as a supplementary anomaly signal alongside supervised XGBoost rather than as a standalone detector."
+            )
+        else:
+            verdict += (
+                " Even the best unsupervised detector still trails supervised attribution strongly and should serve "
+                "strictly as a supplementary novelty signal."
+            )
+        anomaly_detector_comparison = {
+            "holdout_class": holdout_name,
+            "best_by_f1": best_f1_det["Detector"],
+            "best_by_roc_auc": best_auc_det["Detector"],
+            "detectors": comp_rows,
+            "verdict": verdict,
+        }
 
     # 4. Preprocessing latency benchmark (isolated from model inference)
     prep_bench_df = pd.DataFrame(X_test_scaled[:10], columns=artifacts.feature_names)
@@ -366,28 +482,32 @@ def run_evaluation_suite(
             }
         )
 
-    if ae_eval:
-        lat_ae = latency_table.get("Autoencoder", {})
-        ae_ci = ae_eval.get("f1_ci95", {})
+    for det_name in ("Autoencoder", "Isolation Forest", "One-Class SVM", "LOF"):
+        det_ev = anomaly_evals.get(det_name)
+        if not det_ev:
+            continue
+        lat_det = latency_table.get(det_name, {})
+        det_ci = det_ev.get("f1_ci95", {})
+        fit_dur = durations.get(det_name, det_ev.get("fit_duration_sec", 0.0))
         rows_cmp.append(
             {
-                "Model": "Autoencoder",
-                "Evaluation_Framing": ae_eval["framing"],
-                "Accuracy": round(ae_eval["accuracy"], 4),
-                "Precision_Weighted": round(ae_eval["precision"], 4),
-                "Recall_Weighted": round(ae_eval["recall"], 4),
-                "F1_Weighted": round(ae_eval["f1"], 4),
-                "F1_Macro": round(ae_eval["f1"], 4),
-                "F1_Macro_CI95_Low": round(ae_ci.get("ci95_low", ae_eval["f1"]), 4),
-                "F1_Macro_CI95_High": round(ae_ci.get("ci95_high", ae_eval["f1"]), 4),
-                "ROC_AUC": round(ae_eval["roc_auc"], 4),
-                "PR_AUC": round(ae_eval["pr_auc"], 4),
-                "Latency_Mean_us": round(lat_ae.get("single_mean_us", 0.0), 2),
-                "Latency_Median_us": round(lat_ae.get("single_median_us", 0.0), 2),
-                "Latency_P95_us": round(lat_ae.get("single_p95_us", 0.0), 2),
-                "Samples_Per_Sec": round(lat_ae.get("batch_samples_per_sec", 0.0), 1),
-                "Model_Size_MB": lat_ae.get("model_size_mb", 0.0),
-                "Training_Duration_s": round(float(durations.get("Autoencoder", 0.0)), 2),
+                "Model": det_name,
+                "Evaluation_Framing": det_ev["framing"],
+                "Accuracy": round(det_ev["accuracy"], 4),
+                "Precision_Weighted": round(det_ev["precision"], 4),
+                "Recall_Weighted": round(det_ev["recall"], 4),
+                "F1_Weighted": round(det_ev["f1"], 4),
+                "F1_Macro": round(det_ev["f1"], 4),
+                "F1_Macro_CI95_Low": round(det_ci.get("ci95_low", det_ev["f1"]), 4),
+                "F1_Macro_CI95_High": round(det_ci.get("ci95_high", det_ev["f1"]), 4),
+                "ROC_AUC": round(det_ev["roc_auc"], 4),
+                "PR_AUC": round(det_ev["pr_auc"], 4),
+                "Latency_Mean_us": round(lat_det.get("single_mean_us", 0.0), 2),
+                "Latency_Median_us": round(lat_det.get("single_median_us", 0.0), 2),
+                "Latency_P95_us": round(lat_det.get("single_p95_us", 0.0), 2),
+                "Samples_Per_Sec": round(lat_det.get("batch_samples_per_sec", 0.0), 1),
+                "Model_Size_MB": lat_det.get("model_size_mb", 0.0),
+                "Training_Duration_s": round(float(fit_dur), 2),
             }
         )
 
@@ -403,6 +523,7 @@ def run_evaluation_suite(
         ae_errors=ae_test_errors,
         class_names=class_names,
         out_path=figures_dir / "roc_curves.png",
+        baseline_anomaly_scores=baseline_anomaly_scores,
     )
     plot_precision_recall_curves(
         y_test=y_test,
@@ -411,6 +532,7 @@ def run_evaluation_suite(
         ae_errors=ae_test_errors,
         class_names=class_names,
         out_path=figures_dir / "pr_curves.png",
+        baseline_anomaly_scores=baseline_anomaly_scores,
     )
 
     # 7. SHAP Explainability
@@ -535,6 +657,8 @@ def run_evaluation_suite(
         "ensemble_comparison": ensemble_comparison,
         "ensemble_analysis": ensemble_analysis,
         "autoencoder_evaluation": ae_eval,
+        "anomaly_evaluations": anomaly_evals,
+        "anomaly_detector_comparison": anomaly_detector_comparison,
         "unseen_attack_protocol": unseen_res,
         "by_day_protocol": by_day_res,
         "feature_ablation": ablation_res,

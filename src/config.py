@@ -251,6 +251,20 @@ class AutoencoderConfig(BaseModel):
     threshold_file: str = "anomaly_threshold.json"
 
 
+class AnomalyBaselinesConfig(BaseModel):
+    """Configuration for classical benign-only unsupervised anomaly baselines."""
+
+    enabled: bool = True
+    isolation_forest_n_estimators: int = Field(default=200, ge=10)
+    isolation_forest_max_samples: int = Field(default=512, ge=16)
+    ocsvm_nu: float = Field(default=0.05, gt=0.0, lt=1.0)
+    ocsvm_gamma: str | float = "scale"
+    ocsvm_max_train_samples: int = Field(default=15000, ge=100)
+    lof_n_neighbors: int = Field(default=20, ge=2)
+    lof_max_train_samples: int = Field(default=15000, ge=100)
+    baselines_file: str = "anomaly_baselines.pkl"
+
+
 class XGBoostOptunaConfig(BaseModel):
     """Optuna tuning configuration for XGBoost."""
 
@@ -291,6 +305,7 @@ class ModelConfig(BaseModel):
     autoencoder: AutoencoderConfig = Field(default_factory=AutoencoderConfig)
     xgboost: XGBoostConfig = Field(default_factory=XGBoostConfig)
     ensemble: EnsembleConfig = Field(default_factory=EnsembleConfig)
+    anomaly_baselines: AnomalyBaselinesConfig = Field(default_factory=AnomalyBaselinesConfig)
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:

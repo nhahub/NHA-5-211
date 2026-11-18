@@ -30,6 +30,7 @@ class LoadedArtifacts:
     manifest: dict[str, Any]
     calibrators: dict[str, Any] | None = None
     stacker: Any | None = None
+    anomaly_baselines: dict[str, Any] | None = None
 
 
 class ModelRegistry:
@@ -133,6 +134,7 @@ class ModelRegistry:
         label_encoder = _maybe_joblib("label_encoder.pkl")
         calibrators = _maybe_joblib("calibrators.pkl")
         stacker = _maybe_joblib("stacking_meta.pkl")
+        anomaly_baselines = _maybe_joblib("anomaly_baselines.pkl")
 
         feat_path = self.models_dir / "feature_names.json"
         feature_names: list[str] = []
@@ -166,4 +168,5 @@ class ModelRegistry:
             manifest=manifest,
             calibrators=calibrators,
             stacker=stacker,
+            anomaly_baselines=anomaly_baselines,
         )

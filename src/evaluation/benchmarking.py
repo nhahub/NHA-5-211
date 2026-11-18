@@ -69,11 +69,15 @@ def benchmark_model_inference(
         if model_type in ("keras", "cnn", "ae"):
             # Direct model(..., training=False) avoids Keras Dataset wrapper overhead on 1-row streaming flows
             return model(single_in, training=False)
+        if model_type == "sklearn_anomaly":
+            return -model.decision_function(single_in)
         return model.predict_proba(single_in)
 
     def _infer_batch() -> Any:
         if model_type in ("keras", "cnn", "ae"):
             return model.predict(batch_in, batch_size=512, verbose=0)
+        if model_type == "sklearn_anomaly":
+            return -model.decision_function(batch_in)
         return model.predict_proba(batch_in)
 
     # Warm-up runs (JIT / graph compilation / cache warm)

@@ -238,6 +238,71 @@ def _binary_metrics(y_bin_true: np.ndarray, scores: np.ndarray, threshold: float
     }
 
 
+def evaluate_anomaly_detector(
+    model_name: str,
+    y_test_multiclass: np.ndarray,
+    anomaly_scores_test: np.ndarray,
+    benign_val_scores: np.ndarray,
+    threshold: float,
+    class_names: list[str],
+    benign_index: int,
+    percentiles: list[float] | None = None,
+    bootstrap_n: int = 1000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Evaluate any benign-only unsupervised anomaly detector under binary novelty framing."""
+    y_bin_true = (y_test_multiclass != benign_index).astype(np.int64)
+    primary = _binary_metrics(y_bin_true, anomaly_scores_test, threshold)
+    y_pred_bin = (anomaly_scores_test > threshold).astype(np.int64)
+    cm_raw = confusion_matrix(y_bin_true, y_pred_bin, labels=[0, 1])
+    cm_norm = cm_raw.astype(np.float64) / (cm_raw.sum(axis=1, keepdims=True) + 1e-8)
+
+    pct_list = percentiles or [90.0, 95.0, 97.0, 99.0]
+    sweep: list[dict[str, float]] = []
+    for pct in pct_list:
+        t_val = float(np.percentile(benign_val_scores, pct))
+        row = _binary_metrics(y_bin_true, anomaly_scores_test, t_val)
+        row["percentile"] = float(pct)
+        row["threshold"] = t_val
+        sweep.append(row)
+
+    per_attack_recall: dict[str, dict[str, float]] = {}
+    for cls_idx, cls_name in enumerate(class_names):
+        mask = y_test_multiclass == cls_idx
+        if not np.any(mask):
+            continue
+        flagged_rate = float(np.mean(y_pred_bin[mask]))
+        mean_score = float(np.mean(anomaly_scores_test[mask]))
+        per_attack_recall[cls_name] = {
+            "count": int(np.sum(mask)),
+            "flagged_rate": flagged_rate,
+            "mean_score": mean_score,
+            "mean_mse": mean_score,
+        }
+
+    prec_curve, rec_curve, _ = precision_recall_curve(y_bin_true, anomaly_scores_test)
+    pr_auc_curve = float(auc(rec_curve, prec_curve))
+    f1_ci95 = bootstrap_binary_f1_ci(
+        y_bin_true=y_bin_true,
+        y_bin_pred=y_pred_bin,
+        n_bootstrap=bootstrap_n,
+        seed=seed,
+    )
+
+    return {
+        "model": model_name,
+        "framing": "Binary anomaly (Benign vs Anomalous)",
+        "threshold": float(threshold),
+        **primary,
+        "f1_ci95": f1_ci95,
+        "pr_auc_trapz": pr_auc_curve,
+        "confusion_matrix_raw": cm_raw.tolist(),
+        "confusion_matrix_normalized": cm_norm.tolist(),
+        "percentile_sweep": sweep,
+        "per_class_anomaly_detection_rate": per_attack_recall,
+    }
+
+
 def evaluate_autoencoder(
     y_test_multiclass: np.ndarray,
     recon_errors_test: np.ndarray,
@@ -250,57 +315,18 @@ def evaluate_autoencoder(
     seed: int = 42,
 ) -> dict[str, Any]:
     """Evaluate the unsupervised Autoencoder under binary novelty framing."""
-    y_bin_true = (y_test_multiclass != benign_index).astype(np.int64)
-    primary = _binary_metrics(y_bin_true, recon_errors_test, threshold)
-    y_pred_bin = (recon_errors_test > threshold).astype(np.int64)
-    cm_raw = confusion_matrix(y_bin_true, y_pred_bin, labels=[0, 1])
-    cm_norm = cm_raw.astype(np.float64) / (cm_raw.sum(axis=1, keepdims=True) + 1e-8)
-
-    # Percentile trade-off sweep
-    pct_list = percentiles or [90.0, 95.0, 97.0, 99.0]
-    sweep: list[dict[str, float]] = []
-    for pct in pct_list:
-        t_val = float(np.percentile(benign_val_errors, pct))
-        row = _binary_metrics(y_bin_true, recon_errors_test, t_val)
-        row["percentile"] = float(pct)
-        row["threshold"] = t_val
-        sweep.append(row)
-
-    # Per-attack-class detection rate (without ever training on attack labels)
-    per_attack_recall: dict[str, dict[str, float]] = {}
-    for cls_idx, cls_name in enumerate(class_names):
-        mask = y_test_multiclass == cls_idx
-        if not np.any(mask):
-            continue
-        flagged_rate = float(np.mean(y_pred_bin[mask]))
-        mean_err = float(np.mean(recon_errors_test[mask]))
-        per_attack_recall[cls_name] = {
-            "count": int(np.sum(mask)),
-            "flagged_rate": flagged_rate,
-            "mean_mse": mean_err,
-        }
-
-    prec_curve, rec_curve, _ = precision_recall_curve(y_bin_true, recon_errors_test)
-    pr_auc_curve = float(auc(rec_curve, prec_curve))
-    f1_ci95 = bootstrap_binary_f1_ci(
-        y_bin_true=y_bin_true,
-        y_bin_pred=y_pred_bin,
-        n_bootstrap=bootstrap_n,
+    return evaluate_anomaly_detector(
+        model_name="Autoencoder",
+        y_test_multiclass=y_test_multiclass,
+        anomaly_scores_test=recon_errors_test,
+        benign_val_scores=benign_val_errors,
+        threshold=threshold,
+        class_names=class_names,
+        benign_index=benign_index,
+        percentiles=percentiles,
+        bootstrap_n=bootstrap_n,
         seed=seed,
     )
-
-    return {
-        "model": "Autoencoder",
-        "framing": "Binary anomaly (Benign vs Anomalous)",
-        "threshold": float(threshold),
-        **primary,
-        "f1_ci95": f1_ci95,
-        "pr_auc_trapz": pr_auc_curve,
-        "confusion_matrix_raw": cm_raw.tolist(),
-        "confusion_matrix_normalized": cm_norm.tolist(),
-        "percentile_sweep": sweep,
-        "per_class_anomaly_detection_rate": per_attack_recall,
-    }
 
 
 def evaluate_unseen_attack_protocol(

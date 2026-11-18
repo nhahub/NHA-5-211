@@ -17,7 +17,12 @@ def _df_to_markdown(df: pd.DataFrame) -> str:
     sep = "| " + " | ".join(["---"] * len(cols)) + " |"
     rows = []
     for row in df.itertuples(index=False, name=None):
-        cells = [f"{v:.4f}" if isinstance(v, float) else str(v) for v in row]
+        cells = [
+            "N/A"
+            if (v is None or (isinstance(v, float) and pd.isna(v)))
+            else (f"{v:.4f}" if isinstance(v, float) else str(v))
+            for v in row
+        ]
         rows.append("| " + " | ".join(cells) + " |")
     return "\n".join([header, sep, *rows])
 
@@ -40,6 +45,8 @@ def write_academic_reports(
     xgb_cv = summary.get("xgboost_cross_validation", {})
     sup_evals = summary.get("supervised_evaluations", {})
     ens_analysis = summary.get("ensemble_analysis", {})
+    anom_evals = summary.get("anomaly_evaluations", {})
+    anom_comp = summary.get("anomaly_detector_comparison", {})
     prep_lat = summary.get("preprocessing_latency", {})
     shap_sum = summary.get("shap_summary", {})
     split_strat = summary.get("split_strategy") or audit.get("split_strategy", "random")
@@ -62,9 +69,9 @@ def write_academic_reports(
     comp_lines = [
         "# SMART IDS v3 — Model Comparison Report\n",
         mode_banner,
-        f"## {sec_num}. Unified Four-Model Benchmark (Primary Split: `{split_strat}`)\n",
+        f"## {sec_num}. Unified Model Benchmark (Primary Split: `{split_strat}`)\n",
         "- **Supervised models (MLP, 1D-CNN, XGBoost):** Evaluated on multi-class attack attribution using weighted and macro metrics.\n",
-        "- **Unsupervised Autoencoder:** Evaluated separately under binary novelty framing (Benign vs. Anomalous).\n\n",
+        "- **Unsupervised anomaly detectors (Autoencoder, Isolation Forest, One-Class SVM, LOF):** Trained strictly on benign flows and evaluated under identical binary novelty framing (Benign vs. Anomalous).\n\n",
         cmp_md + "\n\n",
     ]
     ci_lines: list[str] = []
@@ -77,13 +84,15 @@ def write_academic_reports(
                 f"`{ev.get('f1_macro', 0.0):.4f}` (`[{ci['ci95_low']:.4f}, {ci['ci95_high']:.4f}]`, "
                 f"bootstrap std=`{ci['std']:.4f}`)\n"
             )
-    ae_ci = ae.get("f1_ci95", {})
-    if ae and ae_ci.get("n_bootstrap", 0) > 0:
-        ci_lines.append(
-            f"- **Autoencoder Binary F1 (95% Bootstrap CI, n={ae_ci['n_bootstrap']}):** "
-            f"`{ae.get('f1', 0.0):.4f}` (`[{ae_ci['ci95_low']:.4f}, {ae_ci['ci95_high']:.4f}]`, "
-            f"bootstrap std=`{ae_ci['std']:.4f}`)\n"
-        )
+    det_sources = anom_evals or ({"Autoencoder": ae} if ae else {})
+    for det_name, det_ev in det_sources.items():
+        det_ci = det_ev.get("f1_ci95", {})
+        if det_ci.get("n_bootstrap", 0) > 0:
+            ci_lines.append(
+                f"- **{det_name} Binary F1 (95% Bootstrap CI, n={det_ci['n_bootstrap']}):** "
+                f"`{det_ev.get('f1', 0.0):.4f}` (`[{det_ci['ci95_low']:.4f}, {det_ci['ci95_high']:.4f}]`, "
+                f"bootstrap std=`{det_ci['std']:.4f}`)\n"
+            )
     if ci_lines:
         comp_lines.extend([*ci_lines, "\n"])
 
@@ -244,6 +253,30 @@ def write_academic_reports(
     if ens_analysis.get("honest_verdict"):
         comp_lines.append(f"- **Empirical Conclusion:** {ens_analysis['honest_verdict']}\n\n")
 
+    if anom_comp.get("detectors"):
+        sec_num += 1
+        comp_lines.append(f"## {sec_num}. Unsupervised Anomaly Detector Baselines (Benign-Only Training)\n")
+        comp_lines.append(_df_to_markdown(pd.DataFrame(anom_comp["detectors"])) + "\n\n")
+        if anom_comp.get("verdict"):
+            comp_lines.append(f"- **Verdict:** {anom_comp['verdict']}\n\n")
+        sweep_rows = [
+            {
+                "Detector": d_name,
+                "Percentile": row["percentile"],
+                "Threshold": row["threshold"],
+                "Precision": row["precision"],
+                "Recall": row["recall"],
+                "F1": row["f1"],
+                "FPR": row["fpr"],
+                "FNR": row["fnr"],
+            }
+            for d_name, d_ev in anom_evals.items()
+            for row in d_ev.get("percentile_sweep", [])
+        ]
+        if sweep_rows:
+            comp_lines.append("### Percentile Threshold Trade-Off Sweep Across Detectors\n\n")
+            comp_lines.append(_df_to_markdown(pd.DataFrame(sweep_rows)) + "\n\n")
+
     sec_num += 1
     comp_lines.append(f"## {sec_num}. XGBoost Baseline vs. Optuna Hyperparameter Optimization\n")
     xgb_opt = diag.get("xgboost_optimization", {})
@@ -354,17 +387,31 @@ def write_academic_reports(
                 "- **Calibration Evidence:** Models were already well-calibrated near `T = 1.0` with minimal NLL/ECE change.\n\n"
             )
 
-    if ae:
-        exp_lines.append("## 4. Autoencoder Zero-Day Novelty Detection & Percentile Sweep\n")
-        exp_lines.append(
-            f"- **95th Percentile Benign Validation Threshold:** `{ae.get('threshold', 0):.6f}`\n"
-            f"- **Binary Test Metrics:** Accuracy=`{ae.get('accuracy', 0):.4f}`, Precision=`{ae.get('precision', 0):.4f}`, "
-            f"Recall=`{ae.get('recall', 0):.4f}`, F1=`{ae.get('f1', 0):.4f}`, ROC-AUC=`{ae.get('roc_auc', 0):.4f}`, "
-            f"FPR=`{ae.get('fpr', 0):.4f}`, FNR=`{ae.get('fnr', 0):.4f}`\n\n"
+    if ae or anom_comp.get("detectors"):
+        exp_lines.append("## 4. Unsupervised Anomaly Detection & Classical Baselines\n")
+        if anom_comp.get("detectors"):
+            exp_lines.append(_df_to_markdown(pd.DataFrame(anom_comp["detectors"])) + "\n\n")
+            if anom_comp.get("verdict"):
+                exp_lines.append(f"- **Assessment:** {anom_comp['verdict']}\n\n")
+        if ae:
+            exp_lines.append(
+                f"- **Autoencoder 95th Percentile Benign Validation Threshold:** `{ae.get('threshold', 0):.6f}`\n"
+                f"- **Autoencoder Binary Test Metrics:** Accuracy=`{ae.get('accuracy', 0):.4f}`, Precision=`{ae.get('precision', 0):.4f}`, "
+                f"Recall=`{ae.get('recall', 0):.4f}`, F1=`{ae.get('f1', 0):.4f}`, ROC-AUC=`{ae.get('roc_auc', 0):.4f}`, "
+                f"FPR=`{ae.get('fpr', 0):.4f}`, FNR=`{ae.get('fnr', 0):.4f}`\n\n"
+            )
+        sweep_src = (
+            [
+                {"Detector": d_name, **row}
+                for d_name, d_ev in anom_evals.items()
+                for row in d_ev.get("percentile_sweep", [])
+            ]
+            if anom_evals
+            else [{"Detector": "Autoencoder", **row} for row in ae.get("percentile_sweep", [])]
         )
-        if ae.get("percentile_sweep"):
-            sweep_df = pd.DataFrame(ae["percentile_sweep"])[
-                ["percentile", "threshold", "precision", "recall", "f1", "fpr", "fnr"]
+        if sweep_src:
+            sweep_df = pd.DataFrame(sweep_src)[
+                ["Detector", "percentile", "threshold", "precision", "recall", "f1", "fpr", "fnr"]
             ]
             exp_lines.append(_df_to_markdown(sweep_df) + "\n\n")
 

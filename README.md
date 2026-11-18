@@ -38,7 +38,7 @@ Traditional signature-based Intrusion Detection Systems (e.g., Snort, Suricata) 
 See [`docs/architecture.md`](docs/architecture.md) for full Mermaid system and data-pipeline diagrams.
 
 - **Supervised Attribution & Honest Ensembling:** XGBoost, MLP, and 1D-CNN are benchmarked individually and combined via `best_single`, `soft_voting`, `confidence_weighted`, `val_weighted_voting`, `stacking` (validation-only `LogisticRegression` meta-learner in log-probability space), and `hybrid_anomaly_override` (which delegates supervised attribution to `best_single` by default unless multi-model fusion outperforms it). Multi-model probability blending does **not** automatically improve over standalone `XGBoost` on tabular flows and is evaluated strictly on held-out test Macro-F1.
-- **Unsupervised Anomaly Signal:** The Autoencoder anomaly score (`MSE > threshold`) remains an independent orthogonal signal rather than being diluted into supervised class probabilities; if a flow is classified as `BENIGN` (or low-confidence) yet breaches the calibrated MSE threshold, the hybrid engine surfaces a `Zero-Day Anomaly (Novel)` flag.
+- **Supplementary Unsupervised Anomaly Signal:** The Autoencoder reconstruction error (`MSE > threshold`) is kept orthogonal to supervised class probabilities and benchmarked under identical benign-only training and percentile calibration alongside classical baselines (**Isolation Forest**, **One-Class SVM**, and **Local Outlier Factor**). Because benign-only anomaly detectors exhibit lower precision/recall than supervised `XGBoost` on stealthy attack flows, the Autoencoder serves strictly as a **supplementary anomaly signal** (`Zero-Day Anomaly (Novel)` flag when breaching calibrated thresholds) rather than a standalone replacement.
 - **Canonical Response Layer:** Shared across CLI, notebooks, and dashboard via [`src/response/response_engine.py`](src/response/response_engine.py).
 
 ---
@@ -214,7 +214,7 @@ IDS_Final/
 
 - **Academic Dry-Run Firewall Scope:** Active response executes strictly in dry-run simulation mode (`iptables` rules are logged, never applied to the host kernel).
 - **Offline Batch Telemetry:** Live packet capture (`libpcap`/`eBPF`) and streaming CICFlowMeter extraction are outside project scope.
-- **Unseen-Attack Overlap:** The unsupervised Autoencoder relies on reconstruction MSE divergence; stealthy attacks whose flow statistics closely resemble normal HTTP traffic (e.g., the 26 held-out `Web Attack` flows) exhibited `0.0000` recall at the 95th-percentile threshold (`0.5440` ROC-AUC) when isolated, whereas global anomaly detection across all attack classes achieved `0.8393` ROC-AUC (`0.5132` recall at `0.0521` FPR).
+- **Supplementary Role of Unsupervised Anomaly Detection:** The Autoencoder (and classical benign-only baselines: Isolation Forest, One-Class SVM, LOF) relies purely on deviation from normal traffic patterns; stealthy application-layer attacks whose flow statistics resemble benign HTTP requests (`Web Attack`) exhibit low recall without supervised signatures. The Autoencoder is therefore positioned strictly as a supplementary zero-day signal alongside supervised `XGBoost` attribution (`reports/model_comparison_report.md` reports exact per-detector scores across identical percentile thresholds).
 
 ---
 

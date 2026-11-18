@@ -4,15 +4,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 
-from src.config import AppConfig, EnsembleConfig, ModelConfig, XGBoostConfig, XGBoostOptunaConfig
+from src.config import (
+    AnomalyBaselinesConfig,
+    AppConfig,
+    EnsembleConfig,
+    ModelConfig,
+    XGBoostConfig,
+    XGBoostOptunaConfig,
+)
 from src.data.loader import generate_synthetic_cicids2017
 from src.data.preprocessing import run_preprocessing_pipeline
-from src.detection.anomaly_detection import AnomalyDetector
+from src.detection.anomaly_detection import AnomalyDetector, fit_classical_anomaly_baselines
 from src.detection.inference import UnifiedDetectionEngine
-from src.evaluation.metrics import bootstrap_macro_f1_ci, evaluate_supervised_model
+from src.evaluation.metrics import (
+    bootstrap_macro_f1_ci,
+    evaluate_anomaly_detector,
+    evaluate_supervised_model,
+)
 from src.evaluation.protocols import (
     evaluate_by_day_protocol,
     evaluate_feature_ablation,
@@ -421,3 +433,100 @@ def test_optuna_cv_std_gating_and_stacking_meta_learner() -> None:
     assert dec_ov.predicted_labels[0] == "Zero-Day Anomaly (Novel)"
     assert dec_ov.predicted_labels[1] == "DDoS"
     assert dec_ov.predicted_labels[2] == "PortScan"
+
+
+def test_classical_anomaly_baselines_and_unified_evaluation(tmp_app_config: AppConfig) -> None:
+    """Isolation Forest, One-Class SVM, and LOF fit on benign-only data and match AE protocol."""
+    rng = np.random.default_rng(101)
+    X_benign_tr = rng.normal(loc=0.0, scale=1.0, size=(300, 10)).astype(np.float32)
+    X_benign_va = rng.normal(loc=0.0, scale=1.0, size=(120, 10)).astype(np.float32)
+
+    X_test = np.vstack(
+        [
+            rng.normal(loc=0.0, scale=1.0, size=(100, 10)),
+            rng.normal(loc=4.5, scale=1.0, size=(40, 10)),
+            rng.normal(loc=0.4, scale=1.1, size=(20, 10)),
+        ]
+    ).astype(np.float32)
+    y_test = np.array([0] * 100 + [1] * 40 + [2] * 20, dtype=np.int64)
+    cls_names = ["BENIGN", "DoS Hulk", "Web Attack"]
+
+    cfg = AnomalyBaselinesConfig(
+        isolation_forest_n_estimators=50,
+        isolation_forest_max_samples=128,
+        ocsvm_max_train_samples=300,
+        lof_max_train_samples=300,
+    )
+    baselines = fit_classical_anomaly_baselines(
+        X_benign_train=X_benign_tr,
+        X_benign_val=X_benign_va,
+        cfg=cfg,
+        percentile=95.0,
+        seed=42,
+    )
+    assert set(baselines.keys()) == {"Isolation Forest", "One-Class SVM", "LOF"}
+
+    models_dir = tmp_app_config.paths.resolve("models_dir")
+    joblib.dump(baselines, models_dir / cfg.baselines_file)
+    loaded = ModelRegistry(models_dir=models_dir).load_all(load_keras=False)
+    assert loaded.anomaly_baselines is not None
+    assert set(loaded.anomaly_baselines.keys()) == {"Isolation Forest", "One-Class SVM", "LOF"}
+
+    anom_evals = {}
+    det_rows = []
+    for b_name, b_obj in loaded.anomaly_baselines.items():
+        res_b = b_obj.predict_result(X_test)
+        assert len(res_b.scores) == len(X_test)
+        assert float(np.mean(res_b.scores[y_test == 1])) > float(np.mean(res_b.scores[y_test == 0]))
+        ev = evaluate_anomaly_detector(
+            model_name=b_name,
+            y_test_multiclass=y_test,
+            anomaly_scores_test=res_b.scores,
+            benign_val_scores=b_obj.score(X_benign_va),
+            threshold=b_obj.threshold,
+            class_names=cls_names,
+            benign_index=0,
+            percentiles=[90.0, 95.0, 97.0, 99.0],
+            bootstrap_n=100,
+            seed=42,
+        )
+        assert len(ev["percentile_sweep"]) == 4
+        assert "Web Attack" in ev["per_class_anomaly_detection_rate"]
+        assert ev["roc_auc"] > 0.75
+        anom_evals[b_name] = ev
+        det_rows.append(
+            {
+                "Detector": b_name,
+                "Accuracy": ev["accuracy"],
+                "Precision": ev["precision"],
+                "Recall": ev["recall"],
+                "F1": ev["f1"],
+                "ROC_AUC": ev["roc_auc"],
+                "PR_AUC": ev["pr_auc"],
+                "FPR": ev["fpr"],
+                "Holdout_Class_Recall": ev["per_class_anomaly_detection_rate"]["Web Attack"]["flagged_rate"],
+                "Holdout_Class_ROC_AUC": ev["roc_auc"],
+            }
+        )
+
+    best_f1 = max(det_rows, key=lambda r: r["F1"])["Detector"]
+    best_auc = max(det_rows, key=lambda r: r["ROC_AUC"])["Detector"]
+    reports_dir = tmp_app_config.paths.resolve("reports_dir")
+    cmp_path, exp_path = write_academic_reports(
+        summary={
+            "dataset_source": {"is_synthetic": True},
+            "anomaly_evaluations": anom_evals,
+            "anomaly_detector_comparison": {
+                "best_by_f1": best_f1,
+                "best_by_roc_auc": best_auc,
+                "detectors": det_rows,
+                "verdict": f"Best F1={best_f1}, best ROC-AUC={best_auc}.",
+            },
+            "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+            "training_diagnostics": {},
+        },
+        comparison_df=pd.DataFrame([{"Model": r["Detector"], "F1_Macro": r["F1"]} for r in det_rows]),
+        reports_dir=reports_dir,
+    )
+    assert "Unsupervised Anomaly Detector Baselines" in cmp_path.read_text(encoding="utf-8")
+    assert "Unsupervised Anomaly Detection & Classical Baselines" in exp_path.read_text(encoding="utf-8")

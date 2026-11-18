@@ -159,11 +159,17 @@ def render_model_performance_page() -> None:
                 pd.DataFrame(cal_rep).T.reset_index(names="Model"), use_container_width=True, hide_index=True
             )
 
-    # Unseen-attack novelty protocol & Autoencoder percentile sweep
+    # Unseen-attack novelty protocol & Unsupervised anomaly baselines comparison
     ae_eval = eval_summary.get("autoencoder_evaluation", {})
+    anom_comp = eval_summary.get("anomaly_detector_comparison", {})
     unseen = eval_summary.get("unseen_attack_protocol", {})
-    if ae_eval or unseen.get("executed"):
-        st.markdown("#### 🧬 Zero-Day Autoencoder Threshold & Unseen-Attack Protocol")
+    if ae_eval or anom_comp or unseen.get("executed"):
+        st.markdown("#### 🧬 Zero-Day Autoencoder & Classical Anomaly Baselines")
+        if anom_comp.get("detectors"):
+            st.markdown("**Benign-Only Unsupervised Anomaly Detector Comparison**")
+            st.dataframe(pd.DataFrame(anom_comp["detectors"]), use_container_width=True, hide_index=True)
+            if anom_comp.get("verdict"):
+                st.caption(anom_comp["verdict"])
         ae1, ae2 = st.columns(2)
         with ae1:
             if ae_eval.get("percentile_sweep"):

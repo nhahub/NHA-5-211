@@ -121,6 +121,7 @@ def plot_roc_curves(
     ae_errors: np.ndarray,
     class_names: list[str],
     out_path: Path,
+    baseline_anomaly_scores: dict[str, np.ndarray] | None = None,
 ) -> Path:
     """Render one-vs-rest multi-class ROC curves and binary Autoencoder ROC curve."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -163,14 +164,18 @@ def plot_roc_curves(
         ax.set_ylabel("True Positive Rate")
         ax.legend(fontsize=7.5, loc="lower right")
 
-    # Autoencoder Binary ROC
+    # Anomaly Detectors Binary ROC (Autoencoder + Classical Baselines)
     ax_ae = axes[1, 1]
     if len(np.unique(y_test_binary)) > 1:
         fpr, tpr, _ = roc_curve(y_test_binary, ae_errors)
         ae_auc = auc(fpr, tpr)
-        ax_ae.plot(fpr, tpr, lw=2.3, color="crimson", label=f"Binary Anomaly AUC = {ae_auc:.3f}")
+        ax_ae.plot(fpr, tpr, lw=2.3, color="crimson", label=f"Autoencoder AUC = {ae_auc:.3f}")
+        for b_name, b_scores in (baseline_anomaly_scores or {}).items():
+            b_fpr, b_tpr, _ = roc_curve(y_test_binary, b_scores)
+            b_auc = auc(b_fpr, b_tpr)
+            ax_ae.plot(b_fpr, b_tpr, lw=1.7, ls="--", label=f"{b_name} AUC = {b_auc:.3f}")
     ax_ae.plot([0, 1], [0, 1], "k:", alpha=0.5)
-    ax_ae.set_title("Autoencoder — Binary Zero-Day ROC", fontweight="bold")
+    ax_ae.set_title("Unsupervised Anomaly — Binary ROC", fontweight="bold")
     ax_ae.set_xlabel("False Positive Rate")
     ax_ae.set_ylabel("True Positive Rate")
     ax_ae.legend(loc="lower right")
@@ -188,6 +193,7 @@ def plot_precision_recall_curves(
     ae_errors: np.ndarray,
     class_names: list[str],
     out_path: Path,
+    baseline_anomaly_scores: dict[str, np.ndarray] | None = None,
 ) -> Path:
     """Render Precision-Recall curves across supervised models and Autoencoder."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -216,8 +222,12 @@ def plot_precision_recall_curves(
     if len(np.unique(y_test_binary)) > 1:
         prec, rec, _ = precision_recall_curve(y_test_binary, ae_errors)
         ap = average_precision_score(y_test_binary, ae_errors)
-        ax_ae.plot(rec, prec, lw=2.3, color="#0ea5e9", label=f"Binary Anomaly AP = {ap:.3f}")
-    ax_ae.set_title("Autoencoder — Binary Precision-Recall", fontweight="bold")
+        ax_ae.plot(rec, prec, lw=2.3, color="#0ea5e9", label=f"Autoencoder AP = {ap:.3f}")
+        for b_name, b_scores in (baseline_anomaly_scores or {}).items():
+            b_prec, b_rec, _ = precision_recall_curve(y_test_binary, b_scores)
+            b_ap = average_precision_score(y_test_binary, b_scores)
+            ax_ae.plot(b_rec, b_prec, lw=1.7, ls="--", label=f"{b_name} AP = {b_ap:.3f}")
+    ax_ae.set_title("Unsupervised Anomaly — Binary Precision-Recall", fontweight="bold")
     ax_ae.set_xlabel("Recall")
     ax_ae.set_ylabel("Precision")
     ax_ae.legend(loc="lower left")
