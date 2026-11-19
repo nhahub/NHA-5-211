@@ -4,18 +4,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+from pathlib import Path
 import time
 from typing import Any
 
 import joblib
 import numpy as np
 
-from src.config import AppConfig, ModelConfig
+from src.config import AppConfig, AutoencoderConfig, ModelConfig
 from src.data.preprocessing import PreparedDataset
-from src.detection.anomaly_detection import fit_classical_anomaly_baselines
+from src.detection.anomaly_detection import (
+    AnomalyFusionDetector,
+    fit_and_select_anomaly_fusion,
+    fit_classical_anomaly_baselines,
+)
 from src.evaluation.protocols import run_xgboost_stratified_cv
 from src.models.autoencoder import (
     build_autoencoder,
+    build_deep_regularized_autoencoder,
+    build_vae,
     calibrate_threshold,
     compute_reconstruction_error,
     extract_benign_subset,
@@ -63,6 +70,7 @@ class TrainingOutputs:
     stacker: StackingMetaLearner | None = None
     best_supervised_model: str = "XGBoost"
     imbalance_strategies_by_model: dict[str, str] = field(default_factory=dict)
+    anomaly_fusion: AnomalyFusionDetector | None = None
 
 
 def _extract_history_dict(history_obj: Any) -> dict[str, list[float]]:
@@ -86,6 +94,48 @@ def _compute_overfitting_gap(hist: dict[str, list[float]]) -> dict[str, float]:
         gap["best_val_acc"] = float(hist["val_accuracy"][best_epoch])
         gap["acc_generalization_gap"] = float(hist["accuracy"][best_epoch] - hist["val_accuracy"][best_epoch])
     return gap
+
+
+def _fit_benign_reconstruction_variant(
+    name: str,
+    model: Any,
+    ckpt_path: Path,
+    X_benign_train: np.ndarray,
+    X_benign_val: np.ndarray,
+    epochs: int,
+    ae_cfg: AutoencoderConfig,
+) -> tuple[Any, dict[str, list[float]], float, float, dict[str, float]]:
+    """Train a benign-only reconstruction anomaly model, save it, and calibrate its threshold."""
+    cbs = build_keras_callbacks(
+        checkpoint_path=ckpt_path,
+        early_stopping_patience=ae_cfg.early_stopping_patience,
+        reduce_lr_patience=ae_cfg.reduce_lr_patience,
+        reduce_lr_factor=ae_cfg.reduce_lr_factor,
+        min_lr=ae_cfg.min_lr,
+    )
+    t0 = time.perf_counter()
+    hist_obj = model.fit(
+        X_benign_train,
+        X_benign_train,
+        validation_data=(X_benign_val, X_benign_val),
+        epochs=epochs,
+        batch_size=ae_cfg.batch_size,
+        callbacks=cbs,
+        verbose=2,
+    )
+    dur = float(time.perf_counter() - t0)
+    safe_save_keras_model(model, ckpt_path)
+    hist = _extract_history_dict(hist_obj)
+    val_errors = compute_reconstruction_error(model, X_benign_val)
+    thresh, stats = calibrate_threshold(val_errors, percentile=ae_cfg.threshold_percentile)
+    logger.info(
+        "%s finished in %.2fs | Calibrated %.1fth pct threshold=%.6f",
+        name,
+        dur,
+        ae_cfg.threshold_percentile,
+        thresh,
+    )
+    return model, hist, dur, thresh, stats
 
 
 def train_all_models(
@@ -344,6 +394,80 @@ def train_all_models(
             durations[b_name] = float(base_obj.fit_duration_sec)
         joblib.dump(anomaly_baselines, models_dir / model_cfg.anomaly_baselines.baselines_file)
 
+    anomaly_variants_meta: dict[str, Any] = {}
+    if model_cfg.autoencoder.try_variants and len(X_benign_train) >= 10 and len(X_benign_val) >= 5:
+        var_epochs = max(1, min(int(ae_epochs), int(model_cfg.autoencoder.variant_epochs_cap)))
+        deep_ae_raw = build_deep_regularized_autoencoder(num_features, cfg=model_cfg.autoencoder)
+        deep_ae, h_deep, d_deep, t_deep, st_deep = _fit_benign_reconstruction_variant(
+            "Autoencoder (Deep Reg)",
+            deep_ae_raw,
+            models_dir / model_cfg.autoencoder.deep_reg_checkpoint_name,
+            X_benign_train,
+            X_benign_val,
+            epochs=var_epochs,
+            ae_cfg=model_cfg.autoencoder,
+        )
+        trained_models["Autoencoder (Deep Reg)"] = deep_ae
+        histories["Autoencoder (Deep Reg)"] = h_deep
+        durations["Autoencoder (Deep Reg)"] = d_deep
+        overfit_stats["Autoencoder (Deep Reg)"] = _compute_overfitting_gap(h_deep)
+        anomaly_variants_meta["Autoencoder (Deep Reg)"] = {
+            "threshold": float(t_deep),
+            "stats": st_deep,
+            "epochs_cap": var_epochs,
+        }
+
+        vae_raw = build_vae(num_features, cfg=model_cfg.autoencoder)
+        vae_model, h_vae, d_vae, t_vae, st_vae = _fit_benign_reconstruction_variant(
+            "VAE",
+            vae_raw,
+            models_dir / model_cfg.autoencoder.vae_checkpoint_name,
+            X_benign_train,
+            X_benign_val,
+            epochs=var_epochs,
+            ae_cfg=model_cfg.autoencoder,
+        )
+        trained_models["VAE"] = vae_model
+        histories["VAE"] = h_vae
+        durations["VAE"] = d_vae
+        overfit_stats["VAE"] = _compute_overfitting_gap(h_vae)
+        anomaly_variants_meta["VAE"] = {
+            "threshold": float(t_vae),
+            "stats": st_vae,
+            "epochs_cap": var_epochs,
+        }
+
+    anomaly_fusion: AnomalyFusionDetector | None = None
+    anomaly_validation_selection: dict[str, Any] = {}
+    if model_cfg.autoencoder.fusion_enabled and len(dataset.X_val_scaled) > 0:
+        val_anom_scores: dict[str, np.ndarray] = {
+            "Autoencoder": compute_reconstruction_error(autoencoder, dataset.X_val_scaled)
+        }
+        for v_name in ("Autoencoder (Deep Reg)", "VAE"):
+            if v_name in trained_models:
+                val_anom_scores[v_name] = compute_reconstruction_error(
+                    trained_models[v_name], dataset.X_val_scaled
+                )
+        for b_name, base_obj in anomaly_baselines.items():
+            val_anom_scores[b_name] = base_obj.score(dataset.X_val_scaled)
+
+        anomaly_fusion = fit_and_select_anomaly_fusion(
+            val_scores_by_detector=val_anom_scores,
+            y_val=dataset.y_val,
+            benign_index=benign_idx,
+            percentile=model_cfg.autoencoder.threshold_percentile,
+            grid_step=model_cfg.autoencoder.fusion_grid_step,
+        )
+        joblib.dump(anomaly_fusion, models_dir / model_cfg.autoencoder.fusion_file)
+        anomaly_validation_selection = {
+            "ae_component_selected": anomaly_fusion.ae_component_name,
+            "fusion_weights": anomaly_fusion.weights,
+            "fusion_threshold": float(anomaly_fusion.threshold),
+            "best_single_validation_detector": anomaly_fusion.best_single_validation_detector,
+            "best_overall_validation_detector": anomaly_fusion.best_overall_validation_detector,
+            "selection_table": anomaly_fusion.validation_selection_summary,
+        }
+
     # 5. Train Baseline + Optuna-Tuned XGBoost
     xgb_cfg = model_cfg.xgboost.model_copy(deep=True)
     if optuna_trials_override is not None:
@@ -502,6 +626,8 @@ def train_all_models(
                     k: {"threshold": float(v.threshold), "train_samples": int(v.train_samples_used)}
                     for k, v in anomaly_baselines.items()
                 },
+                "anomaly_variants_meta": anomaly_variants_meta,
+                "anomaly_validation_selection": anomaly_validation_selection,
                 "hardware": {
                     "tf_device": hardware.tf_device,
                     "xgb_device": hardware.xgb_device,
@@ -528,4 +654,5 @@ def train_all_models(
         stacker=stacker,
         best_supervised_model=best_sup_model,
         imbalance_strategies_by_model=selected_strategies,
+        anomaly_fusion=anomaly_fusion,
     )

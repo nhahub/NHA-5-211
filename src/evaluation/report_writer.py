@@ -517,8 +517,31 @@ def write_academic_reports(
 
     if anom_comp.get("detectors"):
         sec_num += 1
-        comp_lines.append(f"## {sec_num}. Unsupervised Anomaly Detector Baselines (Benign-Only Training)\n")
+        comp_lines.append(
+            f"## {sec_num}. Unsupervised Anomaly Detector Baselines & Options (Benign-Only Training)\n"
+        )
+        comp_lines.append(
+            "> **Role Clarification:** Unsupervised detectors (including Autoencoder variants, classical "
+            "baselines, and leave-attack-out score-level fusion) remain **supplementary zero-day signals**, "
+            "NOT replacements for supervised multi-class XGBoost.\n\n"
+        )
         comp_lines.append(_df_to_markdown(pd.DataFrame(anom_comp["detectors"])) + "\n\n")
+        val_sel = anom_comp.get("val_selection") or diag.get("anomaly_validation_selection", {})
+        if val_sel:
+            weights_str = ", ".join(
+                f"`{k}`={float(w):.2f}" for k, w in (val_sel.get("fusion_weights") or {}).items()
+            )
+            comp_lines.append(
+                f"- **Non-Test Validation Selection (Benign Percentile + Leave-Attack-Out Validation):** "
+                f"Best single=`{val_sel.get('best_single_validation_detector', 'Autoencoder')}`, "
+                f"Selected overall=`{val_sel.get('best_overall_validation_detector', '')}`, "
+                f"Fusion weights=[{weights_str}], Fusion threshold=`{float(val_sel.get('fusion_threshold', 0.0)):.4f}`.\n"
+            )
+            if val_sel.get("selection_table"):
+                comp_lines.append(
+                    "\n### Anomaly Validation Selection Summary (Non-Test Leave-Attack-Out)\n\n"
+                )
+                comp_lines.append(_df_to_markdown(pd.DataFrame(val_sel["selection_table"])) + "\n\n")
         if anom_comp.get("verdict"):
             comp_lines.append(f"- **Verdict:** {anom_comp['verdict']}\n\n")
         sweep_rows = [

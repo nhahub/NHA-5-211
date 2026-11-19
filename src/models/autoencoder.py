@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import keras
-from keras import layers
+from keras import layers, regularizers
 import numpy as np
 
 from src.config import AutoencoderConfig
@@ -52,6 +52,103 @@ def build_autoencoder(
         loss="mse",
     )
     return autoencoder, encoder, decoder
+
+
+@keras.saving.register_keras_serializable(package="smart_ids")
+class VAESampling(layers.Layer):
+    """Reparameterization sampling layer adding KL-divergence regularization loss during training."""
+
+    def __init__(self, kl_weight: float = 0.01, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.kl_weight = float(kl_weight)
+
+    def call(self, inputs: list[Any], training: bool | None = None) -> Any:
+        z_mean, z_log_var = inputs
+        z_log_var_c = keras.ops.clip(z_log_var, -10.0, 10.0)
+        kl = -0.5 * keras.ops.mean(1.0 + z_log_var_c - keras.ops.square(z_mean) - keras.ops.exp(z_log_var_c))
+        self.add_loss(self.kl_weight * kl)
+        if training:
+            eps = keras.random.normal(shape=keras.ops.shape(z_mean))
+            return z_mean + keras.ops.exp(0.5 * z_log_var_c) * eps
+        return z_mean
+
+    def get_config(self) -> dict[str, Any]:
+        cfg = super().get_config()
+        cfg["kl_weight"] = self.kl_weight
+        return cfg
+
+
+def build_deep_regularized_autoencoder(
+    input_dim: int,
+    cfg: AutoencoderConfig | None = None,
+) -> keras.Model:
+    """Build a deeper benign-only denoising + L2/Dropout regularized Autoencoder."""
+    conf = cfg or AutoencoderConfig()
+    reg = regularizers.l2(conf.deep_reg_l2)
+
+    inputs = keras.Input(shape=(input_dim,), name="deep_ae_input")
+    x = layers.GaussianNoise(conf.deep_reg_noise_std, name="deep_ae_noise")(inputs)
+    for idx, units in enumerate(conf.deep_reg_encoder_units, start=1):
+        x = layers.Dense(units, kernel_regularizer=reg, use_bias=False, name=f"deep_enc_dense_{idx}")(x)
+        x = layers.BatchNormalization(name=f"deep_enc_bn_{idx}")(x)
+        x = layers.LeakyReLU(negative_slope=0.1, name=f"deep_enc_lrelu_{idx}")(x)
+        if conf.deep_reg_dropout > 0.0:
+            x = layers.Dropout(conf.deep_reg_dropout, name=f"deep_enc_drop_{idx}")(x)
+
+    x = layers.Dense(
+        conf.deep_reg_latent_dim,
+        kernel_regularizer=reg,
+        activation="linear",
+        name="deep_latent",
+    )(x)
+    x = layers.LeakyReLU(negative_slope=0.1, name="deep_latent_act")(x)
+
+    for idx, units in enumerate(reversed(conf.deep_reg_encoder_units), start=1):
+        x = layers.Dense(units, kernel_regularizer=reg, use_bias=False, name=f"deep_dec_dense_{idx}")(x)
+        x = layers.BatchNormalization(name=f"deep_dec_bn_{idx}")(x)
+        x = layers.LeakyReLU(negative_slope=0.1, name=f"deep_dec_lrelu_{idx}")(x)
+
+    reconstruction = layers.Dense(input_dim, activation="linear", name="deep_reconstruction")(x)
+    model = keras.Model(inputs=inputs, outputs=reconstruction, name="smart_ids_deep_reg_ae")
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=conf.learning_rate, clipnorm=1.0),
+        loss="mse",
+    )
+    return model
+
+
+def build_vae(
+    input_dim: int,
+    cfg: AutoencoderConfig | None = None,
+) -> keras.Model:
+    """Build a benign-only Variational Autoencoder (VAE) using MSE + KL regularization."""
+    conf = cfg or AutoencoderConfig()
+    reg = regularizers.l2(conf.vae_l2)
+
+    inputs = keras.Input(shape=(input_dim,), name="vae_input")
+    x = inputs
+    for idx, units in enumerate(conf.vae_encoder_units, start=1):
+        x = layers.Dense(units, kernel_regularizer=reg, name=f"vae_enc_dense_{idx}")(x)
+        x = layers.BatchNormalization(name=f"vae_enc_bn_{idx}")(x)
+        x = layers.LeakyReLU(negative_slope=0.1, name=f"vae_enc_lrelu_{idx}")(x)
+
+    z_mean = layers.Dense(conf.vae_latent_dim, name="z_mean")(x)
+    z_log_var = layers.Dense(conf.vae_latent_dim, name="z_log_var")(x)
+    z = VAESampling(kl_weight=conf.vae_kl_weight, name="vae_sampling")([z_mean, z_log_var])
+
+    y = z
+    for idx, units in enumerate(reversed(conf.vae_encoder_units), start=1):
+        y = layers.Dense(units, kernel_regularizer=reg, name=f"vae_dec_dense_{idx}")(y)
+        y = layers.BatchNormalization(name=f"vae_dec_bn_{idx}")(y)
+        y = layers.LeakyReLU(negative_slope=0.1, name=f"vae_dec_lrelu_{idx}")(y)
+
+    reconstruction = layers.Dense(input_dim, activation="linear", name="vae_reconstruction")(y)
+    vae = keras.Model(inputs=inputs, outputs=reconstruction, name="smart_ids_vae")
+    vae.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=conf.learning_rate, clipnorm=1.0),
+        loss="mse",
+    )
+    return vae
 
 
 def find_benign_class_index(label_encoder: Any) -> tuple[int, str]:

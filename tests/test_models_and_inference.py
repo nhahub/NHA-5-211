@@ -20,7 +20,11 @@ from src.config import (
 )
 from src.data.loader import generate_synthetic_cicids2017
 from src.data.preprocessing import drop_features_from_prepared_dataset, run_preprocessing_pipeline
-from src.detection.anomaly_detection import AnomalyDetector, fit_classical_anomaly_baselines
+from src.detection.anomaly_detection import (
+    AnomalyDetector,
+    fit_and_select_anomaly_fusion,
+    fit_classical_anomaly_baselines,
+)
 from src.detection.inference import UnifiedDetectionEngine
 from src.evaluation.metrics import (
     bootstrap_macro_f1_ci,
@@ -41,6 +45,8 @@ from src.evaluation.protocols import (
 from src.evaluation.report_writer import format_ensemble_empirical_conclusion, write_academic_reports
 from src.models.autoencoder import (
     build_autoencoder,
+    build_deep_regularized_autoencoder,
+    build_vae,
     calibrate_threshold,
     compute_reconstruction_error,
     extract_benign_subset,
@@ -1230,3 +1236,153 @@ def test_time_block_failure_analysis_ks_drift_and_mitigation_tradeoffs(tmp_app_c
     assert "Confusion-Matrix Breakdown for Failing Classes" in md
     assert "Top Shifted Features Train-vs-Test per Failing Class (KS Statistic)" in md
     assert "Time-Block Recall-vs-FPR Mitigation Experiment" in md
+
+
+def test_deep_ae_vae_and_leave_attack_out_score_fusion(tmp_app_config: AppConfig) -> None:
+    """Deep regularized AE, VAE, and non-test leave-attack-out score fusion evaluate and reload cleanly."""
+    from src.config import AutoencoderConfig
+    from src.training.callbacks import safe_save_keras_model
+
+    rng = np.random.default_rng(314)
+    X_ben_tr = rng.normal(0.0, 1.0, size=(240, 8)).astype(np.float32)
+    X_val = np.vstack(
+        [
+            rng.normal(0.0, 1.0, size=(100, 8)),
+            rng.normal(3.8, 1.0, size=(25, 8)),
+            rng.normal(-3.5, 1.0, size=(20, 8)),
+        ]
+    ).astype(np.float32)
+    y_val = np.array([0] * 100 + [1] * 25 + [2] * 20, dtype=np.int64)
+    X_test = np.vstack(
+        [
+            rng.normal(0.0, 1.0, size=(90, 8)),
+            rng.normal(4.0, 1.0, size=(30, 8)),
+            rng.normal(-3.8, 1.0, size=(20, 8)),
+        ]
+    ).astype(np.float32)
+    y_test = np.array([0] * 90 + [1] * 30 + [2] * 20, dtype=np.int64)
+    cls_names = ["BENIGN", "DDoS", "Web Attack"]
+
+    ae_cfg = AutoencoderConfig(
+        encoder_units=[32, 16],
+        latent_dim=8,
+        decoder_units=[16, 32],
+        deep_reg_encoder_units=[48, 24],
+        deep_reg_latent_dim=10,
+        vae_encoder_units=[32, 16],
+        vae_latent_dim=6,
+        epochs=2,
+        variant_epochs_cap=2,
+        batch_size=64,
+    )
+    models_dir = tmp_app_config.paths.resolve("models_dir")
+
+    ae_base, _, _ = build_autoencoder(8, cfg=ae_cfg)
+    ae_base.fit(X_ben_tr, X_ben_tr, epochs=2, batch_size=64, verbose=0)
+    safe_save_keras_model(ae_base, models_dir / ae_cfg.checkpoint_name)
+
+    deep_ae = build_deep_regularized_autoencoder(8, cfg=ae_cfg)
+    deep_ae.fit(X_ben_tr, X_ben_tr, epochs=2, batch_size=64, verbose=0)
+    safe_save_keras_model(deep_ae, models_dir / ae_cfg.deep_reg_checkpoint_name)
+
+    vae = build_vae(8, cfg=ae_cfg)
+    vae.fit(X_ben_tr, X_ben_tr, epochs=2, batch_size=64, verbose=0)
+    safe_save_keras_model(vae, models_dir / ae_cfg.vae_checkpoint_name)
+
+    base_cls = fit_classical_anomaly_baselines(
+        X_ben_tr,
+        X_val[y_val == 0],
+        AnomalyBaselinesConfig(
+            isolation_forest_n_estimators=25,
+            isolation_forest_max_samples=128,
+            ocsvm_max_train_samples=240,
+            lof_max_train_samples=240,
+        ),
+        percentile=95.0,
+        seed=42,
+    )
+    joblib.dump(base_cls, models_dir / "anomaly_baselines.pkl")
+
+    val_scores = {
+        "Autoencoder": compute_reconstruction_error(ae_base, X_val),
+        "Autoencoder (Deep Reg)": compute_reconstruction_error(deep_ae, X_val),
+        "VAE": compute_reconstruction_error(vae, X_val),
+        "One-Class SVM": base_cls["One-Class SVM"].score(X_val),
+        "Isolation Forest": base_cls["Isolation Forest"].score(X_val),
+        "LOF": base_cls["LOF"].score(X_val),
+    }
+    fusion = fit_and_select_anomaly_fusion(
+        val_scores_by_detector=val_scores,
+        y_val=y_val,
+        benign_index=0,
+        percentile=95.0,
+        grid_step=0.25,
+    )
+    assert abs(sum(fusion.weights.values()) - 1.0) < 1e-6
+    assert len(fusion.validation_selection_summary) == 7
+    joblib.dump(fusion, models_dir / ae_cfg.fusion_file)
+
+    reloaded = ModelRegistry(models_dir=models_dir).load_all(load_keras=True)
+    assert "Autoencoder (Deep Reg)" in reloaded.models
+    assert "VAE" in reloaded.models
+    assert reloaded.anomaly_fusion is not None
+
+    test_scores = {
+        "Autoencoder": compute_reconstruction_error(reloaded.models["Autoencoder"], X_test),
+        "Autoencoder (Deep Reg)": compute_reconstruction_error(
+            reloaded.models["Autoencoder (Deep Reg)"], X_test
+        ),
+        "VAE": compute_reconstruction_error(reloaded.models["VAE"], X_test),
+        "One-Class SVM": base_cls["One-Class SVM"].score(X_test),
+        "Isolation Forest": base_cls["Isolation Forest"].score(X_test),
+        "LOF": base_cls["LOF"].score(X_test),
+    }
+    fused_val = reloaded.anomaly_fusion.score_from_components(
+        {k: v[y_val == 0] for k, v in val_scores.items()}
+    )
+    fused_test = reloaded.anomaly_fusion.score_from_components(test_scores)
+    fused_ev = evaluate_anomaly_detector(
+        "Score-Level Fusion (AE+OCSVM+IF)",
+        y_test,
+        fused_test,
+        fused_val,
+        float(reloaded.anomaly_fusion.threshold),
+        cls_names,
+        benign_index=0,
+        percentiles=[90.0, 95.0],
+        bootstrap_n=50,
+        seed=42,
+    )
+    assert fused_ev["roc_auc"] > 0.80
+    assert fused_ev["f1_ci95"]["ci95_low"] <= fused_ev["f1"] <= fused_ev["f1_ci95"]["ci95_high"]
+
+    reports_dir = tmp_app_config.paths.resolve("reports_dir")
+    cmp_df = pd.DataFrame([{"Model": "XGBoost", "Accuracy": 0.99, "F1_Weighted": 0.99, "F1_Macro": 0.95}])
+    summary = {
+        "dataset_source": {"is_synthetic": False},
+        "split_strategy": "random",
+        "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+        "training_diagnostics": {
+            "anomaly_validation_selection": {
+                "selection_table": fusion.validation_selection_summary,
+                "fusion_weights": fusion.weights,
+                "fusion_threshold": fusion.threshold,
+            }
+        },
+        "anomaly_detector_comparison": {
+            "detectors": [
+                {
+                    "Detector": "Score-Level Fusion (AE+OCSVM+IF)",
+                    "F1": fused_ev["f1"],
+                    "F1_CI95_Low": fused_ev["f1_ci95"]["ci95_low"],
+                    "F1_CI95_High": fused_ev["f1_ci95"]["ci95_high"],
+                    "ROC_AUC": fused_ev["roc_auc"],
+                }
+            ],
+            "verdict": "Supplementary zero-day signals only.",
+        },
+    }
+    cmp_path, _ = write_academic_reports(summary, cmp_df, reports_dir)
+    md = cmp_path.read_text(encoding="utf-8")
+    assert "supplementary zero-day signals" in md
+    assert "Anomaly Validation Selection Summary (Non-Test Leave-Attack-Out)" in md

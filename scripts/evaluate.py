@@ -321,10 +321,12 @@ def run_evaluation_suite(
     holdout_idx = class_names.index(holdout_name) if holdout_name in class_names else None
 
     X_benign_val, _, _ = extract_benign_subset(X_val_scaled, y_val, artifacts.label_encoder)
+    anom_val_benign_scores: dict[str, np.ndarray] = {}
     if "Autoencoder" in artifacts.models:
         ae_model = artifacts.models["Autoencoder"]
         benign_val_errors = compute_reconstruction_error(ae_model, X_benign_val)
         ae_test_errors = compute_reconstruction_error(ae_model, X_test_scaled)
+        anom_val_benign_scores["Autoencoder"] = benign_val_errors
         ae_eval = evaluate_autoencoder(
             y_test_multiclass=y_test,
             recon_errors_test=ae_test_errors,
@@ -368,6 +370,52 @@ def run_evaluation_suite(
                 seed=eval_seed,
             )
 
+    # Evaluate benign-only neural variants (Deep Regularized Autoencoder & VAE) if present
+    anom_var_meta = train_diag.get("anomaly_variants_meta", {})
+    for var_name, ckpt_file in (
+        ("Autoencoder (Deep Reg)", model_c.autoencoder.deep_reg_checkpoint_name),
+        ("VAE", model_c.autoencoder.vae_checkpoint_name),
+    ):
+        if var_name not in artifacts.models:
+            continue
+        v_model = artifacts.models[var_name]
+        v_val_err = compute_reconstruction_error(v_model, X_benign_val)
+        v_test_err = compute_reconstruction_error(v_model, X_test_scaled)
+        v_thresh = float(
+            anom_var_meta.get(var_name, {}).get(
+                "threshold",
+                np.percentile(v_val_err, model_c.autoencoder.threshold_percentile)
+                if len(v_val_err) > 0
+                else artifacts.anomaly_threshold,
+            )
+        )
+        anom_val_benign_scores[var_name] = v_val_err
+        baseline_anomaly_scores[var_name] = v_test_err
+        anomaly_evals[var_name] = evaluate_anomaly_detector(
+            model_name=var_name,
+            y_test_multiclass=y_test,
+            anomaly_scores_test=v_test_err,
+            benign_val_scores=v_val_err,
+            threshold=v_thresh,
+            class_names=class_names,
+            benign_index=benign_idx,
+            percentiles=app_c.evaluation.autoencoder_percentiles,
+            bootstrap_n=boot_n,
+            seed=eval_seed,
+        )
+        anomaly_evals[var_name]["fit_duration_sec"] = float(
+            train_diag.get("training_durations_sec", {}).get(var_name, 0.0)
+        )
+        latency_table[var_name] = benchmark_model_inference(
+            v_model,
+            X_test_scaled,
+            "ae",
+            model_path=models_dir / ckpt_file,
+            n_warmup=app_c.evaluation.latency_warmup_calls,
+            n_runs=app_c.evaluation.latency_timed_runs,
+            batch_size=app_c.evaluation.batch_benchmark_size,
+        )
+
     # Evaluate Classical Benign-Only Anomaly Baselines (Isolation Forest, One-Class SVM, LOF)
     anomaly_baselines = artifacts.anomaly_baselines or {}
     if not anomaly_baselines and model_c.anomaly_baselines.enabled and len(X_train_scaled) > 0:
@@ -384,6 +432,7 @@ def run_evaluation_suite(
     for b_name, base_obj in anomaly_baselines.items():
         val_scores = base_obj.score(X_benign_val)
         test_scores = base_obj.score(X_test_scaled)
+        anom_val_benign_scores[b_name] = val_scores
         baseline_anomaly_scores[b_name] = test_scores
         anomaly_evals[b_name] = evaluate_anomaly_detector(
             model_name=b_name,
@@ -413,7 +462,35 @@ def run_evaluation_suite(
         lat_b["model_size_mb"] = baseline_model_sizes[b_name]
         latency_table[b_name] = lat_b
 
+    # Evaluate Score-Level Anomaly Fusion (weights chosen strictly on non-test benign val + LOO attacks)
+    fusion_obj = artifacts.anomaly_fusion
+    all_test_scores = {"Autoencoder": ae_test_errors, **baseline_anomaly_scores}
+    if fusion_obj is not None:
+        needed_comps = [k for k, w in fusion_obj.weights.items() if w > 0]
+        if needed_comps and all(k in all_test_scores and k in anom_val_benign_scores for k in needed_comps):
+            fusion_name = getattr(fusion_obj, "name", "Score-Level Fusion (AE+OCSVM+IF)")
+            f_val_scores = fusion_obj.score_from_components(anom_val_benign_scores)
+            f_test_scores = fusion_obj.score_from_components(all_test_scores)
+            baseline_anomaly_scores[fusion_name] = f_test_scores
+            anomaly_evals[fusion_name] = evaluate_anomaly_detector(
+                model_name=fusion_name,
+                y_test_multiclass=y_test,
+                anomaly_scores_test=f_test_scores,
+                benign_val_scores=f_val_scores,
+                threshold=float(fusion_obj.threshold),
+                class_names=class_names,
+                benign_index=benign_idx,
+                percentiles=app_c.evaluation.autoencoder_percentiles,
+                bootstrap_n=boot_n,
+                seed=eval_seed,
+            )
+
     # Summarize comparison across all benign-only anomaly detectors
+    anom_val_sel = train_diag.get("anomaly_validation_selection", {})
+    val_winner_name = str(
+        anom_val_sel.get("best_overall_validation_detector")
+        or (getattr(fusion_obj, "best_overall_validation_detector", "") if fusion_obj else "")
+    )
     anomaly_detector_comparison: dict[str, Any] = {}
     if anomaly_evals:
         comp_rows = []
@@ -433,6 +510,7 @@ def run_evaluation_suite(
                     holdout_auc = float(
                         _binary_metrics(y_nov, scores_for_auc[eval_m], det_ev["threshold"])["roc_auc"]
                     )
+            det_ci = det_ev.get("f1_ci95", {})
             comp_rows.append(
                 {
                     "Detector": det_name,
@@ -440,11 +518,14 @@ def run_evaluation_suite(
                     "Precision": float(det_ev["precision"]),
                     "Recall": float(det_ev["recall"]),
                     "F1": float(det_ev["f1"]),
+                    "F1_CI95_Low": round(float(det_ci.get("ci95_low", det_ev["f1"])), 4),
+                    "F1_CI95_High": round(float(det_ci.get("ci95_high", det_ev["f1"])), 4),
                     "ROC_AUC": float(det_ev["roc_auc"]),
                     "PR_AUC": float(det_ev["pr_auc"]),
                     "FPR": float(det_ev["fpr"]),
                     "Holdout_Class_Recall": holdout_rec,
                     "Holdout_Class_ROC_AUC": holdout_auc,
+                    "Val_Selected": "YES" if det_name == val_winner_name else "",
                 }
             )
         best_f1_det = max(comp_rows, key=lambda r: r["F1"])
@@ -452,23 +533,29 @@ def run_evaluation_suite(
         ae_row = next((r for r in comp_rows if r["Detector"] == "Autoencoder"), None)
         verdict = (
             f"Best binary F1 at {model_c.autoencoder.threshold_percentile:.0f}th-pct threshold: "
-            f"{best_f1_det['Detector']} (F1={best_f1_det['F1']:.4f}, Recall={best_f1_det['Recall']:.4f}, FPR={best_f1_det['FPR']:.4f}); "
-            f"best overall ROC-AUC ranking: {best_auc_det['Detector']} (ROC-AUC={best_auc_det['ROC_AUC']:.4f})."
+            f"{best_f1_det['Detector']} (F1={best_f1_det['F1']:.4f} "
+            f"[{best_f1_det['F1_CI95_Low']:.4f}, {best_f1_det['F1_CI95_High']:.4f}], "
+            f"Recall={best_f1_det['Recall']:.4f}, FPR={best_f1_det['FPR']:.4f}); "
+            f"best overall ROC-AUC ranking: {best_auc_det['Detector']} (ROC-AUC={best_auc_det['ROC_AUC']:.4f}); "
+            f"validation-selected option (leave-attack-out non-test): '{val_winner_name or best_f1_det['Detector']}'."
         )
         if ae_row and best_f1_det["Detector"] != "Autoencoder":
             verdict += (
-                f" Autoencoder achieved F1={ae_row['F1']:.4f} / ROC-AUC={ae_row['ROC_AUC']:.4f}, confirming it works "
-                "best as a supplementary anomaly signal alongside supervised XGBoost rather than as a standalone detector."
+                f" Baseline Autoencoder achieved F1={ae_row['F1']:.4f} / ROC-AUC={ae_row['ROC_AUC']:.4f}. "
+                "All benign-only unsupervised options remain strictly supplementary zero-day signals and do NOT "
+                "replace supervised multi-class XGBoost."
             )
         else:
             verdict += (
-                " Even the best unsupervised detector still trails supervised attribution strongly and should serve "
-                "strictly as a supplementary novelty signal."
+                " Even the best unsupervised option/fusion still trails supervised attribution by a wide margin "
+                "and remains strictly a supplementary zero-day signal, not a replacement for XGBoost."
             )
         anomaly_detector_comparison = {
             "holdout_class": holdout_name,
             "best_by_f1": best_f1_det["Detector"],
             "best_by_roc_auc": best_auc_det["Detector"],
+            "validation_winner": val_winner_name,
+            "val_selection": anom_val_sel,
             "detectors": comp_rows,
             "verdict": verdict,
         }
@@ -523,10 +610,8 @@ def run_evaluation_suite(
             }
         )
 
-    for det_name in ("Autoencoder", "Isolation Forest", "One-Class SVM", "LOF"):
-        det_ev = anomaly_evals.get(det_name)
-        if not det_ev:
-            continue
+    for det_name in anomaly_evals:
+        det_ev = anomaly_evals[det_name]
         lat_det = latency_table.get(det_name, {})
         det_ci = det_ev.get("f1_ci95", {})
         fit_dur = durations.get(det_name, det_ev.get("fit_duration_sec", 0.0))

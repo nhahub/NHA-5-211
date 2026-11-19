@@ -45,6 +45,7 @@ class LoadedArtifacts:
     calibrators: dict[str, Any] | None = None
     stacker: Any | None = None
     anomaly_baselines: dict[str, Any] | None = None
+    anomaly_fusion: Any | None = None
     model_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
     model_imbalance_strategies: dict[str, str] = field(default_factory=dict)
     lfs_pointers: list[str] = field(default_factory=list)
@@ -135,13 +136,21 @@ class ModelRegistry:
             "CNN": self.models_dir / "best_cnn.keras",
             "Autoencoder": self.models_dir / "best_autoencoder.keras",
         }
+        optional_keras_targets = {
+            "Autoencoder (Deep Reg)": self.models_dir / "best_autoencoder_deep.keras",
+            "VAE": self.models_dir / "best_vae.keras",
+        }
         if load_keras:
             try:
                 import tensorflow as tf
 
-                for name, path in keras_targets.items():
+                import src.models.autoencoder  # noqa: F401 - register custom VAESampling layer
+
+                for name, path in {**keras_targets, **optional_keras_targets}.items():
+                    is_optional = name in optional_keras_targets
                     if not path.exists():
-                        missing_artifacts.append(path.name)
+                        if not is_optional:
+                            missing_artifacts.append(path.name)
                     elif is_git_lfs_pointer(path):
                         lfs_pointers.append(path.name)
                         logger.warning(
@@ -172,10 +181,11 @@ class ModelRegistry:
             except Exception as exc:
                 logger.warning("Failed loading XGBoost model: %s", exc)
 
-        def _maybe_joblib(fname: str) -> Any | None:
+        def _maybe_joblib(fname: str, optional: bool = False) -> Any | None:
             p = self.models_dir / fname
             if not p.exists():
-                missing_artifacts.append(fname)
+                if not optional:
+                    missing_artifacts.append(fname)
                 return None
             if is_git_lfs_pointer(p):
                 lfs_pointers.append(fname)
@@ -194,6 +204,7 @@ class ModelRegistry:
         calibrators = _maybe_joblib("calibrators.pkl")
         stacker = _maybe_joblib("stacking_meta.pkl")
         anomaly_baselines = _maybe_joblib("anomaly_baselines.pkl")
+        anomaly_fusion = _maybe_joblib("anomaly_fusion.pkl", optional=True)
 
         feat_path = self.models_dir / "feature_names.json"
         feature_names: list[str] = []
@@ -246,6 +257,7 @@ class ModelRegistry:
             calibrators=calibrators,
             stacker=stacker,
             anomaly_baselines=anomaly_baselines,
+            anomaly_fusion=anomaly_fusion,
             model_metadata=model_metadata,
             model_imbalance_strategies=model_imbalance_strategies,
             lfs_pointers=sorted(set(lfs_pointers)),

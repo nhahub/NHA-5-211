@@ -278,7 +278,7 @@ class CNNConfig(BaseModel):
 
 
 class AutoencoderConfig(BaseModel):
-    """Unsupervised Autoencoder hyperparameters."""
+    """Unsupervised Autoencoder and enhanced benign-only anomaly variant hyperparameters."""
 
     encoder_units: list[int] = Field(default_factory=lambda: [256, 128, 64])
     latent_dim: int = 32
@@ -293,6 +293,22 @@ class AutoencoderConfig(BaseModel):
     threshold_percentile: float = 95.0
     checkpoint_name: str = "best_autoencoder.keras"
     threshold_file: str = "anomaly_threshold.json"
+    try_variants: bool = True
+    variant_epochs_cap: int = Field(default=20, ge=1)
+    deep_reg_encoder_units: list[int] = Field(default_factory=lambda: [512, 256, 128, 64])
+    deep_reg_latent_dim: int = 24
+    deep_reg_l2: float = 1e-4
+    deep_reg_dropout: float = 0.2
+    deep_reg_noise_std: float = 0.05
+    deep_reg_checkpoint_name: str = "best_autoencoder_deep.keras"
+    vae_encoder_units: list[int] = Field(default_factory=lambda: [256, 128, 64])
+    vae_latent_dim: int = 16
+    vae_kl_weight: float = 0.01
+    vae_l2: float = 1e-4
+    vae_checkpoint_name: str = "best_vae.keras"
+    fusion_enabled: bool = True
+    fusion_file: str = "anomaly_fusion.pkl"
+    fusion_grid_step: float = Field(default=0.2, gt=0.0, le=0.5)
 
 
 class AnomalyBaselinesConfig(BaseModel):

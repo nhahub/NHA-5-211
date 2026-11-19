@@ -52,6 +52,22 @@ autoencoder:
   threshold_percentile: 95.0
   checkpoint_name: "best_autoencoder.keras"
   threshold_file: "anomaly_threshold.json"
+  try_variants: true
+  variant_epochs_cap: 20
+  deep_reg_encoder_units: [512, 256, 128, 64]
+  deep_reg_latent_dim: 24
+  deep_reg_l2: 0.0001
+  deep_reg_dropout: 0.2
+  deep_reg_noise_std: 0.05
+  deep_reg_checkpoint_name: "best_autoencoder_deep.keras"
+  vae_encoder_units: [256, 128, 64]
+  vae_latent_dim: 16
+  vae_kl_weight: 0.01
+  vae_l2: 0.0001
+  vae_checkpoint_name: "best_vae.keras"
+  fusion_enabled: true
+  fusion_file: "anomaly_fusion.pkl"
+  fusion_grid_step: 0.2
 
 xgboost:
   baseline:
