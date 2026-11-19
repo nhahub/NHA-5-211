@@ -35,6 +35,9 @@ def _check_close(
 def parse_test_report_counts(test_report_text: str) -> dict[str, int] | None:
     """Extract passed/failed/skipped counts from reports/test_report.md."""
     match = re.search(
+        r"(\d+)\s+passed\s*/\s*(\d+)\s+failed\s*/\s*\d+\s+error\s*/\s*(\d+)\s+skipped",
+        test_report_text,
+    ) or re.search(
         r"(\d+)\s+passed,\s+(\d+)\s+failed,\s+(\d+)\s+skipped",
         test_report_text,
     )
