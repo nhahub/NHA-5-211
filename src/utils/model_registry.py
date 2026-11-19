@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,23 @@ from src.utils.logging import get_logger
 logger = get_logger("smart_ids.registry")
 
 _LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+_MANIFEST_TRACKED_SUFFIXES = {".pkl", ".keras", ".json", ".h5", ".onnx"}
+
+
+class ModelIntegrityError(RuntimeError):
+    """Raised when artifact SHA-256 verification fails or manifest checks refuse loading."""
+
+
+def compute_file_sha256(path: Path, chunk_size: int = 1 << 20) -> str:
+    """Compute lowercase hexadecimal SHA-256 digest for ``path``."""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def is_git_lfs_pointer(path: Path) -> bool:
@@ -50,16 +68,43 @@ class LoadedArtifacts:
     model_imbalance_strategies: dict[str, str] = field(default_factory=dict)
     lfs_pointers: list[str] = field(default_factory=list)
     missing_artifacts: list[str] = field(default_factory=list)
+    manifest_sha256: dict[str, Any] = field(default_factory=dict)
+    integrity_warnings: list[str] = field(default_factory=list)
 
 
 class ModelRegistry:
     """Save, load, and inspect SMART IDS v3 models and preprocessing artifacts."""
 
-    def __init__(self, models_dir: Path, artifacts_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        models_dir: Path,
+        artifacts_dir: Path | None = None,
+        verify_model_hashes: bool | None = None,
+        require_manifest: bool | None = None,
+        manifest_filename: str | None = None,
+    ) -> None:
         self.models_dir = Path(models_dir)
         self.artifacts_dir = Path(artifacts_dir) if artifacts_dir else self.models_dir
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+        cfg_verify = True
+        cfg_require_manifest = False
+        cfg_manifest_name = "MANIFEST.json"
+        if verify_model_hashes is None or require_manifest is None or manifest_filename is None:
+            try:
+                from src.config import get_app_config
+
+                sec = get_app_config().security
+                cfg_verify = bool(sec.verify_model_hashes)
+                cfg_require_manifest = bool(sec.require_manifest)
+                cfg_manifest_name = str(sec.manifest_file or "MANIFEST.json")
+            except Exception:
+                pass
+
+        self.verify_model_hashes = cfg_verify if verify_model_hashes is None else bool(verify_model_hashes)
+        self.require_manifest = cfg_require_manifest if require_manifest is None else bool(require_manifest)
+        self.manifest_filename = cfg_manifest_name if manifest_filename is None else str(manifest_filename)
 
     def save_preprocessing_artifacts(
         self,
@@ -125,11 +170,104 @@ class ModelRegistry:
         logger.info("Saved per-model metadata to %s", out_path)
         return out_path
 
+    def save_artifact_manifest(self) -> Path:
+        """Generate ``models/MANIFEST.json`` with SHA-256 digests for all binary/config artifacts."""
+        manifest_path = self.models_dir / self.manifest_filename
+        artifacts: dict[str, dict[str, Any]] = {}
+        for path in sorted(self.models_dir.iterdir(), key=lambda p: p.name):
+            if not path.is_file() or path.name == self.manifest_filename:
+                continue
+            if path.suffix.lower() not in _MANIFEST_TRACKED_SUFFIXES:
+                continue
+            if is_git_lfs_pointer(path):
+                logger.info("Skipping Git LFS pointer stub from MANIFEST.json: %s", path.name)
+                continue
+            artifacts[path.name] = {
+                "sha256": compute_file_sha256(path),
+                "size_bytes": int(path.stat().st_size),
+            }
+
+        payload: dict[str, Any] = {
+            "algorithm": "sha256",
+            "generated_at_utc": datetime.now(UTC).isoformat(),
+            "artifact_count": len(artifacts),
+            "artifacts": artifacts,
+        }
+        with manifest_path.open("w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+        logger.info("Saved SHA-256 MANIFEST (%d artifacts) to %s", len(artifacts), manifest_path)
+        return manifest_path
+
+    def _load_sha256_manifest(self) -> dict[str, Any] | None:
+        manifest_path = self.models_dir / self.manifest_filename
+        if not manifest_path.exists():
+            return None
+        try:
+            with manifest_path.open("r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except Exception as exc:
+            raise ModelIntegrityError(
+                f"Failed parsing model integrity manifest '{manifest_path}': {exc}"
+            ) from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("artifacts"), dict):
+            raise ModelIntegrityError(f"Invalid model integrity manifest structure in '{manifest_path}'.")
+        return payload
+
+    def verify_artifact_file(
+        self,
+        path: Path,
+        manifest_payload: dict[str, Any] | None = None,
+        integrity_warnings: list[str] | None = None,
+        require_entry_when_manifest_present: bool = True,
+    ) -> None:
+        """Verify SHA-256 digest of ``path`` against ``MANIFEST.json`` before loading."""
+        if not self.verify_model_hashes or not path.exists():
+            return
+        if is_git_lfs_pointer(path):
+            return
+
+        payload = manifest_payload if manifest_payload is not None else self._load_sha256_manifest()
+        manifest_path = self.models_dir / self.manifest_filename
+        if payload is None:
+            msg = f"Model integrity manifest '{manifest_path}' is missing while loading '{path.name}'."
+            if self.require_manifest:
+                logger.error(msg)
+                raise ModelIntegrityError(msg)
+            logger.warning("%s Proceeding unverified because security.require_manifest=false.", msg)
+            if integrity_warnings is not None and msg not in integrity_warnings:
+                integrity_warnings.append(msg)
+            return
+
+        artifacts = payload.get("artifacts", {})
+        if path.name not in artifacts:
+            if not require_entry_when_manifest_present:
+                return
+            msg = f"Artifact '{path.name}' is not registered in '{manifest_path}'; refusing unverified load."
+            logger.error(msg)
+            raise ModelIntegrityError(msg)
+
+        expected = str(artifacts[path.name].get("sha256", "")).strip().lower()
+        if not expected:
+            msg = f"Manifest entry for '{path.name}' has no sha256 digest in '{manifest_path}'."
+            logger.error(msg)
+            raise ModelIntegrityError(msg)
+
+        actual = compute_file_sha256(path).lower()
+        if actual != expected:
+            msg = (
+                f"SHA-256 integrity mismatch for '{path.name}': expected {expected}, got {actual}. "
+                "Refusing to deserialize artifact."
+            )
+            logger.error(msg)
+            raise ModelIntegrityError(msg)
+
     def load_all(self, load_keras: bool = True) -> LoadedArtifacts:
         """Load all available model and preprocessing artifacts defensively."""
         models: dict[str, Any] = {}
         lfs_pointers: list[str] = []
         missing_artifacts: list[str] = []
+        integrity_warnings: list[str] = []
+        manifest_sha256 = self._load_sha256_manifest() or {}
 
         keras_targets = {
             "MLP": self.models_dir / "best_mlp.keras",
@@ -159,10 +297,19 @@ class ModelRegistry:
                             path.name,
                         )
                     else:
+                        self.verify_artifact_file(
+                            path,
+                            manifest_payload=manifest_sha256 if manifest_sha256 else None,
+                            integrity_warnings=integrity_warnings,
+                        )
                         try:
                             models[name] = tf.keras.models.load_model(path, compile=False)
+                        except ModelIntegrityError:
+                            raise
                         except Exception as exc:
                             logger.warning("Failed loading Keras model '%s': %s", path.name, exc)
+            except ModelIntegrityError:
+                raise
             except Exception as exc:
                 logger.warning("Failed initializing TensorFlow for Keras model loading: %s", exc)
 
@@ -173,12 +320,19 @@ class ModelRegistry:
             lfs_pointers.append(xgb_path.name)
             logger.warning("xgb_model.json is a Git LFS pointer stub; run 'git lfs pull' or train locally.")
         else:
+            self.verify_artifact_file(
+                xgb_path,
+                manifest_payload=manifest_sha256 if manifest_sha256 else None,
+                integrity_warnings=integrity_warnings,
+            )
             try:
                 import xgboost as xgb
 
                 clf = xgb.XGBClassifier()
                 clf.load_model(str(xgb_path))
                 models["XGBoost"] = clf
+            except ModelIntegrityError:
+                raise
             except Exception as exc:
                 logger.warning("Failed loading XGBoost model: %s", exc)
 
@@ -192,6 +346,11 @@ class ModelRegistry:
                 lfs_pointers.append(fname)
                 logger.warning("%s is a Git LFS pointer stub; run 'git lfs pull' to fetch binary.", fname)
                 return None
+            self.verify_artifact_file(
+                p,
+                manifest_payload=manifest_sha256 if manifest_sha256 else None,
+                integrity_warnings=integrity_warnings,
+            )
             try:
                 return joblib.load(p)
             except Exception as exc:
@@ -263,4 +422,6 @@ class ModelRegistry:
             model_imbalance_strategies=model_imbalance_strategies,
             lfs_pointers=sorted(set(lfs_pointers)),
             missing_artifacts=sorted(set(missing_artifacts)),
+            manifest_sha256=manifest_sha256,
+            integrity_warnings=integrity_warnings,
         )

@@ -13,12 +13,33 @@ from dashboard.data_access import get_response_engine, load_cached_artifacts
 from src.config import get_app_config
 
 
+def _render_command_preview(decision: dict[str, Any]) -> None:
+    preview = decision.get("command_preview") or {}
+    if not preview:
+        return
+    status = decision.get("execution_status") or preview.get("status") or "NOT EXECUTED (dry-run)"
+    st.warning(f"🧾 **OS Firewall Command Preview — {status}**")
+    if preview.get("refused_reason"):
+        st.caption(f"Protected IP Guard: {preview['refused_reason']}")
+        return
+    preview_lines = "\n".join(
+        [
+            f"# Status: {status}",
+            f"# Linux iptables:   {preview.get('linux_iptables', '')}",
+            f"# Linux nftables:   {preview.get('linux_nftables', '')}",
+            f"# Windows netsh:    {preview.get('windows_netsh', '')}",
+            f"# Windows PS:       {preview.get('windows_powershell', '')}",
+        ]
+    )
+    st.code(preview_lines, language="bash")
+
+
 def render_active_response_page(sidebar_state: dict[str, Any], overview_logs: pd.DataFrame) -> None:
     """Render manual mitigation trigger, Critical alert batching, blocked IP table, and audit log."""
     st.subheader("Active Response & Mitigation Simulation Engine")
     st.info(
-        "🛡️ **Academic Safety Mode Active:** All firewall commands execute strictly in **DRY-RUN / SIMULATION** mode. "
-        "No host `iptables` or OS network rules are modified."
+        "🛡️ **Academic Safety Mode Active:** All firewall commands operate strictly in **NOT EXECUTED (dry-run)** "
+        "simulation mode and never modify host firewalls or block private/loopback ranges."
     )
 
     resp_engine = get_response_engine()
@@ -71,9 +92,11 @@ def render_active_response_page(sidebar_state: dict[str, Any], overview_logs: pd
                 min_actionable_confidence=conf_floor,
             )
             st.markdown(
-                f"**Resolved Threat Tier:** {threat_badge_html(decision['threat_level'])}",
+                f"**Resolved Threat Tier:** {threat_badge_html(decision['threat_level'])} | "
+                f"`{decision.get('execution_status', 'NOT EXECUTED (dry-run)')}`",
                 unsafe_allow_html=True,
             )
+            _render_command_preview(decision)
             st.json(decision)
 
         # Batch process top Critical events from active Overview logs
@@ -143,7 +166,20 @@ def render_active_response_page(sidebar_state: dict[str, Any], overview_logs: pd
     st.markdown("---")
     st.markdown("#### 🧾 Incident Response History & Audit Export")
     if resp_engine.history:
-        hist_df = pd.DataFrame(list(reversed(resp_engine.history)))
+        latest_with_preview = next(
+            (ev for ev in reversed(resp_engine.history) if ev.get("command_preview")), None
+        )
+        if latest_with_preview is not None:
+            _render_command_preview(latest_with_preview)
+        hist_rows = []
+        for ev in reversed(resp_engine.history):
+            row = dict(ev)
+            prev = row.pop("command_preview", {}) or {}
+            if prev:
+                row["preview_iptables"] = prev.get("linux_iptables") or prev.get("refused_reason", "")
+            row.setdefault("execution_status", "NOT EXECUTED (dry-run)")
+            hist_rows.append(row)
+        hist_df = pd.DataFrame(hist_rows)
         st.dataframe(hist_df, use_container_width=True, hide_index=True)
 
         ex1, ex2, ex3 = st.columns([1, 1, 2])

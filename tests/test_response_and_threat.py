@@ -9,7 +9,12 @@ import xgboost as xgb
 
 from src.detection.threat_scoring import get_threat_level
 from src.explainability.shap_explainer import explain_single_sample
-from src.response.response_engine import ActiveResponseEngine, validate_ip
+from src.response.response_engine import (
+    ActiveResponseEngine,
+    build_firewall_command_preview,
+    is_protected_ip,
+    validate_ip,
+)
 
 
 def test_threat_level_boundaries_and_benign_safety() -> None:
@@ -99,3 +104,52 @@ def test_local_shap_explanation_xgboost(tmp_path: Path) -> None:
     assert res["explainer"] == "TreeExplainer"
     assert len(res["top_features"]) == 5
     assert wf_path.exists()
+
+
+def test_response_command_previews_and_protected_ip_safeguards(tmp_path: Path) -> None:
+    """Firewall previews generate Linux/Windows strings in NOT EXECUTED dry-run mode and protect local ranges."""
+    for protected_ip in (
+        "127.0.0.1",
+        "::1",
+        "10.0.0.1",
+        "172.16.10.4",
+        "192.168.1.50",
+        "169.254.1.1",
+        "224.0.0.1",
+        "0.0.0.0",
+    ):
+        is_prot, _ = is_protected_ip(protected_ip)
+        assert is_prot is True
+
+    assert is_protected_ip("203.0.113.55")[0] is False
+    assert is_protected_ip("8.8.8.8")[0] is False
+
+    log_path = tmp_path / "resp.log"
+    hist_path = tmp_path / "hist.json"
+    engine = ActiveResponseEngine(dry_run=True, log_file=log_path, history_file=hist_path)
+
+    # Protected internal IP must NEVER be blocked or added to blocked_ips
+    prot_res = engine.apply_active_response("192.168.1.50", "DDoS", 0.99, "XGBoost")
+    assert prot_res["blocked"] is False
+    assert prot_res["action"] == "BLOCK_REFUSED_PROTECTED"
+    assert prot_res["execution_status"] == "NOT EXECUTED (dry-run)"
+    assert "192.168.1.50" not in engine.blocked_ips
+    assert "refused_reason" in prot_res["command_preview"]
+
+    # Valid external/test-net IPs produce full Linux & Windows preview commands tagged NOT EXECUTED (dry-run)
+    v4_res = engine.apply_active_response("203.0.113.55", "DDoS", 0.97, "XGBoost")
+    assert v4_res["action"] == "BLOCK"
+    assert v4_res["execution_status"] == "NOT EXECUTED (dry-run)"
+    prev = v4_res["command_preview"]
+    assert prev["status"] == "NOT EXECUTED (dry-run)"
+    assert "iptables" in prev["linux_iptables"] and "203.0.113.55" in prev["linux_iptables"]
+    assert "nft add rule" in prev["linux_nftables"]
+    assert "netsh advfirewall" in prev["windows_netsh"]
+    assert "New-NetFirewallRule" in prev["windows_powershell"]
+
+    v6_prev = build_firewall_command_preview("2001:db8::42", action_type="BLOCK")
+    assert "ip6tables" in v6_prev["linux_iptables"]
+    assert "ip6 saddr" in v6_prev["linux_nftables"]
+
+    # Audit log explicitly records NOT EXECUTED (dry-run)
+    assert "NOT EXECUTED (dry-run)" in log_path.read_text(encoding="utf-8")

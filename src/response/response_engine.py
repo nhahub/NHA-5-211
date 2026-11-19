@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 import ipaddress
 import json
@@ -13,6 +13,13 @@ from typing import Any
 
 from src.detection.threat_scoring import get_threat_level
 from src.utils.logging import get_logger
+
+_DOCUMENTATION_TEST_NETS = (
+    ipaddress.ip_network("192.0.2.0/24"),
+    ipaddress.ip_network("198.51.100.0/24"),
+    ipaddress.ip_network("203.0.113.0/24"),
+    ipaddress.ip_network("2001:db8::/32"),
+)
 
 
 def validate_ip(ip: str) -> bool:
@@ -29,9 +36,90 @@ def validate_ip(ip: str) -> bool:
         return False
 
 
+def is_protected_ip(ip: str) -> tuple[bool, str]:
+    """Return (is_protected, reason) for private, loopback, link-local, multicast, reserved, or unspecified IPs."""
+    if not validate_ip(ip):
+        return False, "invalid"
+    ip_obj = ipaddress.ip_address(ip.strip())
+    if ip_obj.is_loopback:
+        return True, "loopback"
+    if ip_obj.is_link_local:
+        return True, "link-local"
+    if ip_obj.is_multicast:
+        return True, "multicast"
+    if ip_obj.is_unspecified:
+        return True, "unspecified"
+    if ip_obj.is_reserved:
+        return True, "reserved"
+    if ip_obj.is_private and not any(ip_obj in net for net in _DOCUMENTATION_TEST_NETS):
+        return True, "private"
+    return False, "routable_or_doc_testnet"
+
+
+def build_firewall_command_preview(
+    src_ip: str,
+    action_type: str = "BLOCK",
+    rate_limit_pps: int = 100,
+) -> dict[str, Any]:
+    """Build non-executed OS-specific firewall command previews for Linux and Windows."""
+    if not validate_ip(src_ip):
+        raise ValueError(f"Cannot build firewall preview for invalid IP '{src_ip}'.")
+
+    ip_obj = ipaddress.ip_address(src_ip.strip())
+    ip_clean = str(ip_obj)
+    protected, reason = is_protected_ip(ip_clean)
+    if protected:
+        return {
+            "status": "NOT EXECUTED (dry-run)",
+            "ip": ip_clean,
+            "refused_reason": f"Protected {reason} IP range is never targeted.",
+        }
+
+    safe_tag = ip_clean.replace(":", "_").replace(".", "_")
+    iptables_bin = "ip6tables" if ip_obj.version == 6 else "iptables"
+    nft_family = "ip6" if ip_obj.version == 6 else "ip"
+    pps = max(1, int(rate_limit_pps))
+
+    if action_type == "RATE_LIMIT":
+        return {
+            "status": "NOT EXECUTED (dry-run)",
+            "ip": ip_clean,
+            "linux_iptables": (
+                f"sudo {iptables_bin} -I INPUT 1 -s {ip_clean} -m limit --limit {pps}/second -j ACCEPT"
+            ),
+            "linux_nftables": (
+                f"sudo nft add rule inet filter input {nft_family} saddr {ip_clean} "
+                f"limit rate {pps}/second accept"
+            ),
+            "windows_netsh": (
+                f"# Windows Defender Firewall lacks native per-IP pps rate limit; "
+                f"optional QoS policy tag: SMART_IDS_RATELIMIT_{safe_tag}_{pps}pps"
+            ),
+            "windows_powershell": (
+                f"New-NetQosPolicy -Name 'SMART_IDS_RATELIMIT_{safe_tag}' "
+                f"-IPSrcPrefixMatchCondition {ip_clean} -ThrottleRateActionBitsPerSecond {pps * 12000}"
+            ),
+        }
+
+    return {
+        "status": "NOT EXECUTED (dry-run)",
+        "ip": ip_clean,
+        "linux_iptables": f"sudo {iptables_bin} -I INPUT 1 -s {ip_clean} -j DROP",
+        "linux_nftables": f"sudo nft add rule inet filter input {nft_family} saddr {ip_clean} drop",
+        "windows_netsh": (
+            f'netsh advfirewall firewall add rule name="SMART_IDS_BLOCK_{safe_tag}" '
+            f"dir=in action=block remoteip={ip_clean}"
+        ),
+        "windows_powershell": (
+            f"New-NetFirewallRule -DisplayName 'SMART_IDS_BLOCK_{safe_tag}' "
+            f"-Direction Inbound -RemoteAddress {ip_clean} -Action Block"
+        ),
+    }
+
+
 @dataclass
 class ResponseDecision:
-    """Nine-field canonical response decision contract plus anomaly metadata."""
+    """Canonical response decision contract plus anomaly metadata and non-executed previews."""
 
     timestamp: str
     src_ip: str
@@ -45,6 +133,8 @@ class ResponseDecision:
     is_anomaly: bool = False
     anomaly_score: float = 0.0
     idempotent_skip: bool = False
+    execution_status: str = "NOT EXECUTED (dry-run)"
+    command_preview: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -85,6 +175,20 @@ class ActiveResponseEngine:
             return False, f"Invalid source IP '{src_ip}' rejected by ipaddress validation gate.", False
 
         ip_clean = str(ipaddress.ip_address(src_ip.strip()))
+        protected, protected_reason = is_protected_ip(ip_clean)
+        if protected:
+            msg = (
+                f"Refused block for protected {protected_reason} IP '{ip_clean}' "
+                "(private/loopback/link-local/multicast/reserved ranges are never blocked) "
+                "[NOT EXECUTED (dry-run)]."
+            )
+            self.logger.warning(
+                "BLOCK_REFUSED_PROTECTED | src_ip=%s | reason=%s | NOT EXECUTED (dry-run)",
+                ip_clean,
+                protected_reason,
+            )
+            return False, msg, False
+
         if ip_clean in self.blocked_ips:
             msg = f"Idempotent skip: {ip_clean} already present in BLOCKED_IPS registry."
             self.logger.info(msg)
@@ -98,9 +202,13 @@ class ActiveResponseEngine:
         command = ["iptables", "-I", "INPUT", "1", "-s", ip_clean, "-j", "DROP"]
 
         if effective_dry_run:
-            msg = f"[DRY RUN] Would execute: {' '.join(command)}"
+            msg = f"[DRY RUN] NOT EXECUTED (dry-run) | Preview: {' '.join(command)}"
             self.blocked_ips.add(ip_clean)
-            self.logger.critical("BLOCK (DRY RUN) | src_ip=%s | cmd=%s", ip_clean, " ".join(command))
+            self.logger.critical(
+                "BLOCK (DRY RUN) | src_ip=%s | status=NOT EXECUTED (dry-run) | cmd=%s",
+                ip_clean,
+                " ".join(command),
+            )
             return True, msg, False
 
         try:
@@ -143,6 +251,8 @@ class ActiveResponseEngine:
 
         blocked = False
         idempotent_skip = False
+        execution_status = "NOT EXECUTED (dry-run)"
+        command_preview: dict[str, Any] = {}
         if threat_level == "Low":
             action = "LOG"
             action_detail = f"Passive statistical logging for '{attack_class}' (confidence={conf:.4f})."
@@ -154,23 +264,41 @@ class ActiveResponseEngine:
             )
             self.logger.info("ALERT | src_ip=%s | class=%s | conf=%.4f", src_ip, attack_class, conf)
         elif threat_level == "High":
-            action = "RATE_LIMIT"
             if not validate_ip(src_ip):
                 action = "RATE_LIMIT_FAILED"
                 action_detail = f"Invalid source IP '{src_ip}' rejected before rate-limiting."
                 self.logger.error("RATE_LIMIT_FAILED | invalid_ip=%s | class=%s", src_ip, attack_class)
             else:
-                action_detail = (
-                    f"[DRY RUN] Rate-limiting applied to {src_ip} ({self.rate_limit_pps} pps ceiling) "
-                    f"for '{attack_class}' (confidence={conf:.4f})."
-                )
-                self.logger.warning(
-                    "RATE_LIMIT | src_ip=%s | ceiling=%dpps | class=%s | conf=%.4f",
+                protected, protected_reason = is_protected_ip(src_ip)
+                command_preview = build_firewall_command_preview(
                     src_ip,
-                    self.rate_limit_pps,
-                    attack_class,
-                    conf,
+                    action_type="RATE_LIMIT",
+                    rate_limit_pps=self.rate_limit_pps,
                 )
+                if protected:
+                    action = "RATE_LIMIT_REFUSED_PROTECTED"
+                    action_detail = (
+                        f"[NOT EXECUTED (dry-run)] Refused rate-limit for protected {protected_reason} "
+                        f"IP '{src_ip}' (confidence={conf:.4f})."
+                    )
+                    self.logger.warning(
+                        "RATE_LIMIT_REFUSED_PROTECTED | src_ip=%s | reason=%s | status=NOT EXECUTED (dry-run)",
+                        src_ip,
+                        protected_reason,
+                    )
+                else:
+                    action = "RATE_LIMIT"
+                    action_detail = (
+                        f"[DRY RUN] NOT EXECUTED (dry-run) | Rate-limiting preview ({self.rate_limit_pps} pps) "
+                        f"generated for {src_ip} ('{attack_class}', confidence={conf:.4f})."
+                    )
+                    self.logger.warning(
+                        "RATE_LIMIT | src_ip=%s | ceiling=%dpps | class=%s | conf=%.4f | status=NOT EXECUTED (dry-run)",
+                        src_ip,
+                        self.rate_limit_pps,
+                        attack_class,
+                        conf,
+                    )
         else:
             # Critical tier
             if not validate_ip(src_ip):
@@ -180,10 +308,24 @@ class ActiveResponseEngine:
                     "BLOCK_FAILED | invalid_ip=%s | class=%s | conf=%.4f", src_ip, attack_class, conf
                 )
             else:
-                ok, detail, idempotent_skip = self.block_ip_iptables(src_ip, dry_run=dry_run)
-                action = "BLOCK" if ok else "BLOCK_FAILED"
-                action_detail = detail
-                blocked = ok
+                protected, protected_reason = is_protected_ip(src_ip)
+                command_preview = build_firewall_command_preview(src_ip, action_type="BLOCK")
+                if protected:
+                    action = "BLOCK_REFUSED_PROTECTED"
+                    action_detail = (
+                        f"[NOT EXECUTED (dry-run)] Refused block for protected {protected_reason} "
+                        f"IP '{src_ip}' (confidence={conf:.4f})."
+                    )
+                    self.logger.warning(
+                        "BLOCK_REFUSED_PROTECTED | src_ip=%s | reason=%s | status=NOT EXECUTED (dry-run)",
+                        src_ip,
+                        protected_reason,
+                    )
+                else:
+                    ok, detail, idempotent_skip = self.block_ip_iptables(src_ip, dry_run=dry_run)
+                    action = "BLOCK" if ok else "BLOCK_FAILED"
+                    action_detail = detail
+                    blocked = ok
 
         decision = ResponseDecision(
             timestamp=datetime.now(UTC).isoformat(),
@@ -198,6 +340,8 @@ class ActiveResponseEngine:
             is_anomaly=bool(is_anomaly),
             anomaly_score=round(float(anomaly_score), 6),
             idempotent_skip=idempotent_skip,
+            execution_status=execution_status,
+            command_preview=command_preview,
         ).to_dict()
 
         self.history.append(decision)

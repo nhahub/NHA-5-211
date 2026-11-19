@@ -21,7 +21,9 @@ All system parameters are centralized in two Pydantic-validated YAML files:
 | `evaluation` | `latency_warmup_calls`, `latency_timed_runs` | `50`, `100` | Discards first N warm-up calls before `time.perf_counter()` single-flow latency timing |
 | `evaluation` | `run_by_day_comparison`, `run_time_block_comparison` | `true`, `true` | Runs secondary open-set cross-day (`by_day`) and chronological drift (`time_block`) benchmarks |
 | `evaluation` | `autoencoder_percentiles` | `[90, 95, 97, 99]` | Percentile thresholds evaluated for precision/recall/FPR trade-off analysis |
-| `response` | `dry_run`, `rate_limit_pps` | `true`, `100` | Safety lock ensuring all `iptables` actions remain simulated |
+| `response` | `dry_run`, `rate_limit_pps` | `true`, `100` | Safety lock ensuring all firewall previews remain non-executed (`NOT EXECUTED (dry-run)`) |
+| `security` | `verify_model_hashes`, `require_manifest`, `manifest_file` | `true`, `false`, `"MANIFEST.json"` | Verifies SHA-256 against `models/MANIFEST.json` before every `joblib.load`; refuses mismatches via `ModelIntegrityError` |
+| `models_download` | `release_base_url`, `release_repo`, `release_tag` | `""`, `""`, `"models-v3"` | Optional GitHub Release fallback URL settings used by `scripts/download_models.py` |
 
 ---
 
@@ -56,4 +58,4 @@ All system parameters are centralized in two Pydantic-validated YAML files:
 - `supervised_weights`: fallback weights (`XGBoost: 0.45`, `MLP: 0.35`, `CNN: 0.20`), superseded by validation log-loss weighting (`val_weighted_voting`) or `LogisticRegression` meta-learning (`stacking`, trained strictly on validation log-probabilities)
 - `calibrate_probabilities: true` (float64 bounded Brent Temperature Scaling fit strictly on validation probabilities)
 
-> **Security Note (`*.pkl` Artifacts):** Serialized files (`models/*.pkl` loaded via `joblib` / `pickle`, including `scaler.pkl`, `imputer.pkl`, `outlier_clipper.pkl`, `label_encoder.pkl`, `calibrators.pkl`, `stacking_meta.pkl`, and `anomaly_baselines.pkl`) use Python pickle deserialization and **must only be loaded from trusted sources**.
+> **Security Note (`*.pkl` Artifacts & SHA-256 Verification):** Serialized files (`models/*.pkl` loaded via `joblib` / `pickle`, including `scaler.pkl`, `imputer.pkl`, `outlier_clipper.pkl`, `label_encoder.pkl`, `calibrators.pkl`, `stacking_meta.pkl`, and `anomaly_baselines.pkl`) use Python pickle deserialization and **must only be loaded from trusted sources**. Training automatically generates `models/MANIFEST.json` containing SHA-256 checksums; when `security.verify_model_hashes: true` (default), `ModelRegistry` ([`src/utils/model_registry.py`](../src/utils/model_registry.py)) validates every digest before loading and raises `ModelIntegrityError` on any mismatch.

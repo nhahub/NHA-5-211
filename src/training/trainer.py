@@ -819,6 +819,7 @@ def train_all_models(
         "Autoencoder": {"imbalance_strategy": "benign_only", "train_samples": int(len(X_benign_train))},
     }
     registry.save_model_metadata(model_metadata)
+    registry.save_artifact_manifest()
 
     with (artifacts_dir / "training_diagnostics.json").open("w", encoding="utf-8") as fh:
         json.dump(

@@ -235,6 +235,60 @@ class ImbalanceSelectionConfig(BaseModel):
     tie_tolerance: float | None = Field(default=None, ge=0.0, le=0.2)
 
 
+class SecurityConfig(BaseModel):
+    """Model artifact integrity verification controls."""
+
+    verify_model_hashes: bool = True
+    require_manifest: bool = False
+    manifest_file: str = "MANIFEST.json"
+
+
+class ModelsDownloadConfig(BaseModel):
+    """LFS-free fallback asset download settings (GitHub Releases / HTTP mirror)."""
+
+    release_base_url: str = ""
+    release_repo: str = ""
+    release_tag: str = "models-v3"
+    required_assets: list[str] = Field(
+        default_factory=lambda: [
+            "xgb_model.json",
+            "scaler.pkl",
+            "imputer.pkl",
+            "outlier_clipper.pkl",
+            "label_encoder.pkl",
+            "feature_names.json",
+            "anomaly_threshold.json",
+            "best_mlp.keras",
+            "best_cnn.keras",
+            "best_autoencoder.keras",
+        ]
+    )
+    optional_assets: list[str] = Field(
+        default_factory=lambda: [
+            "MANIFEST.json",
+            "model_metadata.json",
+            "training_histories.json",
+            "xgb_baseline.json",
+            "calibrators.pkl",
+            "stacking_meta.pkl",
+            "anomaly_baselines.pkl",
+            "anomaly_fusion.pkl",
+            "best_autoencoder_deep.keras",
+            "best_vae.keras",
+        ]
+    )
+
+    def resolved_base_url(self) -> str:
+        """Return configured release base URL or construct one from owner/repo + tag."""
+        if self.release_base_url.strip():
+            return self.release_base_url.strip().rstrip("/")
+        if self.release_repo.strip():
+            repo = self.release_repo.strip().strip("/")
+            tag = self.release_tag.strip() or "models-v3"
+            return f"https://github.com/{repo}/releases/download/{tag}"
+        return ""
+
+
 class DashboardConfig(BaseModel):
     """Streamlit UI runtime settings."""
 
@@ -254,6 +308,8 @@ class AppConfig(BaseModel):
     imbalance_selection: ImbalanceSelectionConfig = Field(default_factory=ImbalanceSelectionConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     response: ResponseConfig = Field(default_factory=ResponseConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+    models_download: ModelsDownloadConfig = Field(default_factory=ModelsDownloadConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
 
 

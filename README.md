@@ -44,23 +44,36 @@ uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 ### Docker Execution (Dashboard)
 
 ```bash
-# Pull Git LFS model binaries first if building from a fresh clone
+# 1a. Pull Git LFS model binaries first (recommended for full model inference)
 git lfs pull
+
+# 1b. Or download model assets from a GitHub Release URL (Git LFS quota-free fallback)
+python scripts/download_models.py --repo <owner>/<repo> --tag models-v3
+
+# 2. Standard build (succeeds in degraded demo/report mode if LFS stubs remain, printing a loud warning)
 docker build -t smart-ids-v3 .
+
+# 3. Strict production build (aborts Docker build if models/ contains unfetched LFS pointer stubs or missing weights)
+docker build --build-arg REQUIRE_MODELS=true -t smart-ids-v3 .
+
 docker run --rm -p 8501:8501 smart-ids-v3
 ```
 
-## Model Artifacts (Git LFS)
+## Model Artifacts (Git LFS & Release Fallback)
 
 - Large/retrain-volatile model binaries (`*.keras`, `*.pkl`, `models/xgb_model.json`, `*.h5`, `*.onnx`, `*.npz`, `*.parquet`) are tracked via **Git LFS** in [`.gitattributes`](.gitattributes) so retraining never bloats Git object history going forward (historical commits remain untouched).
-- On a fresh clone, fetch the binaries before running inference or building the Docker image:
+- On a fresh clone, fetch the binaries via Git LFS **or** the Release downloader before running inference or strict Docker builds:
 
 ```bash
+# Option A: Git LFS
 git lfs install
 git lfs pull
+
+# Option B: GitHub Release fallback (configured via `models_download` in configs/config.yaml)
+.venv\Scripts\python.exe scripts/download_models.py --base-url https://github.com/<owner>/<repo>/releases/download/models-v3
 ```
 
-- If `models/` is empty or contains unfetched Git LFS pointer stubs (for example, a Docker build without `git lfs pull`), the SOC dashboard degrades gracefully with a clear status banner directing you to run `git lfs pull` or `python scripts/train.py --run-eval` while keeping historical evaluation reports and synthetic SOC demo telemetry accessible. CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) checks out LFS artifacts automatically via `actions/checkout@v4` (`lfs: true`).
+- If `models/` is empty or contains unfetched Git LFS pointer stubs (for example, a Docker build without `git lfs pull` or an `lfs: false` checkout), the SOC dashboard degrades gracefully with a clear status banner, Dockerfile emits a prominent build-time warning unless `REQUIRE_MODELS=true`, and tests requiring full binaries skip with a clear reason. Core CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs `lint-and-test` with `lfs: false` so GitHub LFS bandwidth quotas never block code checks, alongside an optional `workflow_dispatch`-only `lfs-artifact-smoke` job (`lfs: true`).
 
 ### Independent Evaluation & Optional ONNX Export
 
@@ -133,8 +146,8 @@ All PRs and pushes to `main` run these Ruff and pytest checks automatically via 
 ```text
 NHA-5-211/
 ├── .gitattributes             # Git LFS tracking for *.keras, *.pkl & large model files
-├── .github/workflows/ci.yml   # GitHub Actions CI (Ruff + pytest on Python 3.13, LFS enabled)
-├── Dockerfile                 # Containerized Streamlit SOC deployment (port 8501)
+├── .github/workflows/ci.yml   # GitHub Actions CI (lfs:false lint/pytest + manual LFS smoke job)
+├── Dockerfile                 # Containerized Streamlit SOC deployment (REQUIRE_MODELS guard)
 ├── LICENSE                    # MIT License
 ├── app.py                     # Streamlit SOC dashboard entrypoint (7 tabs)
 ├── configs/                   # YAML pipeline & hyperparameter configs
@@ -151,9 +164,9 @@ NHA-5-211/
 
 ## Limitations, Security & License
 
-- **Artifact Deserialization Security (`*.pkl` via `joblib`):** Serialized model and preprocessing files (`*.pkl` loaded via `joblib`) execute arbitrary code on deserialization and **must only be loaded from trusted sources**.
+- **Artifact Deserialization Security & SHA-256 Verification (`*.pkl` via `joblib`):** Serialized model and preprocessing files (`*.pkl` loaded via `joblib`) execute arbitrary code on deserialization and **must only be loaded from trusted sources**. During training, `models/MANIFEST.json` is generated with SHA-256 digests of every model artifact; [`ModelRegistry`](src/utils/model_registry.py) (controlled by `security.verify_model_hashes: true` in [`configs/config.yaml`](configs/config.yaml)) verifies each artifact's SHA-256 digest before calling `joblib.load`, refuses to load tampered or mismatched files with `ModelIntegrityError`, and skips unfetched Git LFS pointer stubs gracefully.
 
-- **Dry-Run Mitigation Only:** `ActiveResponseEngine` logs simulated `iptables` rules without altering host firewall state.
+- **Dry-Run Mitigation & Non-Executed Command Previews:** `ActiveResponseEngine` runs strictly in `NOT EXECUTED (dry-run)` preview mode, validating source IPs with `ipaddress`, refusing private/loopback/link-local/multicast/reserved/unspecified IP ranges, recording append-only JSON/text audit logs, and surfacing OS-specific firewall command previews (`iptables`/`nftables`, Windows `netsh`/`New-NetFirewallRule`). Live firewall execution is intentionally out of scope for this academic project.
 - **Offline Batch Telemetry:** Live packet capture (`libpcap`/`eBPF`) and streaming CICFlowMeter extraction are outside project scope.
 - **Open-Set Unseen-Attack Miss Rate:** On open-set cross-day evaluation (`by_day`), supervised models detect only `~28.8%` of unseen attack flows (`XGBoost (1 - P_Benign)` recall `0.2876` at precision `0.9991`; binary `XGBoost` recall `0.2690` at precision `0.9981`; `MLP` recall `0.2839` at precision `0.9942`); anomaly detectors are therefore kept as a supplementary zero-day signal.
 - **Supplementary Anomaly Detection:** Unsupervised detectors (`Autoencoder`, `IsolationForest`, `OneClassSVM`, `LOF`) struggle on stealthy application-layer flows mimicking benign HTTP statistics and act purely as supplementary zero-day alerts alongside supervised `XGBoost`.

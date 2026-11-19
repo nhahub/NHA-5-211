@@ -9,12 +9,21 @@ import joblib
 import numpy as np
 import pandas as pd
 import pytest
+from scripts.download_models import download_model_assets
 from scripts.export_onnx import check_onnx_environment
 from scripts.export_onnx import main as export_onnx_main
 from scripts.generate_test_report import CommandRun, parse_pytest_output, render_test_report
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-from src.config import AppConfig, DataConfig, EvaluationConfig, ModelConfig, SplitConfig
+from src.config import (
+    AppConfig,
+    DataConfig,
+    EvaluationConfig,
+    ModelConfig,
+    SecurityConfig,
+    SplitConfig,
+    get_app_config,
+)
 from src.data.feature_engineering import SchemaValidationError
 from src.data.loader import CICIDS2017_FEATURES, generate_synthetic_cicids2017
 from src.data.preprocessing import (
@@ -29,7 +38,12 @@ from src.evaluation.protocols import evaluate_feature_ablation
 from src.models.mlp import build_mlp
 from src.models.xgboost_model import build_xgboost_classifier
 from src.response.response_engine import ActiveResponseEngine
-from src.utils.model_registry import ModelRegistry
+from src.utils.model_registry import (
+    ModelIntegrityError,
+    ModelRegistry,
+    compute_file_sha256,
+    is_git_lfs_pointer,
+)
 
 
 def test_model_registry_partial_and_corrupt_artifacts(
@@ -336,3 +350,147 @@ def test_latency_warmup_config_and_test_report_generator_parser() -> None:
     )
     assert "tests/test_a.py" in md and "1.25" in md and "1.35" in md
     assert "2 passed, 1 warning" in md
+
+
+def test_manifest_sha256_match_mismatch_missing_and_lfs_skip(tmp_path: Path, monkeypatch) -> None:
+    """ModelRegistry enforces SHA-256 verification before joblib.load and skips LFS stubs gracefully."""
+    assert SecurityConfig().verify_model_hashes is True
+    models_dir = tmp_path / "sec_models"
+    reg = ModelRegistry(models_dir=models_dir, verify_model_hashes=True, require_manifest=False)
+
+    scaler_path = models_dir / "scaler.pkl"
+    le_path = models_dir / "label_encoder.pkl"
+    joblib.dump(StandardScaler(), scaler_path)
+    joblib.dump(LabelEncoder(), le_path)
+
+    # Generate SHA-256 MANIFEST.json and verify match path succeeds
+    manifest_path = reg.save_artifact_manifest()
+    assert manifest_path.exists()
+    manifest_json = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest_json["algorithm"] == "sha256"
+    assert manifest_json["artifacts"]["scaler.pkl"]["sha256"] == compute_file_sha256(scaler_path)
+
+    loaded_ok = reg.load_all(load_keras=False)
+    assert loaded_ok.scaler is not None
+    assert loaded_ok.label_encoder is not None
+    assert loaded_ok.integrity_warnings == []
+
+    # LFS pointer stub is skipped cleanly without error even when require_manifest=True
+    lfs_stub = "version https://git-lfs.github.com/spec/v1\noid sha256:abc123\nsize 2048\n"
+    (models_dir / "calibrators.pkl").write_text(lfs_stub, encoding="utf-8")
+    strict_with_lfs = ModelRegistry(models_dir=models_dir, verify_model_hashes=True, require_manifest=True)
+    loaded_lfs = strict_with_lfs.load_all(load_keras=False)
+    assert "calibrators.pkl" in loaded_lfs.lfs_pointers
+
+    # Tamper with scaler.pkl -> MUST refuse BEFORE calling joblib.load
+    scaler_path.write_bytes(scaler_path.read_bytes() + b"\x00tamper")
+    called_joblib = []
+    orig_joblib_load = joblib.load
+
+    def _spy_joblib_load(path, *args, **kwargs):
+        called_joblib.append(Path(path).name)
+        return orig_joblib_load(path, *args, **kwargs)
+
+    monkeypatch.setattr("src.utils.model_registry.joblib.load", _spy_joblib_load)
+    with pytest.raises(ModelIntegrityError, match="SHA-256 integrity mismatch"):
+        reg.load_all(load_keras=False)
+    assert "scaler.pkl" not in called_joblib
+
+    # Opt-out flag verify_model_hashes=False bypasses hash failure (restore clean pickle first)
+    monkeypatch.undo()
+    joblib.dump(StandardScaler(), scaler_path)
+    manifest_path.unlink()
+
+    # Missing manifest: require_manifest=True refuses; require_manifest=False warns clearly
+    strict_missing = ModelRegistry(models_dir=models_dir, verify_model_hashes=True, require_manifest=True)
+    with pytest.raises(ModelIntegrityError, match="missing"):
+        strict_missing.load_all(load_keras=False)
+
+    permissive_missing = ModelRegistry(
+        models_dir=models_dir, verify_model_hashes=True, require_manifest=False
+    )
+    loaded_warn = permissive_missing.load_all(load_keras=False)
+    assert loaded_warn.scaler is not None
+    assert any("MANIFEST.json" in w for w in loaded_warn.integrity_warnings)
+
+
+def test_download_models_fallback_and_hash_verification(tmp_path: Path) -> None:
+    """LFS-free downloader fetches release assets offline-mocked and enforces SHA-256 check."""
+    remote_dir = tmp_path / "remote_release"
+    remote_dir.mkdir(parents=True, exist_ok=True)
+    local_dir = tmp_path / "local_models"
+    local_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pretend local dir has an unfetched Git LFS pointer stub for scaler.pkl
+    (local_dir / "scaler.pkl").write_text(
+        "version https://git-lfs.github.com/spec/v1\noid sha256:000\nsize 99\n",
+        encoding="utf-8",
+    )
+    # Prepare real remote payload + MANIFEST.json
+    remote_scaler = remote_dir / "scaler.pkl"
+    joblib.dump(StandardScaler(), remote_scaler)
+    (remote_dir / "feature_names.json").write_text('["f1", "f2"]', encoding="utf-8")
+    manifest_payload = {
+        "algorithm": "sha256",
+        "artifacts": {
+            "scaler.pkl": {"sha256": compute_file_sha256(remote_scaler)},
+            "feature_names.json": {"sha256": compute_file_sha256(remote_dir / "feature_names.json")},
+        },
+    }
+    (remote_dir / "MANIFEST.json").write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+    def _local_fetcher(url: str, dest: Path, timeout: int) -> None:
+        fname = url.rsplit("/", 1)[-1]
+        src = remote_dir / fname
+        if not src.exists():
+            raise FileNotFoundError(fname)
+        dest.write_bytes(src.read_bytes())
+
+    summary = download_model_assets(
+        base_url="https://example.invalid/releases/download/models-v3",
+        output_dir=local_dir,
+        required_assets=["scaler.pkl", "feature_names.json"],
+        optional_assets=["MANIFEST.json", "optional_absent.keras"],
+        verify_hashes=True,
+        fetcher=_local_fetcher,
+    )
+    assert set(summary["verified"]) == {"scaler.pkl", "feature_names.json"}
+    assert "optional_absent.keras" in summary["optional_missing"]
+    assert not is_git_lfs_pointer(local_dir / "scaler.pkl")
+
+    # Corrupt remote asset -> must delete tampered file and raise ModelIntegrityError
+    remote_scaler.write_bytes(remote_scaler.read_bytes() + b"corrupt")
+    with pytest.raises(ModelIntegrityError, match="failed SHA-256 verification"):
+        download_model_assets(
+            base_url="https://example.invalid/releases/download/models-v3",
+            output_dir=local_dir,
+            required_assets=["scaler.pkl"],
+            optional_assets=["MANIFEST.json"],
+            overwrite=True,
+            verify_hashes=True,
+            fetcher=_local_fetcher,
+        )
+    assert not (local_dir / "scaler.pkl").exists()
+
+
+def test_real_lfs_artifact_smoke() -> None:
+    """Smoke check on persisted production artifacts; skips cleanly when LFS pointers are unfetched."""
+    app_cfg = get_app_config()
+    models_dir = app_cfg.paths.resolve("models_dir")
+    required_files = ["xgb_model.json", "scaler.pkl", "label_encoder.pkl", "feature_names.json"]
+    missing = [f for f in required_files if not (models_dir / f).exists()]
+    pointers = [f for f in required_files if (models_dir / f).exists() and is_git_lfs_pointer(models_dir / f)]
+    if missing or pointers:
+        pytest.skip(
+            f"Real model binaries unavailable or Git LFS pointer stubs (missing={missing}, lfs_pointers={pointers}); "
+            "run 'git lfs pull' or trigger workflow_dispatch."
+        )
+
+    reg = ModelRegistry(models_dir=models_dir, artifacts_dir=app_cfg.paths.resolve("artifacts_dir"))
+    loaded = reg.load_all(load_keras=False)
+    assert "XGBoost" in loaded.models
+    assert loaded.scaler is not None
+    assert loaded.label_encoder is not None
+    sample = np.zeros((1, len(loaded.feature_names)), dtype=np.float32)
+    probs = loaded.models["XGBoost"].predict_proba(sample)
+    assert probs.shape == (1, len(loaded.label_encoder.classes_))

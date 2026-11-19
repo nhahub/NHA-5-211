@@ -140,6 +140,16 @@ response:
     High: "🟠"
     Critical: "🔴"
 
+security:
+  verify_model_hashes: true # Verify SHA-256 against models/MANIFEST.json before every joblib load
+  require_manifest: false # Set true in locked production deployments to fail when MANIFEST.json is missing
+  manifest_file: "MANIFEST.json"
+
+models_download:
+  release_base_url: "" # Optional GitHub Release asset URL fallback, e.g. https://github.com/<owner>/<repo>/releases/download/models-v3
+  release_repo: "" # Alternative "owner/repo" used with release_tag when release_base_url is empty
+  release_tag: "models-v3"
+
 dashboard:
   page_title: "SMART IDS v3 — Hybrid SOC Analytics"
   page_icon: "🛡️"

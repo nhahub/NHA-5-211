@@ -83,6 +83,7 @@ def main() -> None:
         models_dir=app_cfg.paths.resolve("models_dir"),
         artifacts_dir=app_cfg.paths.resolve("artifacts_dir"),
     )
+    registry.save_artifact_manifest()
     registry.save_manifest(
         {
             "python_version": platform.python_version(),
