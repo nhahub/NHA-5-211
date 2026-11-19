@@ -7,6 +7,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.detection.anomaly_detection import describe_score_level_fusion
+
 
 def format_ensemble_empirical_conclusion(ens_analysis: dict[str, Any]) -> str:
     """Generate the ensemble empirical conclusion directly from paired bootstrap test results."""
@@ -74,6 +76,49 @@ def _df_to_markdown(df: pd.DataFrame) -> str:
     return "\n".join([header, sep, *rows])
 
 
+_UNMEASURED_FUSION_COLS = (
+    "Latency_Median_us",
+    "Latency_P95_us",
+    "Latency_Mean_us",
+    "Samples_Per_Sec",
+    "Model_Size_MB",
+    "Training_Duration_s",
+)
+
+
+def resolve_fusion_metadata(summary: dict[str, Any]) -> tuple[str, bool, str | None]:
+    """Extract fusion display label and single-detector degeneracy flag from ``summary``."""
+    anom_comp = summary.get("anomaly_detector_comparison", {}) or {}
+    val_sel = (
+        anom_comp.get("val_selection")
+        or (summary.get("training_diagnostics", {}) or {}).get("anomaly_validation_selection", {})
+        or {}
+    )
+    fusion_weights = val_sel.get("fusion_weights")
+    return describe_score_level_fusion(fusion_weights)
+
+
+def normalize_fusion_display_df(
+    df: pd.DataFrame,
+    summary: dict[str, Any],
+    name_col: str = "Model",
+) -> tuple[pd.DataFrame, bool, str | None]:
+    """Relabel degenerate single-detector fusion rows and replace fake 0.0 telemetry with None/N/A."""
+    fusion_label, is_deg, deg_note = resolve_fusion_metadata(summary)
+    if df.empty or name_col not in df.columns:
+        return df, is_deg, deg_note
+
+    out = df.copy()
+    mask = out[name_col].astype(str).str.startswith("Score-Level Fusion")
+    if bool(mask.any()):
+        if is_deg:
+            out.loc[mask, name_col] = fusion_label
+        for col in _UNMEASURED_FUSION_COLS:
+            if col in out.columns:
+                out.loc[mask & (pd.to_numeric(out[col], errors="coerce") == 0.0), col] = None
+    return out, is_deg, deg_note
+
+
 def write_academic_reports(
     summary: dict[str, Any],
     comparison_df: pd.DataFrame,
@@ -111,7 +156,10 @@ def write_academic_reports(
         "on held-out CICIDS2017 evaluation data.\n"
     )
 
-    cmp_md = _df_to_markdown(comparison_df)
+    norm_cmp_df, fusion_is_deg, fusion_deg_note = normalize_fusion_display_df(
+        comparison_df, summary, name_col="Model"
+    )
+    cmp_md = _df_to_markdown(norm_cmp_df)
 
     # 1. Model Comparison Report
     sec_num = 1
@@ -123,6 +171,8 @@ def write_academic_reports(
         "- **Unsupervised anomaly detectors (Autoencoder, Isolation Forest, One-Class SVM, LOF):** Trained strictly on benign flows and evaluated under identical binary novelty framing (Benign vs. Anomalous).\n\n",
         cmp_md + "\n\n",
     ]
+    if fusion_is_deg and fusion_deg_note:
+        comp_lines.append(f"{fusion_deg_note}\n\n")
     ci_lines: list[str] = []
     for key in ("XGBoost", "CNN", "MLP"):
         ev = sup_evals.get(key, {})
@@ -186,16 +236,16 @@ def write_academic_reports(
             tb_rows.append(
                 {
                     "Model": m_name,
-                    "Accuracy": m_vals.get("accuracy", 0.0),
-                    "Precision_Weighted": m_vals.get("precision_weighted", 0.0),
-                    "Recall_Weighted": m_vals.get("recall_weighted", 0.0),
-                    "F1_Weighted": m_vals.get("f1_weighted", 0.0),
-                    "F1_Macro": m_vals.get("f1_macro", 0.0),
-                    "F1_Macro_Reliable": m_vals.get("f1_macro_reliable", 0.0),
-                    "F1_Macro_CI95_Low": ci.get("ci95_low", m_vals.get("f1_macro", 0.0)),
-                    "F1_Macro_CI95_High": ci.get("ci95_high", m_vals.get("f1_macro", 0.0)),
-                    "ROC_AUC_OVR": m_vals.get("roc_auc_macro_ovr", 0.0),
-                    "PR_AUC_OVR": m_vals.get("pr_auc_macro_ovr", 0.0),
+                    "Accuracy": m_vals.get("accuracy"),
+                    "Precision_Weighted": m_vals.get("precision_weighted"),
+                    "Recall_Weighted": m_vals.get("recall_weighted"),
+                    "F1_Weighted": m_vals.get("f1_weighted"),
+                    "F1_Macro": m_vals.get("f1_macro"),
+                    "F1_Macro_Reliable": m_vals.get("f1_macro_reliable"),
+                    "F1_Macro_CI95_Low": ci.get("ci95_low", m_vals.get("f1_macro")),
+                    "F1_Macro_CI95_High": ci.get("ci95_high", m_vals.get("f1_macro")),
+                    "ROC_AUC_OVR": m_vals.get("roc_auc_macro_ovr"),
+                    "PR_AUC_OVR": m_vals.get("pr_auc_macro_ovr"),
                 }
             )
         if tb_rows:
@@ -526,7 +576,12 @@ def write_academic_reports(
             "baselines, and leave-attack-out score-level fusion) remain **supplementary zero-day signals**, "
             "NOT replacements for supervised multi-class XGBoost.\n\n"
         )
-        comp_lines.append(_df_to_markdown(pd.DataFrame(anom_comp["detectors"])) + "\n\n")
+        anom_table_df, anom_is_deg, anom_deg_note = normalize_fusion_display_df(
+            pd.DataFrame(anom_comp["detectors"]), summary, name_col="Detector"
+        )
+        comp_lines.append(_df_to_markdown(anom_table_df) + "\n\n")
+        if anom_is_deg and anom_deg_note:
+            comp_lines.append(f"{anom_deg_note}\n\n")
         val_sel = anom_comp.get("val_selection") or diag.get("anomaly_validation_selection", {})
         if val_sel:
             weights_str = ", ".join(
@@ -626,7 +681,10 @@ def write_academic_reports(
                 continue
             m_disp = "1D-CNN" if m_key == "CNN" else m_key
             for c_row in entry.get("candidates", []):
-                trial_rows.append({"Model": m_disp, **c_row})
+                row_clean = dict(c_row)
+                if row_clean.get("status") == "skipped_time_budget" and row_clean.get("elapsed_sec") == 0.0:
+                    row_clean["elapsed_sec"] = None
+                trial_rows.append({"Model": m_disp, **row_clean})
         if trial_rows:
             comp_lines.append(_df_to_markdown(pd.DataFrame(trial_rows)) + "\n\n")
         for m_key in ("MLP", "CNN"):
@@ -798,7 +856,12 @@ def write_academic_reports(
     if ae or anom_comp.get("detectors"):
         exp_lines.append("## 4. Unsupervised Anomaly Detection & Classical Baselines\n")
         if anom_comp.get("detectors"):
-            exp_lines.append(_df_to_markdown(pd.DataFrame(anom_comp["detectors"])) + "\n\n")
+            exp_anom_df, exp_anom_deg, exp_deg_note = normalize_fusion_display_df(
+                pd.DataFrame(anom_comp["detectors"]), summary, name_col="Detector"
+            )
+            exp_lines.append(_df_to_markdown(exp_anom_df) + "\n\n")
+            if exp_anom_deg and exp_deg_note:
+                exp_lines.append(f"{exp_deg_note}\n\n")
             if anom_comp.get("verdict"):
                 exp_lines.append(f"- **Assessment:** {anom_comp['verdict']}\n\n")
         if ae:

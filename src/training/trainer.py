@@ -201,7 +201,7 @@ def _run_bounded_neural_loss_experiment(
                     "status": "skipped_time_budget",
                     "val_macro_f1": None,
                     "delta_val_macro_f1": None,
-                    "elapsed_sec": 0.0,
+                    "elapsed_sec": None,
                 }
             )
             continue

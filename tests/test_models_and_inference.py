@@ -1543,3 +1543,108 @@ def test_optuna_budget_and_bounded_neural_loss_keep_revert(
     md_text = cmp_path.read_text(encoding="utf-8")
     assert "Neural Baselines vs. Recommended Production Model" in md_text
     assert "Bounded Neural Improvement Trials" in md_text
+
+
+def test_degenerate_fusion_labeling_and_na_unmeasured_values(tmp_path: Path) -> None:
+    """Single-detector fusion is labeled degenerate and unmeasured cells render as N/A (not 0.0)."""
+    from dashboard.pages.model_performance import _display_df_with_na
+    from src.detection.anomaly_detection import describe_score_level_fusion
+    from src.evaluation.report_writer import normalize_fusion_display_df
+
+    deg_label, is_deg, deg_note = describe_score_level_fusion(
+        {"Autoencoder": 1.0, "One-Class SVM": 0.0, "Isolation Forest": 0.0}
+    )
+    assert deg_label == "Score-Level Fusion (degenerate: equals Autoencoder)"
+    assert is_deg is True
+    assert (
+        deg_note
+        == "Validation selected a single-detector fusion; no gain from fusing detectors on this data."
+    )
+
+    multi_label, is_multi_deg, multi_note = describe_score_level_fusion(
+        {"Autoencoder": 0.6, "One-Class SVM": 0.4}
+    )
+    assert is_multi_deg is False
+    assert multi_note is None
+
+    cmp_df = pd.DataFrame(
+        [
+            {
+                "Model": "Autoencoder",
+                "Accuracy": 0.8934,
+                "F1_Weighted": 0.6926,
+                "F1_Macro": 0.6926,
+                "F1_Macro_Reliable": None,
+                "Latency_Median_us": 198.7,
+                "Training_Duration_s": 68.8,
+            },
+            {
+                "Model": "Score-Level Fusion (AE+OCSVM+IF)",
+                "Accuracy": 0.8934,
+                "F1_Weighted": 0.6926,
+                "F1_Macro": 0.6926,
+                "F1_Macro_Reliable": None,
+                "Latency_Median_us": None,
+                "Training_Duration_s": None,
+            },
+        ]
+    )
+    csv_path = tmp_path / "model_comparison.csv"
+    cmp_df.to_csv(csv_path, index=False)
+    csv_lines = csv_path.read_text(encoding="utf-8").splitlines()
+    # Empty CSV fields (",," or trailing ",") rather than "0.0" for unmeasured values
+    assert csv_lines[2].endswith(",,")
+
+    summary = {
+        "dataset_source": {"is_synthetic": False},
+        "split_strategy": "random",
+        "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+        "training_diagnostics": {
+            "neural_loss_experiments": {
+                "CNN": {
+                    "model": "CNN",
+                    "kept_variant": "cross_entropy",
+                    "decision": "Reverted",
+                    "candidates": [
+                        {
+                            "loss_variant": "focal_loss",
+                            "status": "skipped_time_budget",
+                            "val_macro_f1": None,
+                            "elapsed_sec": 0.0,
+                        }
+                    ],
+                }
+            }
+        },
+        "anomaly_detector_comparison": {
+            "val_selection": {"fusion_weights": {"Autoencoder": 1.0, "One-Class SVM": 0.0}},
+            "detectors": [
+                {"Detector": "Autoencoder", "Accuracy": 0.8934, "F1": 0.6926, "ROC_AUC": 0.8676},
+                {
+                    "Detector": "Score-Level Fusion (AE+OCSVM+IF)",
+                    "Accuracy": 0.8934,
+                    "F1": 0.6926,
+                    "ROC_AUC": 0.8676,
+                },
+            ],
+            "verdict": "Supplementary zero-day signals only.",
+        },
+    }
+    cmp_md_path, exp_md_path = write_academic_reports(summary, cmp_df, tmp_path)
+    cmp_md = cmp_md_path.read_text(encoding="utf-8")
+    exp_md = exp_md_path.read_text(encoding="utf-8")
+    assert "Score-Level Fusion (degenerate: equals Autoencoder)" in cmp_md
+    assert "Score-Level Fusion (degenerate: equals Autoencoder)" in exp_md
+    assert (
+        "Validation selected a single-detector fusion; no gain from fusing detectors on this data." in cmp_md
+    )
+    assert (
+        "Validation selected a single-detector fusion; no gain from fusing detectors on this data." in exp_md
+    )
+    assert "| 0.8934 | 0.6926 | 0.6926 | N/A | N/A | N/A |" in cmp_md
+    assert "focal_loss | skipped_time_budget | N/A | N/A |" in cmp_md
+
+    ui_df = _display_df_with_na(normalize_fusion_display_df(cmp_df, summary, name_col="Model")[0])
+    assert ui_df.loc[1, "Model"] == "Score-Level Fusion (degenerate: equals Autoencoder)"
+    assert ui_df.loc[1, "Latency_Median_us"] == "N/A"
+    assert ui_df.loc[1, "Training_Duration_s"] == "N/A"

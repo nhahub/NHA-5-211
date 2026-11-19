@@ -14,6 +14,24 @@ from dashboard.data_access import (
     load_model_comparison_df,
     load_training_histories,
 )
+from src.evaluation.report_writer import normalize_fusion_display_df
+
+
+def _display_df_with_na(df: pd.DataFrame) -> pd.DataFrame:
+    """Format NaN/None cells safely as 'N/A' strings so PyArrow renders without type conflicts."""
+    out = df.copy()
+    for col in out.columns:
+        if out[col].isna().any():
+            if pd.api.types.is_numeric_dtype(out[col]):
+                digits = (
+                    1
+                    if col == "Samples_Per_Sec"
+                    else (2 if "Latency" in str(col) or "Duration" in str(col) else 4)
+                )
+                out[col] = out[col].map(lambda v, d=digits: "N/A" if pd.isna(v) else f"{float(v):.{d}f}")
+            else:
+                out[col] = out[col].fillna("N/A").astype(str)
+    return out
 
 
 def render_model_performance_page() -> None:
@@ -42,14 +60,21 @@ def render_model_performance_page() -> None:
         "The Autoencoder is evaluated separately under binary novelty framing (Benign vs Anomalous)."
     )
     if not df_cmp.empty:
-        st.dataframe(df_cmp, use_container_width=True, hide_index=True)
+        df_cmp_norm, is_deg_fusion, deg_fusion_note = normalize_fusion_display_df(
+            df_cmp, eval_summary, name_col="Model"
+        )
+        st.dataframe(_display_df_with_na(df_cmp_norm), use_container_width=True, hide_index=True)
+        if is_deg_fusion and deg_fusion_note:
+            st.caption(deg_fusion_note)
 
         c1, c2 = st.columns(2)
         with c1:
-            melted = df_cmp.melt(
+            melted = df_cmp_norm.melt(
                 id_vars=["Model"],
                 value_vars=[
-                    col for col in ["Accuracy", "F1_Weighted", "F1_Macro", "ROC_AUC"] if col in df_cmp.columns
+                    col
+                    for col in ["Accuracy", "F1_Weighted", "F1_Macro", "ROC_AUC"]
+                    if col in df_cmp_norm.columns
                 ],
                 var_name="Metric",
                 value_name="Score",
@@ -66,12 +91,13 @@ def render_model_performance_page() -> None:
             st.plotly_chart(apply_soc_plotly_theme(fig_m, height=380), use_container_width=True)
 
         with c2:
-            if "Latency_Median_us" in df_cmp.columns or "Latency_Mean_us" in df_cmp.columns:
-                lat_cols = [c for c in ("Latency_Median_us", "Latency_P95_us") if c in df_cmp.columns] or [
-                    "Latency_Mean_us"
-                ]
+            if "Latency_Median_us" in df_cmp_norm.columns or "Latency_Mean_us" in df_cmp_norm.columns:
+                lat_cols = [
+                    c for c in ("Latency_Median_us", "Latency_P95_us") if c in df_cmp_norm.columns
+                ] or ["Latency_Mean_us"]
+                df_lat = df_cmp_norm.dropna(subset=lat_cols)
                 fig_l = px.bar(
-                    df_cmp,
+                    df_lat,
                     x="Model",
                     y=lat_cols,
                     barmode="group",
@@ -205,7 +231,12 @@ def render_model_performance_page() -> None:
         st.markdown("#### 🧬 Zero-Day Autoencoder & Classical Anomaly Baselines")
         if anom_comp.get("detectors"):
             st.markdown("**Benign-Only Unsupervised Anomaly Detector Comparison**")
-            st.dataframe(pd.DataFrame(anom_comp["detectors"]), use_container_width=True, hide_index=True)
+            anom_df_norm, anom_deg, anom_deg_note = normalize_fusion_display_df(
+                pd.DataFrame(anom_comp["detectors"]), eval_summary, name_col="Detector"
+            )
+            st.dataframe(_display_df_with_na(anom_df_norm), use_container_width=True, hide_index=True)
+            if anom_deg and anom_deg_note:
+                st.caption(anom_deg_note)
             if anom_comp.get("verdict"):
                 st.caption(anom_comp["verdict"])
         ae1, ae2 = st.columns(2)

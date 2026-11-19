@@ -418,3 +418,21 @@ def fit_and_select_anomaly_fusion(
         best_overall_validation_detector=best_overall,
         validation_selection_summary=val_summary,
     )
+
+
+_DEGENERATE_FUSION_NOTE = (
+    "Validation selected a single-detector fusion; no gain from fusing detectors on this data."
+)
+
+
+def describe_score_level_fusion(
+    fusion_weights: dict[str, float] | None,
+    default_name: str = "Score-Level Fusion (AE+OCSVM+IF)",
+) -> tuple[str, bool, str | None]:
+    """Return ``(display_label, is_degenerate, note)`` identifying single-detector fusion weights."""
+    active = {k: float(w) for k, w in (fusion_weights or {}).items() if float(w) > 1e-6}
+    if len(active) == 1:
+        sole_name, sole_weight = next(iter(active.items()))
+        if abs(sole_weight - 1.0) <= 1e-6:
+            return f"Score-Level Fusion (degenerate: equals {sole_name})", True, _DEGENERATE_FUSION_NOTE
+    return default_name, False, None

@@ -18,7 +18,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import AppConfig, ModelConfig, get_app_config, get_model_config
-from src.detection.anomaly_detection import fit_classical_anomaly_baselines
+from src.detection.anomaly_detection import (
+    describe_score_level_fusion,
+    fit_classical_anomaly_baselines,
+)
 from src.evaluation.benchmarking import benchmark_model_inference, benchmark_preprocessing_latency
 from src.evaluation.metrics import (
     _binary_metrics,
@@ -466,15 +469,23 @@ def run_evaluation_suite(
     # Evaluate Score-Level Anomaly Fusion (weights chosen strictly on non-test benign val + LOO attacks)
     fusion_obj = artifacts.anomaly_fusion
     all_test_scores = {"Autoencoder": ae_test_errors, **baseline_anomaly_scores}
+    fusion_weights_raw = getattr(fusion_obj, "weights", None) if fusion_obj is not None else None
+    fusion_raw_name = (
+        getattr(fusion_obj, "name", "Score-Level Fusion (AE+OCSVM+IF)")
+        if fusion_obj is not None
+        else "Score-Level Fusion (AE+OCSVM+IF)"
+    )
+    fusion_display_name, fusion_is_degenerate, fusion_deg_note = describe_score_level_fusion(
+        fusion_weights_raw, default_name=fusion_raw_name
+    )
     if fusion_obj is not None:
         needed_comps = [k for k, w in fusion_obj.weights.items() if w > 0]
         if needed_comps and all(k in all_test_scores and k in anom_val_benign_scores for k in needed_comps):
-            fusion_name = getattr(fusion_obj, "name", "Score-Level Fusion (AE+OCSVM+IF)")
             f_val_scores = fusion_obj.score_from_components(anom_val_benign_scores)
             f_test_scores = fusion_obj.score_from_components(all_test_scores)
-            baseline_anomaly_scores[fusion_name] = f_test_scores
-            anomaly_evals[fusion_name] = evaluate_anomaly_detector(
-                model_name=fusion_name,
+            baseline_anomaly_scores[fusion_display_name] = f_test_scores
+            anomaly_evals[fusion_display_name] = evaluate_anomaly_detector(
+                model_name=fusion_display_name,
                 y_test_multiclass=y_test,
                 anomaly_scores_test=f_test_scores,
                 benign_val_scores=f_val_scores,
@@ -492,6 +503,8 @@ def run_evaluation_suite(
         anom_val_sel.get("best_overall_validation_detector")
         or (getattr(fusion_obj, "best_overall_validation_detector", "") if fusion_obj else "")
     )
+    if fusion_is_degenerate and val_winner_name.startswith("Score-Level Fusion"):
+        val_winner_name = fusion_display_name
     anomaly_detector_comparison: dict[str, Any] = {}
     if anomaly_evals:
         comp_rows = []
@@ -529,8 +542,13 @@ def run_evaluation_suite(
                     "Val_Selected": "YES" if det_name == val_winner_name else "",
                 }
             )
-        best_f1_det = max(comp_rows, key=lambda r: r["F1"])
-        best_auc_det = max(comp_rows, key=lambda r: r["ROC_AUC"])
+        rank_rows = (
+            [r for r in comp_rows if r["Detector"] != fusion_display_name]
+            if fusion_is_degenerate and len(comp_rows) > 1
+            else comp_rows
+        )
+        best_f1_det = max(rank_rows, key=lambda r: r["F1"])
+        best_auc_det = max(rank_rows, key=lambda r: r["ROC_AUC"])
         ae_row = next((r for r in comp_rows if r["Detector"] == "Autoencoder"), None)
         verdict = (
             f"Best binary F1 at {model_c.autoencoder.threshold_percentile:.0f}th-pct threshold: "
@@ -540,7 +558,9 @@ def run_evaluation_suite(
             f"best overall ROC-AUC ranking: {best_auc_det['Detector']} (ROC-AUC={best_auc_det['ROC_AUC']:.4f}); "
             f"validation-selected option (leave-attack-out non-test): '{val_winner_name or best_f1_det['Detector']}'."
         )
-        if ae_row and best_f1_det["Detector"] != "Autoencoder":
+        if fusion_deg_note:
+            verdict += f" {fusion_deg_note}"
+        elif ae_row and best_f1_det["Detector"] != "Autoencoder":
             verdict += (
                 f" Baseline Autoencoder achieved F1={ae_row['F1']:.4f} / ROC-AUC={ae_row['ROC_AUC']:.4f}. "
                 "All benign-only unsupervised options remain strictly supplementary zero-day signals and do NOT "
@@ -556,6 +576,8 @@ def run_evaluation_suite(
             "best_by_f1": best_f1_det["Detector"],
             "best_by_roc_auc": best_auc_det["Detector"],
             "validation_winner": val_winner_name,
+            "is_degenerate_fusion": fusion_is_degenerate,
+            "degenerate_fusion_note": fusion_deg_note,
             "val_selection": anom_val_sel,
             "detectors": comp_rows,
             "verdict": verdict,
@@ -579,6 +601,14 @@ def run_evaluation_suite(
         train_diag.get("imbalance_strategies_by_model") or artifacts.model_imbalance_strategies or {}
     )
     fallback_imb = train_diag.get("imbalance_experiment", {}).get("selected_strategy", "none")
+
+    def _opt_num(mapping: dict[str, Any], field: str, digits: int | None = None) -> float | None:
+        val = mapping.get(field)
+        if val is None:
+            return None
+        num = float(val)
+        return round(num, digits) if digits is not None else num
+
     rows_cmp: list[dict[str, Any]] = []
     name_map = {"MLP": "MLP", "CNN": "1D-CNN", "XGBoost": "XGBoost"}
     for key, display in name_map.items():
@@ -587,6 +617,7 @@ def run_evaluation_suite(
         ev = supervised_evals[key]
         lat = latency_table.get(display, {})
         ci = ev.get("f1_macro_ci95", {})
+        dur_val = durations.get(key)
         rows_cmp.append(
             {
                 "Model": display,
@@ -602,12 +633,12 @@ def run_evaluation_suite(
                 "F1_Macro_CI95_High": round(ci.get("ci95_high", ev["f1_macro"]), 4),
                 "ROC_AUC": round(ev["roc_auc_macro_ovr"], 4),
                 "PR_AUC": round(ev["pr_auc_macro_ovr"], 4),
-                "Latency_Median_us": round(lat.get("single_median_us", 0.0), 2),
-                "Latency_P95_us": round(lat.get("single_p95_us", 0.0), 2),
-                "Latency_Mean_us": round(lat.get("single_mean_us", 0.0), 2),
-                "Samples_Per_Sec": round(lat.get("batch_samples_per_sec", 0.0), 1),
-                "Model_Size_MB": lat.get("model_size_mb", 0.0),
-                "Training_Duration_s": round(float(durations.get(key, 0.0)), 2),
+                "Latency_Median_us": _opt_num(lat, "single_median_us", 2),
+                "Latency_P95_us": _opt_num(lat, "single_p95_us", 2),
+                "Latency_Mean_us": _opt_num(lat, "single_mean_us", 2),
+                "Samples_Per_Sec": _opt_num(lat, "batch_samples_per_sec", 1),
+                "Model_Size_MB": _opt_num(lat, "model_size_mb", 3),
+                "Training_Duration_s": round(float(dur_val), 2) if dur_val is not None else None,
             }
         )
 
@@ -615,7 +646,7 @@ def run_evaluation_suite(
         det_ev = anomaly_evals[det_name]
         lat_det = latency_table.get(det_name, {})
         det_ci = det_ev.get("f1_ci95", {})
-        fit_dur = durations.get(det_name, det_ev.get("fit_duration_sec", 0.0))
+        fit_dur = durations.get(det_name) if det_name in durations else det_ev.get("fit_duration_sec")
         rows_cmp.append(
             {
                 "Model": det_name,
@@ -631,12 +662,12 @@ def run_evaluation_suite(
                 "F1_Macro_CI95_High": round(det_ci.get("ci95_high", det_ev["f1"]), 4),
                 "ROC_AUC": round(det_ev["roc_auc"], 4),
                 "PR_AUC": round(det_ev["pr_auc"], 4),
-                "Latency_Median_us": round(lat_det.get("single_median_us", 0.0), 2),
-                "Latency_P95_us": round(lat_det.get("single_p95_us", 0.0), 2),
-                "Latency_Mean_us": round(lat_det.get("single_mean_us", 0.0), 2),
-                "Samples_Per_Sec": round(lat_det.get("batch_samples_per_sec", 0.0), 1),
-                "Model_Size_MB": lat_det.get("model_size_mb", 0.0),
-                "Training_Duration_s": round(float(fit_dur), 2),
+                "Latency_Median_us": _opt_num(lat_det, "single_median_us", 2),
+                "Latency_P95_us": _opt_num(lat_det, "single_p95_us", 2),
+                "Latency_Mean_us": _opt_num(lat_det, "single_mean_us", 2),
+                "Samples_Per_Sec": _opt_num(lat_det, "batch_samples_per_sec", 1),
+                "Model_Size_MB": _opt_num(lat_det, "model_size_mb", 3),
+                "Training_Duration_s": round(float(fit_dur), 2) if fit_dur is not None else None,
             }
         )
 
