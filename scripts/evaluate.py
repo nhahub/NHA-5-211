@@ -486,6 +486,10 @@ def run_evaluation_suite(
 
     # 5. Comparison CSV (exact contract expected by report & dashboard)
     durations = train_diag.get("training_durations_sec", {})
+    imb_by_model = dict(
+        train_diag.get("imbalance_strategies_by_model") or artifacts.model_imbalance_strategies or {}
+    )
+    fallback_imb = train_diag.get("imbalance_experiment", {}).get("selected_strategy", "none")
     rows_cmp: list[dict[str, Any]] = []
     name_map = {"MLP": "MLP", "CNN": "1D-CNN", "XGBoost": "XGBoost"}
     for key, display in name_map.items():
@@ -497,6 +501,7 @@ def run_evaluation_suite(
         rows_cmp.append(
             {
                 "Model": display,
+                "Imbalance_Strategy": imb_by_model.get(key, fallback_imb),
                 "Evaluation_Framing": ev["framing"],
                 "Accuracy": round(ev["accuracy"], 4),
                 "Precision_Weighted": round(ev["precision_weighted"], 4),
@@ -526,6 +531,7 @@ def run_evaluation_suite(
         rows_cmp.append(
             {
                 "Model": det_name,
+                "Imbalance_Strategy": "benign_only",
                 "Evaluation_Framing": det_ev["framing"],
                 "Accuracy": round(det_ev["accuracy"], 4),
                 "Precision_Weighted": round(det_ev["precision"], 4),

@@ -538,19 +538,68 @@ def write_academic_reports(
     imb_exp = diag.get("imbalance_experiment", {})
     if imb_exp:
         exp_lines.append("## 2. Class Imbalance Experiment (Unweighted vs. Class Weighting vs. SMOTE)\n")
-        imb_rows = [
-            {"Strategy": label, **imb_exp[key]}
-            for label, key in [
-                ("Unweighted ('none')", "baseline_unweighted_metrics"),
-                ("Class Weighting ('class_weight')", "class_weight_metrics"),
-                ("Hybrid SMOTE ('smote')", "smote_metrics"),
+        per_model_imb = imb_exp.get("per_model", {})
+        if per_model_imb:
+            cap_note = imb_exp.get("neural_epochs_cap")
+            cap_str = (
+                f" (neural candidates capped at `{cap_note}` epochs during selection; full training runs only for each model's winner)"
+                if cap_note
+                else ""
+            )
+            exp_lines.append(f"Selection mode: `{imb_exp.get('selection_mode', 'per_model')}`{cap_str}.\n\n")
+            matrix_rows = []
+            strat_display = {
+                "none": "Unweighted ('none')",
+                "class_weight": "Class Weighting ('class_weight')",
+                "smote": "Hybrid SMOTE ('smote')",
+            }
+            for m_key in ("MLP", "CNN", "XGBoost"):
+                m_entry = per_model_imb.get(m_key)
+                if not m_entry:
+                    continue
+                m_disp = "1D-CNN" if m_key == "CNN" else m_key
+                sel_m = m_entry.get("selected_strategy", "")
+                m_strats = m_entry.get("metrics_by_strategy", {})
+                for strat_key in ("none", "class_weight", "smote"):
+                    s_metrics = m_strats.get(strat_key)
+                    if not s_metrics:
+                        continue
+                    matrix_rows.append(
+                        {
+                            "Model": m_disp,
+                            "Strategy": strat_display.get(strat_key, strat_key),
+                            "Val_Macro_F1": round(float(s_metrics.get("val_macro_f1", 0.0)), 4),
+                            "Val_Weighted_F1": round(float(s_metrics.get("val_weighted_f1", 0.0)), 4),
+                            "Val_Macro_Recall": round(float(s_metrics.get("val_macro_recall", 0.0)), 4),
+                            "Val_MLogLoss": round(float(s_metrics.get("val_mlogloss", 0.0)), 4),
+                            "Selected": "YES" if strat_key == sel_m else "",
+                        }
+                    )
+            if matrix_rows:
+                exp_lines.append(_df_to_markdown(pd.DataFrame(matrix_rows)) + "\n\n")
+            for m_key in ("MLP", "CNN", "XGBoost"):
+                m_entry = per_model_imb.get(m_key)
+                if not m_entry:
+                    continue
+                m_disp = "1D-CNN" if m_key == "CNN" else m_key
+                exp_lines.append(
+                    f"- **{m_disp} (`{m_entry.get('selected_strategy')}`):** {m_entry.get('justification', '')}\n"
+                )
+            exp_lines.append(f"- **Overall Summary:** {imb_exp.get('justification', '')}\n\n")
+        else:
+            imb_rows = [
+                {"Strategy": label, **imb_exp[key]}
+                for label, key in [
+                    ("Unweighted ('none')", "baseline_unweighted_metrics"),
+                    ("Class Weighting ('class_weight')", "class_weight_metrics"),
+                    ("Hybrid SMOTE ('smote')", "smote_metrics"),
+                ]
+                if imb_exp.get(key)
             ]
-            if imb_exp.get(key)
-        ]
-        if imb_rows:
-            exp_lines.append(_df_to_markdown(pd.DataFrame(imb_rows)) + "\n\n")
-        exp_lines.append(f"- **Selected Strategy:** `{imb_exp.get('selected_strategy')}`\n")
-        exp_lines.append(f"- **Justification:** {imb_exp.get('justification')}\n\n")
+            if imb_rows:
+                exp_lines.append(_df_to_markdown(pd.DataFrame(imb_rows)) + "\n\n")
+            exp_lines.append(f"- **Selected Strategy:** `{imb_exp.get('selected_strategy')}`\n")
+            exp_lines.append(f"- **Justification:** {imb_exp.get('justification')}\n\n")
 
     cal_rep = diag.get("calibration_report", {})
     if cal_rep:

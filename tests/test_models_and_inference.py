@@ -53,6 +53,7 @@ from src.models.mlp import build_mlp
 from src.models.xgboost_model import build_xgboost_classifier
 from src.response.response_engine import ActiveResponseEngine
 from src.training.optimization import (
+    compare_imbalance_per_model,
     compare_smote_vs_class_weight,
     optimize_xgboost_with_optuna,
     select_imbalance_strategy,
@@ -728,6 +729,16 @@ def test_train_all_models_unified_cv_regression(tmp_app_config: AppConfig) -> No
     )
     assert out.xgb_optimization.cv_macro_f1_std >= 0.0
     assert "StratifiedKFold" in out.xgb_optimization.cv_method_note
+    assert set(out.imbalance_strategies_by_model.keys()) == {"MLP", "CNN", "XGBoost"}
+    assert out.imbalance_experiment.selection_mode == "per_model"
+    loaded_meta = ModelRegistry(
+        models_dir=tmp_app_config.paths.resolve("models_dir"),
+        artifacts_dir=tmp_app_config.paths.resolve("artifacts_dir"),
+    ).load_all(load_keras=False)
+    for model_key, expected_strat in out.imbalance_strategies_by_model.items():
+        assert loaded_meta.model_imbalance_strategies[model_key] == expected_strat
+    assert loaded_meta.model_imbalance_strategies["Autoencoder"] == "benign_only"
+    assert loaded_meta.model_metadata["MLP"]["imbalance_strategy"] == out.imbalance_strategies_by_model["MLP"]
 
 
 def test_imbalance_tie_breaking_with_synthetic_metric_dicts() -> None:
@@ -809,3 +820,194 @@ def test_imbalance_tie_breaking_with_synthetic_metric_dicts() -> None:
     assert sel3 == "smote"
     assert "beating runner-up" in just3
     assert "tie within tolerance" not in just3.lower()
+
+
+def test_per_model_imbalance_selection_caps_epochs_and_reports(
+    tmp_app_config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Per-model imbalance selection evaluates each model independently, caps epochs, and renders matrix."""
+    rng = np.random.default_rng(77)
+    X_tr = rng.normal(size=(150, 8)).astype(np.float32)
+    y_tr = np.array([0] * 110 + [1] * 25 + [2] * 15, dtype=np.int64)
+    X_tr[y_tr == 1] += 2.2
+    X_tr[y_tr == 2] -= 2.2
+
+    X_sm = rng.normal(size=(240, 8)).astype(np.float32)
+    y_sm = np.array([0] * 110 + [1] * 70 + [2] * 60, dtype=np.int64)
+    X_sm[y_sm == 1] += 2.2
+    X_sm[y_sm == 2] -= 2.2
+
+    X_va = rng.normal(size=(75, 8)).astype(np.float32)
+    y_va = np.array([0] * 55 + [1] * 12 + [2] * 8, dtype=np.int64)
+    X_va[y_va == 1] += 2.2
+    X_va[y_va == 2] -= 2.2
+
+    cw = {0: 0.45, 1: 2.0, 2: 3.3}
+    m_cfg = ModelConfig()
+    m_cfg.mlp.epochs = 25
+    m_cfg.cnn.epochs = 25
+
+    res = compare_imbalance_per_model(
+        X_train_scaled=X_tr,
+        y_train=y_tr,
+        X_train_sm=X_sm,
+        y_train_sm=y_sm,
+        X_val_scaled=X_va,
+        y_val=y_va,
+        class_weights=cw,
+        num_classes=3,
+        model_cfg=m_cfg,
+        smote_class_weights={0: 1.0, 1: 1.0, 2: 1.0},
+        xgb_device="cpu",
+        seed=42,
+        tie_tolerance=0.002,
+        neural_epochs_cap=2,
+    )
+    assert res.selection_mode == "per_model"
+    assert res.neural_epochs_cap == 2
+    assert set(res.per_model.keys()) == {"MLP", "CNN", "XGBoost"}
+    assert set(res.selected_strategies_by_model.keys()) == {"MLP", "CNN", "XGBoost"}
+    assert res.per_model["MLP"]["epochs_cap_applied"] == 2
+    assert res.per_model["CNN"]["epochs_cap_applied"] == 2
+    for model_key in ("MLP", "CNN", "XGBoost"):
+        assert set(res.per_model[model_key]["metrics_by_strategy"].keys()) == {
+            "none",
+            "class_weight",
+            "smote",
+        }
+
+    # Verify independent winners are possible per model using mocked strategy evaluators
+    import src.training.optimization as opt_mod
+
+    fake_neural_map = {
+        "MLP": {
+            "none": {
+                "val_macro_f1": 0.67,
+                "val_weighted_f1": 0.96,
+                "val_macro_recall": 0.65,
+                "val_mlogloss": 0.2,
+            },
+            "class_weight": {
+                "val_macro_f1": 0.76,
+                "val_weighted_f1": 0.97,
+                "val_macro_recall": 0.80,
+                "val_mlogloss": 0.15,
+            },
+            "smote": {
+                "val_macro_f1": 0.72,
+                "val_weighted_f1": 0.96,
+                "val_macro_recall": 0.75,
+                "val_mlogloss": 0.18,
+            },
+        },
+        "CNN": {
+            "none": {
+                "val_macro_f1": 0.70,
+                "val_weighted_f1": 0.97,
+                "val_macro_recall": 0.68,
+                "val_mlogloss": 0.18,
+            },
+            "class_weight": {
+                "val_macro_f1": 0.71,
+                "val_weighted_f1": 0.97,
+                "val_macro_recall": 0.70,
+                "val_mlogloss": 0.17,
+            },
+            "smote": {
+                "val_macro_f1": 0.79,
+                "val_weighted_f1": 0.98,
+                "val_macro_recall": 0.78,
+                "val_mlogloss": 0.12,
+            },
+        },
+    }
+    monkeypatch.setattr(
+        opt_mod,
+        "_evaluate_neural_imbalance_strategies",
+        lambda **kw: (fake_neural_map[kw["model_name"]], int(kw["neural_epochs_cap"])),
+    )
+    monkeypatch.setattr(
+        opt_mod,
+        "_evaluate_xgb_imbalance_strategies",
+        lambda **kw: {
+            "none": {
+                "val_macro_f1": 0.951,
+                "val_weighted_f1": 0.999,
+                "val_macro_recall": 0.94,
+                "val_mlogloss": 0.01,
+            },
+            "class_weight": {
+                "val_macro_f1": 0.945,
+                "val_weighted_f1": 0.998,
+                "val_macro_recall": 0.95,
+                "val_mlogloss": 0.02,
+            },
+            "smote": {
+                "val_macro_f1": 0.952,
+                "val_weighted_f1": 0.999,
+                "val_macro_recall": 0.94,
+                "val_mlogloss": 0.01,
+            },
+        },
+    )
+    diverged = compare_imbalance_per_model(
+        X_train_scaled=X_tr,
+        y_train=y_tr,
+        X_train_sm=X_sm,
+        y_train_sm=y_sm,
+        X_val_scaled=X_va,
+        y_val=y_va,
+        class_weights=cw,
+        num_classes=3,
+        model_cfg=m_cfg,
+        tie_tolerance=0.002,
+        neural_epochs_cap=5,
+    )
+    assert diverged.selected_strategies_by_model == {
+        "MLP": "class_weight",
+        "CNN": "smote",
+        "XGBoost": "none",
+    }
+
+    # Verify report writer renders all Strategy x Model rows and per-model justifications
+    reports_dir = tmp_app_config.paths.resolve("reports_dir")
+    cmp_df = pd.DataFrame(
+        [
+            {
+                "Model": "MLP",
+                "Imbalance_Strategy": "class_weight",
+                "Accuracy": 0.98,
+                "F1_Weighted": 0.98,
+                "F1_Macro": 0.76,
+            },
+            {
+                "Model": "1D-CNN",
+                "Imbalance_Strategy": "smote",
+                "Accuracy": 0.98,
+                "F1_Weighted": 0.98,
+                "F1_Macro": 0.79,
+            },
+            {
+                "Model": "XGBoost",
+                "Imbalance_Strategy": "none",
+                "Accuracy": 0.99,
+                "F1_Weighted": 0.99,
+                "F1_Macro": 0.95,
+            },
+        ]
+    )
+    summary = {
+        "dataset_source": {"is_synthetic": False},
+        "split_strategy": "random",
+        "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+        "training_diagnostics": {
+            "imbalance_experiment": diverged.to_dict(),
+            "imbalance_strategies_by_model": diverged.selected_strategies_by_model,
+        },
+    }
+    _, exp_path = write_academic_reports(summary, cmp_df, reports_dir)
+    exp_text = exp_path.read_text(encoding="utf-8")
+    assert "MLP (`class_weight`)" in exp_text
+    assert "1D-CNN (`smote`)" in exp_text
+    assert "XGBoost (`none`)" in exp_text
+    assert "Val_Macro_F1" in exp_text

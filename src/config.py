@@ -184,6 +184,14 @@ class ResponseConfig(BaseModel):
     )
 
 
+class ImbalanceSelectionConfig(BaseModel):
+    """Per-model imbalance strategy selection controls."""
+
+    per_model: bool = True
+    neural_epochs_cap: int = Field(default=10, ge=1)
+    tie_tolerance: float | None = Field(default=None, ge=0.0, le=0.2)
+
+
 class DashboardConfig(BaseModel):
     """Streamlit UI runtime settings."""
 
@@ -200,6 +208,7 @@ class AppConfig(BaseModel):
     project: ProjectSettings = Field(default_factory=ProjectSettings)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     data: DataConfig = Field(default_factory=DataConfig)
+    imbalance_selection: ImbalanceSelectionConfig = Field(default_factory=ImbalanceSelectionConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     response: ResponseConfig = Field(default_factory=ResponseConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)

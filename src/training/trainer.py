@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import time
 from typing import Any
@@ -33,8 +33,10 @@ from src.training.callbacks import build_keras_callbacks, safe_save_keras_model
 from src.training.optimization import (
     ImbalanceExperimentResult,
     XGBoostOptimizationResult,
+    compare_imbalance_per_model,
     compare_smote_vs_class_weight,
     optimize_xgboost_with_optuna,
+    prepare_strategy_training_data,
 )
 from src.utils.logging import get_logger
 from src.utils.model_registry import ModelRegistry
@@ -60,6 +62,7 @@ class TrainingOutputs:
     hardware_profile: HardwareProfile
     stacker: StackingMetaLearner | None = None
     best_supervised_model: str = "XGBoost"
+    imbalance_strategies_by_model: dict[str, str] = field(default_factory=dict)
 
 
 def _extract_history_dict(history_obj: Any) -> dict[str, list[float]]:
@@ -108,52 +111,96 @@ def train_all_models(
     num_features = dataset.X_train_scaled.shape[1]
     num_classes = len(dataset.class_names)
 
-    # 1. Experimentally compare Unweighted vs Class Weighting vs SMOTE on validation set
+    # 1. Experimentally select imbalance strategy (per model when configured, else global)
+    tie_tol = (
+        app_cfg.imbalance_selection.tie_tolerance
+        if app_cfg.imbalance_selection.tie_tolerance is not None
+        else app_cfg.data.imbalance.imbalance_tie_tolerance
+    )
     if app_cfg.data.imbalance.strategy == "auto_compare":
-        imb_result = compare_smote_vs_class_weight(
-            X_train_scaled=dataset.X_train_scaled,
-            y_train=dataset.y_train,
-            X_train_sm=dataset.X_train_sm,
-            y_train_sm=dataset.y_train_sm,
-            X_val_scaled=dataset.X_val_scaled,
-            y_val=dataset.y_val,
-            class_weights=dataset.class_weights,
-            num_classes=num_classes,
-            smote_class_weights=dataset.smote_class_weights,
-            xgb_device=hardware.xgb_device,
-            seed=seed,
-            tie_tolerance=app_cfg.data.imbalance.imbalance_tie_tolerance,
-        )
-        chosen_imb = imb_result.selected_strategy
+        if app_cfg.imbalance_selection.per_model:
+            imb_result = compare_imbalance_per_model(
+                X_train_scaled=dataset.X_train_scaled,
+                y_train=dataset.y_train,
+                X_train_sm=dataset.X_train_sm,
+                y_train_sm=dataset.y_train_sm,
+                X_val_scaled=dataset.X_val_scaled,
+                y_val=dataset.y_val,
+                class_weights=dataset.class_weights,
+                num_classes=num_classes,
+                model_cfg=model_cfg,
+                smote_class_weights=dataset.smote_class_weights,
+                xgb_device=hardware.xgb_device,
+                seed=seed,
+                tie_tolerance=tie_tol,
+                neural_epochs_cap=app_cfg.imbalance_selection.neural_epochs_cap,
+            )
+            set_global_seed(seed)
+        else:
+            imb_result = compare_smote_vs_class_weight(
+                X_train_scaled=dataset.X_train_scaled,
+                y_train=dataset.y_train,
+                X_train_sm=dataset.X_train_sm,
+                y_train_sm=dataset.y_train_sm,
+                X_val_scaled=dataset.X_val_scaled,
+                y_val=dataset.y_val,
+                class_weights=dataset.class_weights,
+                num_classes=num_classes,
+                smote_class_weights=dataset.smote_class_weights,
+                xgb_device=hardware.xgb_device,
+                seed=seed,
+                tie_tolerance=tie_tol,
+            )
     else:
-        chosen_imb = app_cfg.data.imbalance.strategy
+        explicit_imb = app_cfg.data.imbalance.strategy
         imb_result = ImbalanceExperimentResult(
             smote_metrics={},
             class_weight_metrics={},
             baseline_unweighted_metrics={},
-            selected_strategy=chosen_imb,
-            justification=f"Configured explicitly via data.imbalance.strategy={chosen_imb}.",
+            selected_strategy=explicit_imb,
+            justification=f"Configured explicitly via data.imbalance.strategy={explicit_imb}.",
+            selected_strategies_by_model={
+                "MLP": explicit_imb,
+                "CNN": explicit_imb,
+                "XGBoost": explicit_imb,
+            },
+            selection_mode="explicit",
         )
 
-    if chosen_imb == "smote":
-        X_sup_train = dataset.X_train_sm
-        y_sup_train = dataset.y_train_sm
-        keras_class_weight = dataset.smote_class_weights
-        xgb_sample_weight = (
-            np.array([dataset.smote_class_weights[int(c)] for c in y_sup_train], dtype=np.float32)
-            if dataset.smote_class_weights
-            else None
-        )
-    elif chosen_imb == "class_weight":
-        X_sup_train = dataset.X_train_scaled
-        y_sup_train = dataset.y_train
-        keras_class_weight = dataset.class_weights
-        xgb_sample_weight = np.array([dataset.class_weights[int(c)] for c in y_sup_train], dtype=np.float32)
-    else:
-        X_sup_train = dataset.X_train_scaled
-        y_sup_train = dataset.y_train
-        keras_class_weight = None
-        xgb_sample_weight = None
+    selected_strategies: dict[str, str] = {
+        "MLP": imb_result.selected_strategies_by_model.get("MLP", imb_result.selected_strategy),
+        "CNN": imb_result.selected_strategies_by_model.get("CNN", imb_result.selected_strategy),
+        "XGBoost": imb_result.selected_strategies_by_model.get("XGBoost", imb_result.selected_strategy),
+    }
+
+    X_mlp_train, y_mlp_train, mlp_class_weight, _ = prepare_strategy_training_data(
+        selected_strategies["MLP"],
+        dataset.X_train_scaled,
+        dataset.y_train,
+        dataset.X_train_sm,
+        dataset.y_train_sm,
+        dataset.class_weights,
+        dataset.smote_class_weights,
+    )
+    X_cnn_train, y_cnn_train, cnn_class_weight, _ = prepare_strategy_training_data(
+        selected_strategies["CNN"],
+        dataset.X_train_scaled,
+        dataset.y_train,
+        dataset.X_train_sm,
+        dataset.y_train_sm,
+        dataset.class_weights,
+        dataset.smote_class_weights,
+    )
+    X_xgb_train, y_xgb_train, _, xgb_sample_weight = prepare_strategy_training_data(
+        selected_strategies["XGBoost"],
+        dataset.X_train_scaled,
+        dataset.y_train,
+        dataset.X_train_sm,
+        dataset.y_train_sm,
+        dataset.class_weights,
+        dataset.smote_class_weights,
+    )
+    xgb_imb = selected_strategies["XGBoost"]
 
     histories: dict[str, dict[str, list[float]]] = {}
     durations: dict[str, float] = {}
@@ -161,7 +208,11 @@ def train_all_models(
     trained_models: dict[str, Any] = {}
 
     # 2. Train MLP (512 -> 256 -> 128 -> 64)
-    logger.info("Training MLP classifier on %d samples...", len(X_sup_train))
+    logger.info(
+        "Training MLP classifier on %d samples (imbalance strategy='%s')...",
+        len(X_mlp_train),
+        selected_strategies["MLP"],
+    )
     mlp_epochs = epochs_override or model_cfg.mlp.epochs
     mlp = build_mlp(num_features, num_classes, cfg=model_cfg.mlp)
     mlp_ckpt = models_dir / model_cfg.mlp.checkpoint_name
@@ -174,13 +225,13 @@ def train_all_models(
     )
     t0 = time.perf_counter()
     mlp_hist = mlp.fit(
-        X_sup_train,
-        y_sup_train,
+        X_mlp_train,
+        y_mlp_train,
         validation_data=(dataset.X_val_scaled, dataset.y_val),
         epochs=mlp_epochs,
         batch_size=model_cfg.mlp.batch_size,
         callbacks=mlp_callbacks,
-        class_weight=keras_class_weight,
+        class_weight=mlp_class_weight,
         verbose=2,
     )
     durations["MLP"] = float(time.perf_counter() - t0)
@@ -191,7 +242,11 @@ def train_all_models(
     logger.info("MLP finished in %.2fs | %s", durations["MLP"], overfit_stats["MLP"])
 
     # 3. Train 1D-CNN
-    logger.info("Training 1D-CNN classifier on %d samples...", len(X_sup_train))
+    logger.info(
+        "Training 1D-CNN classifier on %d samples (imbalance strategy='%s')...",
+        len(X_cnn_train),
+        selected_strategies["CNN"],
+    )
     cnn_epochs = epochs_override or model_cfg.cnn.epochs
     cnn = build_cnn1d(num_features, num_classes, cfg=model_cfg.cnn)
     cnn_ckpt = models_dir / model_cfg.cnn.checkpoint_name
@@ -202,17 +257,17 @@ def train_all_models(
         reduce_lr_factor=model_cfg.cnn.reduce_lr_factor,
         min_lr=model_cfg.cnn.min_lr,
     )
-    X_train_cnn = X_sup_train.reshape(-1, num_features, 1)
+    X_train_cnn = X_cnn_train.reshape(-1, num_features, 1)
     X_val_cnn = dataset.X_val_scaled.reshape(-1, num_features, 1)
     t0 = time.perf_counter()
     cnn_hist = cnn.fit(
         X_train_cnn,
-        y_sup_train,
+        y_cnn_train,
         validation_data=(X_val_cnn, dataset.y_val),
         epochs=cnn_epochs,
         batch_size=model_cfg.cnn.batch_size,
         callbacks=cnn_callbacks,
-        class_weight=keras_class_weight,
+        class_weight=cnn_class_weight,
         verbose=2,
     )
     durations["CNN"] = float(time.perf_counter() - t0)
@@ -315,7 +370,7 @@ def train_all_models(
             app_cfg=app_cfg,
             model_cfg=model_cfg,
             xgb_params=None,
-            imbalance_strategy=chosen_imb,
+            imbalance_strategy=xgb_imb,
             n_splits=app_cfg.evaluation.cv_n_splits,
             force_synthetic=dataset.source_info.is_synthetic,
         )
@@ -326,13 +381,13 @@ def train_all_models(
             unified_cv_note = (
                 f"Unified {baseline_cv_res['n_splits']}-fold StratifiedKFold on the development pool "
                 f"({baseline_cv_res['dev_pool_rows']:,} rows = train+val, held-out test excluded) with "
-                f"per-fold preprocessing and '{chosen_imb}' imbalance handling (sample ddof=1 std across folds)."
+                f"per-fold preprocessing and '{xgb_imb}' imbalance handling (sample ddof=1 std across folds)."
             )
 
     t0 = time.perf_counter()
     xgb_opt = optimize_xgboost_with_optuna(
-        X_train=X_sup_train,
-        y_train=y_sup_train,
+        X_train=X_xgb_train,
+        y_train=y_xgb_train,
         X_val=dataset.X_val_scaled,
         y_val=dataset.y_val,
         num_classes=num_classes,
@@ -346,8 +401,8 @@ def train_all_models(
         cv_raw_X=dataset.X_train_scaled,
         cv_raw_y=dataset.y_train,
         cv_n_splits=app_cfg.evaluation.cv_n_splits,
-        use_cv_class_weight=(chosen_imb == "class_weight"),
-        cv_imbalance_strategy=chosen_imb,
+        use_cv_class_weight=(xgb_imb == "class_weight"),
+        cv_imbalance_strategy=xgb_imb,
         smote_kwargs=smote_kw,
     )
     durations["XGBoost"] = float(time.perf_counter() - t0)
@@ -356,7 +411,7 @@ def train_all_models(
     trained_models["XGBoost"] = xgb_model
 
     # 6. Probability calibration analysis & Temperature Scaling fit strictly on validation probabilities
-    xgb_present_cls = np.unique(y_sup_train).astype(np.int64)
+    xgb_present_cls = np.unique(y_xgb_train).astype(np.int64)
     val_probas = {
         "MLP": mlp.predict(dataset.X_val_scaled, batch_size=1024, verbose=0),
         "CNN": cnn.predict(X_val_cnn, batch_size=1024, verbose=0),
@@ -407,11 +462,29 @@ def train_all_models(
         default="XGBoost",
     )
 
-    # Save training histories, calibrators, stacker & optimization summary
+    # Save training histories, calibrators, stacker, per-model metadata & optimization summary
     joblib.dump(calibrators, models_dir / "calibrators.pkl")
     joblib.dump(stacker, models_dir / model_cfg.ensemble.stacker_file)
     with (models_dir / "training_histories.json").open("w", encoding="utf-8") as fh:
         json.dump(histories, fh, indent=2)
+
+    model_metadata: dict[str, dict[str, Any]] = {
+        "MLP": {
+            "imbalance_strategy": selected_strategies["MLP"],
+            "train_samples": int(len(X_mlp_train)),
+        },
+        "CNN": {
+            "imbalance_strategy": selected_strategies["CNN"],
+            "train_samples": int(len(X_cnn_train)),
+        },
+        "XGBoost": {
+            "imbalance_strategy": selected_strategies["XGBoost"],
+            "train_samples": int(len(X_xgb_train)),
+            "selected_variant": xgb_opt.selected_variant,
+        },
+        "Autoencoder": {"imbalance_strategy": "benign_only", "train_samples": int(len(X_benign_train))},
+    }
+    registry.save_model_metadata(model_metadata)
 
     with (artifacts_dir / "training_diagnostics.json").open("w", encoding="utf-8") as fh:
         json.dump(
@@ -419,6 +492,8 @@ def train_all_models(
                 "training_durations_sec": durations,
                 "overfitting_analysis": overfit_stats,
                 "imbalance_experiment": imb_result.to_dict(),
+                "imbalance_strategies_by_model": selected_strategies,
+                "model_metadata": model_metadata,
                 "xgboost_optimization": xgb_opt.to_summary_dict(),
                 "calibration_report": calibration_report,
                 "stacking_summary": stacker.to_summary_dict(),
@@ -452,4 +527,5 @@ def train_all_models(
         hardware_profile=hardware,
         stacker=stacker,
         best_supervised_model=best_sup_model,
+        imbalance_strategies_by_model=selected_strategies,
     )

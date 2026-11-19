@@ -85,6 +85,10 @@ data:
     smote_max_multiplier: 5.0 # Bounds synthetic oversampling to at most 5x the real class size
     smote_min_real_samples: 50 # Classes with fewer real train rows skip SMOTE and receive class weights instead
 
+imbalance_selection:
+  per_model: true # Evaluate {none, class_weight, smote} on each model's own val Macro-F1 (MLP, 1D-CNN, XGBoost)
+  neural_epochs_cap: 10 # Epoch cap for MLP and 1D-CNN candidate runs during strategy selection
+
 evaluation:
   latency_warmup_calls: 50 # Discard first N warm-up calls before recording single-flow latency
   latency_timed_runs: 100

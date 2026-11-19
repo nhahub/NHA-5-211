@@ -88,6 +88,7 @@ def main() -> None:
             "platform": platform.platform(),
             "dataset_source": dataset.source_info.to_dict(),
             "imbalance_strategy_selected": outputs.imbalance_experiment.selected_strategy,
+            "imbalance_strategies_by_model": outputs.imbalance_strategies_by_model,
             "xgb_selected_variant": outputs.xgb_optimization.selected_variant,
             "best_supervised_model": outputs.best_supervised_model,
             "training_durations_sec": outputs.training_durations_sec,

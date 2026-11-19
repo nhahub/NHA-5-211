@@ -45,6 +45,8 @@ class LoadedArtifacts:
     calibrators: dict[str, Any] | None = None
     stacker: Any | None = None
     anomaly_baselines: dict[str, Any] | None = None
+    model_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
+    model_imbalance_strategies: dict[str, str] = field(default_factory=dict)
     lfs_pointers: list[str] = field(default_factory=list)
     missing_artifacts: list[str] = field(default_factory=list)
 
@@ -108,6 +110,18 @@ class ModelRegistry:
         out_path = self.artifacts_dir / "run_manifest.json"
         with out_path.open("w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, default=str)
+        return out_path
+
+    def save_model_metadata(self, model_metadata: dict[str, dict[str, Any]]) -> Path:
+        """Persist per-model training metadata (e.g., imbalance strategy) alongside models."""
+        out_path = self.models_dir / "model_metadata.json"
+        payload = {
+            "saved_at_utc": datetime.now(UTC).isoformat(),
+            "models": model_metadata,
+        }
+        with out_path.open("w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, default=str)
+        logger.info("Saved per-model metadata to %s", out_path)
         return out_path
 
     def load_all(self, load_keras: bool = True) -> LoadedArtifacts:
@@ -201,6 +215,24 @@ class ModelRegistry:
             with manifest_path.open("r", encoding="utf-8") as fh:
                 manifest = json.load(fh)
 
+        model_metadata: dict[str, dict[str, Any]] = {}
+        meta_path = self.models_dir / "model_metadata.json"
+        if meta_path.exists():
+            with meta_path.open("r", encoding="utf-8") as fh:
+                raw_meta = json.load(fh)
+            model_metadata = dict(raw_meta.get("models", {}) or {})
+        elif isinstance(manifest.get("model_metadata"), dict):
+            model_metadata = dict(manifest["model_metadata"])
+
+        model_imbalance_strategies: dict[str, str] = {}
+        if isinstance(manifest.get("imbalance_strategies_by_model"), dict):
+            model_imbalance_strategies.update(
+                {str(k): str(v) for k, v in manifest["imbalance_strategies_by_model"].items()}
+            )
+        for m_key, m_info in model_metadata.items():
+            if isinstance(m_info, dict) and "imbalance_strategy" in m_info:
+                model_imbalance_strategies.setdefault(str(m_key), str(m_info["imbalance_strategy"]))
+
         return LoadedArtifacts(
             models=models,
             scaler=scaler,
@@ -214,6 +246,8 @@ class ModelRegistry:
             calibrators=calibrators,
             stacker=stacker,
             anomaly_baselines=anomaly_baselines,
+            model_metadata=model_metadata,
+            model_imbalance_strategies=model_imbalance_strategies,
             lfs_pointers=sorted(set(lfs_pointers)),
             missing_artifacts=sorted(set(missing_artifacts)),
         )

@@ -124,17 +124,54 @@ def render_model_performance_page() -> None:
         imb_exp = train_diag.get("imbalance_experiment", {})
         if imb_exp:
             st.markdown("**Class Imbalance Experiment (Validation Split)**")
-            imb_rows = []
-            for label, key in [
-                ("Unweighted", "baseline_unweighted_metrics"),
-                ("Class Weighting", "class_weight_metrics"),
-                ("SMOTE", "smote_metrics"),
-            ]:
-                if imb_exp.get(key):
-                    imb_rows.append({"Approach": label, **imb_exp[key]})
-            if imb_rows:
-                st.dataframe(pd.DataFrame(imb_rows), use_container_width=True, hide_index=True)
-            st.caption(imb_exp.get("justification", ""))
+            per_model_imb = imb_exp.get("per_model", {})
+            if per_model_imb:
+                pm_rows = []
+                for m_key in ("MLP", "CNN", "XGBoost"):
+                    m_entry = per_model_imb.get(m_key)
+                    if not m_entry:
+                        continue
+                    m_disp = "1D-CNN" if m_key == "CNN" else m_key
+                    sel_m = m_entry.get("selected_strategy", "")
+                    for strat_key, strat_label in (
+                        ("none", "Unweighted"),
+                        ("class_weight", "Class Weighting"),
+                        ("smote", "SMOTE"),
+                    ):
+                        m_vals = m_entry.get("metrics_by_strategy", {}).get(strat_key)
+                        if m_vals:
+                            pm_rows.append(
+                                {
+                                    "Model": m_disp,
+                                    "Approach": strat_label,
+                                    "Val Macro-F1": round(float(m_vals.get("val_macro_f1", 0.0)), 4),
+                                    "Val Weighted-F1": round(float(m_vals.get("val_weighted_f1", 0.0)), 4),
+                                    "Val Macro-Recall": round(float(m_vals.get("val_macro_recall", 0.0)), 4),
+                                    "Val LogLoss": round(float(m_vals.get("val_mlogloss", 0.0)), 4),
+                                    "Selected": "✓" if strat_key == sel_m else "",
+                                }
+                            )
+                if pm_rows:
+                    st.dataframe(pd.DataFrame(pm_rows), use_container_width=True, hide_index=True)
+                for m_key in ("MLP", "CNN", "XGBoost"):
+                    m_entry = per_model_imb.get(m_key)
+                    if m_entry:
+                        m_disp = "1D-CNN" if m_key == "CNN" else m_key
+                        st.caption(
+                            f"**{m_disp}** (`{m_entry.get('selected_strategy')}`): {m_entry.get('justification', '')}"
+                        )
+            else:
+                imb_rows = []
+                for label, key in [
+                    ("Unweighted", "baseline_unweighted_metrics"),
+                    ("Class Weighting", "class_weight_metrics"),
+                    ("SMOTE", "smote_metrics"),
+                ]:
+                    if imb_exp.get(key):
+                        imb_rows.append({"Approach": label, **imb_exp[key]})
+                if imb_rows:
+                    st.dataframe(pd.DataFrame(imb_rows), use_container_width=True, hide_index=True)
+                st.caption(imb_exp.get("justification", ""))
 
     with e2:
         xgb_opt = eval_summary.get("training_diagnostics", {}).get("xgboost_optimization", {})

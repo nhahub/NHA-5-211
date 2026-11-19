@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import numpy as np
@@ -11,16 +11,31 @@ from sklearn.metrics import f1_score, log_loss, recall_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.utils.class_weight import compute_class_weight
 
-from src.config import XGBoostConfig
+from src.config import ModelConfig, XGBoostConfig
 from src.data.preprocessing import apply_smote_safely, compute_hybrid_smote_class_weights
 from src.models.xgboost_model import (
     expand_xgboost_probas,
     fit_xgboost_safe_multiclass,
 )
 from src.utils.logging import get_logger
+from src.utils.reproducibility import set_global_seed
 
 logger = get_logger("smart_ids.training.optimization")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+
+@dataclass
+class ModelImbalanceOutcome:
+    """Validation comparison across {none, class_weight, smote} for a single model family."""
+
+    model_name: str
+    metrics_by_strategy: dict[str, dict[str, float]]
+    selected_strategy: str
+    justification: str
+    epochs_cap_applied: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -32,6 +47,10 @@ class ImbalanceExperimentResult:
     baseline_unweighted_metrics: dict[str, float]
     selected_strategy: str
     justification: str
+    per_model: dict[str, dict[str, Any]] = field(default_factory=dict)
+    selected_strategies_by_model: dict[str, str] = field(default_factory=dict)
+    neural_epochs_cap: int | None = None
+    selection_mode: str = "global"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -176,6 +195,132 @@ def select_imbalance_strategy(
     return selected, justification
 
 
+def prepare_strategy_training_data(
+    strategy: str,
+    X_train_scaled: np.ndarray,
+    y_train: np.ndarray,
+    X_train_sm: np.ndarray,
+    y_train_sm: np.ndarray,
+    class_weights: dict[int, float] | None,
+    smote_class_weights: dict[int, float] | None = None,
+) -> tuple[np.ndarray, np.ndarray, dict[int, float] | None, np.ndarray | None]:
+    """Return (X_fit, y_fit, keras_class_weight, xgb_sample_weight) for a chosen strategy."""
+    norm = str(strategy).strip().lower()
+    if norm == "smote":
+        cw = smote_class_weights
+        sw = np.array([cw[int(c)] for c in y_train_sm], dtype=np.float32) if cw else None
+        return X_train_sm, y_train_sm, cw, sw
+    if norm == "class_weight":
+        cw = class_weights
+        sw = np.array([cw[int(c)] for c in y_train], dtype=np.float32) if cw else None
+        return X_train_scaled, y_train, cw, sw
+    return X_train_scaled, y_train, None, None
+
+
+def _evaluate_xgb_imbalance_strategies(
+    X_train_scaled: np.ndarray,
+    y_train: np.ndarray,
+    X_train_sm: np.ndarray,
+    y_train_sm: np.ndarray,
+    X_val_scaled: np.ndarray,
+    y_val: np.ndarray,
+    class_weights: dict[int, float],
+    num_classes: int,
+    smote_class_weights: dict[int, float] | None = None,
+    xgb_device: str = "cpu",
+    seed: int = 42,
+) -> dict[str, dict[str, float]]:
+    """Evaluate {none, class_weight, smote} on a fast controlled XGBoost probe."""
+    probe_override = {"n_estimators": 120, "max_depth": 6, "learning_rate": 0.1}
+    results: dict[str, dict[str, float]] = {}
+    for strategy in SIMPLICITY_ORDER:
+        X_fit, y_fit, _, sw = prepare_strategy_training_data(
+            strategy, X_train_scaled, y_train, X_train_sm, y_train_sm, class_weights, smote_class_weights
+        )
+        clf, present_cls = fit_xgboost_safe_multiclass(
+            X_train=X_fit,
+            y_train=y_fit,
+            X_val=X_val_scaled,
+            y_val=y_val,
+            total_classes=num_classes,
+            params_override=probe_override,
+            device=xgb_device,
+            seed=seed,
+            sample_weight=sw,
+            early_stopping_rounds=15,
+        )
+        probs = expand_xgboost_probas(clf.predict_proba(X_val_scaled), present_cls, num_classes)
+        results[strategy] = _eval_val_scores(y_val, probs, num_classes)
+    return results
+
+
+def _evaluate_neural_imbalance_strategies(
+    model_name: str,
+    X_train_scaled: np.ndarray,
+    y_train: np.ndarray,
+    X_train_sm: np.ndarray,
+    y_train_sm: np.ndarray,
+    X_val_scaled: np.ndarray,
+    y_val: np.ndarray,
+    class_weights: dict[int, float],
+    num_classes: int,
+    model_cfg: ModelConfig,
+    smote_class_weights: dict[int, float] | None = None,
+    neural_epochs_cap: int = 10,
+    seed: int = 42,
+) -> tuple[dict[str, dict[str, float]], int]:
+    """Evaluate {none, class_weight, smote} directly on MLP or 1D-CNN with capped epochs."""
+    import keras
+
+    from src.models.cnn import build_cnn1d
+    from src.models.mlp import build_mlp
+
+    num_features = int(X_train_scaled.shape[1])
+    is_cnn = model_name == "CNN"
+    base_epochs = model_cfg.cnn.epochs if is_cnn else model_cfg.mlp.epochs
+    epochs_cap = max(1, min(int(base_epochs), int(neural_epochs_cap)))
+    batch_size = model_cfg.cnn.batch_size if is_cnn else model_cfg.mlp.batch_size
+    patience = model_cfg.cnn.early_stopping_patience if is_cnn else model_cfg.mlp.early_stopping_patience
+
+    X_val_in = X_val_scaled.reshape(-1, num_features, 1) if is_cnn else X_val_scaled
+    results: dict[str, dict[str, float]] = {}
+
+    for strategy in SIMPLICITY_ORDER:
+        keras.backend.clear_session()
+        set_global_seed(seed)
+        X_fit, y_fit, keras_cw, _ = prepare_strategy_training_data(
+            strategy, X_train_scaled, y_train, X_train_sm, y_train_sm, class_weights, smote_class_weights
+        )
+        X_fit_in = X_fit.reshape(-1, num_features, 1) if is_cnn else X_fit
+        model = (
+            build_cnn1d(num_features, num_classes, cfg=model_cfg.cnn)
+            if is_cnn
+            else build_mlp(num_features, num_classes, cfg=model_cfg.mlp)
+        )
+        es_cb = keras.callbacks.EarlyStopping(
+            monitor="val_loss",
+            patience=max(1, min(3, int(patience))),
+            restore_best_weights=True,
+            verbose=0,
+        )
+        model.fit(
+            X_fit_in,
+            y_fit,
+            validation_data=(X_val_in, y_val),
+            epochs=epochs_cap,
+            batch_size=batch_size,
+            callbacks=[es_cb],
+            class_weight=keras_cw,
+            verbose=0,
+        )
+        probs = model.predict(X_val_in, batch_size=max(256, int(batch_size)), verbose=0)
+        results[strategy] = _eval_val_scores(y_val, probs, num_classes)
+        del model
+
+    keras.backend.clear_session()
+    return results, epochs_cap
+
+
 def compare_smote_vs_class_weight(
     X_train_scaled: np.ndarray,
     y_train: np.ndarray,
@@ -191,84 +336,128 @@ def compare_smote_vs_class_weight(
     tie_tolerance: float = 0.002,
 ) -> ImbalanceExperimentResult:
     """Experimentally evaluate Unweighted vs Class-Weight vs SMOTE and pick best Val Macro-F1."""
-    logger.info("Running imbalance handling experiment (Unweighted vs Class-Weight vs SMOTE)...")
-
-    # Fast, controlled probe using shallow regularized XGBoost on identical validation set
-    probe_override = {"n_estimators": 120, "max_depth": 6, "learning_rate": 0.1}
-
-    # 1. Unweighted raw imbalanced baseline ("none")
-    clf_raw, cls_raw = fit_xgboost_safe_multiclass(
-        X_train=X_train_scaled,
+    logger.info("Running global imbalance handling experiment (Unweighted vs Class-Weight vs SMOTE)...")
+    xgb_metrics = _evaluate_xgb_imbalance_strategies(
+        X_train_scaled=X_train_scaled,
         y_train=y_train,
-        X_val=X_val_scaled,
+        X_train_sm=X_train_sm,
+        y_train_sm=y_train_sm,
+        X_val_scaled=X_val_scaled,
         y_val=y_val,
-        total_classes=num_classes,
-        params_override=probe_override,
-        device=xgb_device,
+        class_weights=class_weights,
+        num_classes=num_classes,
+        smote_class_weights=smote_class_weights,
+        xgb_device=xgb_device,
         seed=seed,
-        early_stopping_rounds=15,
     )
-    raw_metrics = _eval_val_scores(
-        y_val, expand_xgboost_probas(clf_raw.predict_proba(X_val_scaled), cls_raw, num_classes), num_classes
-    )
-
-    # 2. Inverse-frequency class weighting without synthetic oversampling
-    sample_weights = np.array([class_weights[int(c)] for c in y_train], dtype=np.float32)
-    clf_cw, cls_cw = fit_xgboost_safe_multiclass(
-        X_train=X_train_scaled,
-        y_train=y_train,
-        X_val=X_val_scaled,
-        y_val=y_val,
-        total_classes=num_classes,
-        params_override=probe_override,
-        device=xgb_device,
-        seed=seed,
-        sample_weight=sample_weights,
-        early_stopping_rounds=15,
-    )
-    cw_metrics = _eval_val_scores(
-        y_val, expand_xgboost_probas(clf_cw.predict_proba(X_val_scaled), cls_cw, num_classes), num_classes
-    )
-
-    # 3. Capped SMOTE on eligible classes + class-weight fallback for skipped rare classes
-    sm_sample_weights = (
-        np.array([smote_class_weights[int(c)] for c in y_train_sm], dtype=np.float32)
-        if smote_class_weights
-        else None
-    )
-    clf_sm, cls_sm = fit_xgboost_safe_multiclass(
-        X_train=X_train_sm,
-        y_train=y_train_sm,
-        X_val=X_val_scaled,
-        y_val=y_val,
-        total_classes=num_classes,
-        params_override=probe_override,
-        device=xgb_device,
-        seed=seed,
-        sample_weight=sm_sample_weights,
-        early_stopping_rounds=15,
-    )
-    sm_metrics = _eval_val_scores(
-        y_val, expand_xgboost_probas(clf_sm.predict_proba(X_val_scaled), cls_sm, num_classes), num_classes
-    )
-
-    # Simplicity-aware data-driven selection within tolerance (none > class_weight > smote)
     selected, justification = select_imbalance_strategy(
-        metrics_by_strategy={
-            "none": raw_metrics,
-            "class_weight": cw_metrics,
-            "smote": sm_metrics,
-        },
+        metrics_by_strategy=xgb_metrics,
         tie_tolerance=tie_tolerance,
     )
 
     logger.info("Imbalance experiment winner: %s | %s", selected, justification)
     return ImbalanceExperimentResult(
-        smote_metrics=sm_metrics,
-        class_weight_metrics=cw_metrics,
-        baseline_unweighted_metrics=raw_metrics,
+        smote_metrics=xgb_metrics["smote"],
+        class_weight_metrics=xgb_metrics["class_weight"],
+        baseline_unweighted_metrics=xgb_metrics["none"],
         selected_strategy=selected,
         justification=justification,
+        selected_strategies_by_model={"MLP": selected, "CNN": selected, "XGBoost": selected},
+        selection_mode="global",
+    )
+
+
+def compare_imbalance_per_model(
+    X_train_scaled: np.ndarray,
+    y_train: np.ndarray,
+    X_train_sm: np.ndarray,
+    y_train_sm: np.ndarray,
+    X_val_scaled: np.ndarray,
+    y_val: np.ndarray,
+    class_weights: dict[int, float],
+    num_classes: int,
+    model_cfg: ModelConfig | None = None,
+    smote_class_weights: dict[int, float] | None = None,
+    xgb_device: str = "cpu",
+    seed: int = 42,
+    tie_tolerance: float = 0.002,
+    neural_epochs_cap: int = 10,
+) -> ImbalanceExperimentResult:
+    """Select the optimal imbalance strategy independently for MLP, 1D-CNN, and XGBoost."""
+    cfg = model_cfg or ModelConfig()
+    logger.info(
+        "Running per-model imbalance strategy selection (MLP, 1D-CNN @ cap=%d epochs, XGBoost)...",
+        int(neural_epochs_cap),
+    )
+
+    per_model_outcomes: dict[str, ModelImbalanceOutcome] = {}
+
+    for neural_name in ("MLP", "CNN"):
+        metrics_map, applied_cap = _evaluate_neural_imbalance_strategies(
+            model_name=neural_name,
+            X_train_scaled=X_train_scaled,
+            y_train=y_train,
+            X_train_sm=X_train_sm,
+            y_train_sm=y_train_sm,
+            X_val_scaled=X_val_scaled,
+            y_val=y_val,
+            class_weights=class_weights,
+            num_classes=num_classes,
+            model_cfg=cfg,
+            smote_class_weights=smote_class_weights,
+            neural_epochs_cap=neural_epochs_cap,
+            seed=seed,
+        )
+        sel, just = select_imbalance_strategy(metrics_map, tie_tolerance=tie_tolerance)
+        per_model_outcomes[neural_name] = ModelImbalanceOutcome(
+            model_name=neural_name,
+            metrics_by_strategy=metrics_map,
+            selected_strategy=sel,
+            justification=just,
+            epochs_cap_applied=applied_cap,
+        )
+        logger.info("Per-model imbalance [%s]: selected='%s' | %s", neural_name, sel, just)
+
+    xgb_metrics = _evaluate_xgb_imbalance_strategies(
+        X_train_scaled=X_train_scaled,
+        y_train=y_train,
+        X_train_sm=X_train_sm,
+        y_train_sm=y_train_sm,
+        X_val_scaled=X_val_scaled,
+        y_val=y_val,
+        class_weights=class_weights,
+        num_classes=num_classes,
+        smote_class_weights=smote_class_weights,
+        xgb_device=xgb_device,
+        seed=seed,
+    )
+    xgb_sel, xgb_just = select_imbalance_strategy(xgb_metrics, tie_tolerance=tie_tolerance)
+    per_model_outcomes["XGBoost"] = ModelImbalanceOutcome(
+        model_name="XGBoost",
+        metrics_by_strategy=xgb_metrics,
+        selected_strategy=xgb_sel,
+        justification=xgb_just,
+        epochs_cap_applied=None,
+    )
+    logger.info("Per-model imbalance [XGBoost]: selected='%s' | %s", xgb_sel, xgb_just)
+
+    selected_by_model = {k: v.selected_strategy for k, v in per_model_outcomes.items()}
+    summary_just = (
+        "Per-model imbalance selection (independent validation Macro-F1 with "
+        f"tie_tolerance={tie_tolerance:.4f}, neural_epochs_cap={int(neural_epochs_cap)}): "
+        + ", ".join(f"{k} -> '{v}'" for k, v in selected_by_model.items())
+        + "."
+    )
+    return ImbalanceExperimentResult(
+        smote_metrics=xgb_metrics["smote"],
+        class_weight_metrics=xgb_metrics["class_weight"],
+        baseline_unweighted_metrics=xgb_metrics["none"],
+        selected_strategy=xgb_sel,
+        justification=summary_just,
+        per_model={k: v.to_dict() for k, v in per_model_outcomes.items()},
+        selected_strategies_by_model=selected_by_model,
+        neural_epochs_cap=int(neural_epochs_cap),
+        selection_mode="per_model",
     )
 
 
