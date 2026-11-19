@@ -3,188 +3,65 @@
 [![CI](https://github.com/nhahub/NHA-5-211/actions/workflows/ci.yml/badge.svg)](https://github.com/nhahub/NHA-5-211/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Multi-Model Network Intrusion Detection with Zero-Day Anomaly Tracking**
-
-Academic Graduation Project — Built to the accompanying project technical specification (provided separately outside this repository) with split-isolated CICIDS2017 preprocessing (post-clipping cross-split deduplication and `strict_leakage_check` enforcement), CUDA/CPU adaptive XGBoost + TensorFlow/Keras models, classical anomaly baselines, SHAP explainability, dry-run active mitigation, CI automation, and a 7-tab Streamlit SOC dashboard.
+**SMART IDS v3** is a modular CICIDS2017 network intrusion detection system pairing a production `XGBoost` multi-class classifier (alongside `MLP` and `1D-CNN` neural baselines) with benign-only zero-day anomaly tracking (`Autoencoder`, `VAE`, `One-Class SVM`, `Isolation Forest`, `LOF`), split-isolated preprocessing (`strict_leakage_check`), SHAP explainability, dry-run firewall response previews, and a 7-tab Streamlit SOC dashboard (`app.py`). Detailed architecture, preprocessing, model specs, and extended benchmarks live in [`docs/`](docs/results_details.md).
 
 ---
 
-## Summary & Architecture
+## Results Overview (`200k` CICIDS2017 Sample: `2,830,743` Raw → `191,268` Clean Flows, 77 Features, 13 Classes)
 
-**SMART IDS v3** integrates supervised intrusion attribution, unsupervised novelty tracking, explainable AI (XAI), and safe dry-run mitigation across modular packages:
+| Model | Imbalance | `random` `F1_Macro` (95% CI) | `time_block` `F1_Macro` (95% CI) | `by_day` Closed-Set `F1_Macro` |
+|---|---|---:|---:|---:|
+| **XGBoost (Rec.)** | `none` | **0.9603** `[0.9013, 0.9849]` | **0.7518** `[0.7098, 0.8250]` | **0.0860** |
+| **1D-CNN (Baseline)** | `smote` | 0.8447 `[0.7649, 0.8819]` | 0.4376 `[0.4265, 0.4787]` | 0.0691 |
+| **MLP (Baseline)** | `smote` | 0.7934 `[0.7544, 0.8176]` | 0.2767 `[0.2752, 0.3004]` | 0.0661 |
 
-- **Supervised Models:** **`XGBoost`** is the **recommended production classifier** (adaptive CUDA/CPU + CV-std-gated Optuna TPE). **`MLP`** (`512→256→128→64`) and **`1D-CNN`** serve strictly as **neural baselines for comparison**, evaluated independently with per-model imbalance strategy selection and bounded loss/LR regularization trials (`ReduceLROnPlateau`, `label_smoothing`, `focal_loss`), alongside ensemble fusion rules (`best_single`, `val_weighted_voting`, validation `stacking`, and `hybrid_anomaly_override`, defaulting to standalone `XGBoost` when multi-model fusion shows no statistically significant gain).
-- **Orthogonal Zero-Day Tracking:** `Autoencoder` trained exclusively on `BENIGN` traffic and benchmarked against **Isolation Forest**, **One-Class SVM**, and **Local Outlier Factor** across identical benign validation percentiles (`90, 95, 97, 99`) plus a Leave-One-Attack-Out unseen-attack protocol.
-- **Zero-Leakage Pipeline:** Stateless cleaning precedes stratified (`random`), chronological per-class (`time_block`), or open-set cross-day (`by_day`) splitting; imputers, 5-sigma clippers, scalers, and SMOTE fit strictly on `train`, followed by post-clipping/post-scaling overlap removal enforced by `strict_leakage_check`.
-- **Canonical Response & SOC UI:** Shared dry-run `ActiveResponseEngine` with `ipaddress` validation and append-only audit logs surfaced through `app.py`.
+> All-class `F1_Macro` is the headline metric throughout; per-protocol `F1_Macro_Reliable` (`0.9972` / `0.9562` / `0.9286` on `random`), which excludes rare classes with `< 30` test flows, appears only alongside `F1_Macro` in [`docs/results_details.md`](docs/results_details.md) and [`reports/model_comparison_report.md`](reports/model_comparison_report.md).
 
-See [`docs/architecture.md`](docs/architecture.md), [`docs/dataset_and_methodology.md`](docs/dataset_and_methodology.md), [`docs/model_configuration.md`](docs/model_configuration.md), and [`docs/project_details.md`](docs/project_details.md) for detailed layer specs, dependency compatibility notes (`Python 3.13.12`), troubleshooting, and future roadmap.
+### Key Findings
+
+1. **Production Classifier:** `XGBoost` (`none`) leads `random` (`0.9603`) at `252,775` flows/s batch; `40` Optuna trials and `stacking` (`0.9725`, CI crossing `0`) brought no statistically significant gain, so baseline `XGBoost` remains default.
+2. **Per-Model Imbalance Selection:** Evaluating `{none, class_weight, smote}` per model kept `XGBoost` on `none` and switched `MLP` and `1D-CNN` to `smote`, lifting `MLP` test `F1_Macro` from `0.6728` to `0.7934`.
+3. **Drift & Unseen Attacks:** Under chronological `time_block` (row-order fallback) `XGBoost` `F1_Macro` drops to `0.7518`, and under open-set `by_day` binary evaluation `XGBoost (1 - P_Benign)` detects only `28.76%` of unseen attacks (`F1 = 0.4467`).
+4. **Deployment Profiles:** Saved `models/xgb_model.json` uses `'none'` (`time_block` Benign FPR `0.0001`, focus recall `0.4276`); `'class_weight'` **requires retraining** (`0.8512` `F1_Macro`, `0.7816` focus recall at `~1.4%` FPR), and `Bot` recall stays `0.000` on `time_block` (`~0.015` max on `by_day`).
+5. **Anomaly Detectors (Supplementary):** Benign-only `Autoencoder` (`F1 = 0.6926`, `ROC-AUC = 0.8676`) leads all 6 individual baselines, while `Score-Level Fusion (degenerate: equals Autoencoder)` adds zero fusion gain (`weights: Autoencoder=1.00`, unmeasured cols `N/A`).
 
 ---
 
 ## Quick Start
 
-### Local Setup (Python 3.13)
+### Local (Python 3.13)
 
 ```powershell
-# 1. Create and populate Python 3.13 virtual environment
 uv venv --python 3.13 .venv
 uv pip install --python .venv\Scripts\python.exe -r requirements.txt
-
-# 2. Place official CICIDS2017 CSVs into data/raw/ (or omit for explicit synthetic demo mode)
-# Source: https://www.unb.ca/cic/datasets/ids-2017.html
-
-# 3. Train all models and regenerate evaluation reports & figures
+# Place the 8 CICIDS2017 CSVs into data/raw/ (or omit for synthetic demo mode)
 .venv\Scripts\python.exe scripts/train.py --run-eval
-
-# 4. Launch the SOC dashboard
+.venv\Scripts\python.exe scripts/evaluate.py --time-block-only   # Optional: rerun time_block only
 .venv\Scripts\streamlit.exe run app.py
 ```
 
-### Docker Execution (Dashboard)
+### Docker & Git LFS Model Artifacts
 
 ```bash
-# 1a. Pull Git LFS model binaries first (recommended for full model inference)
-git lfs pull
-
-# 1b. Or download model assets from a GitHub Release URL (Git LFS quota-free fallback)
-python scripts/download_models.py --repo <owner>/<repo> --tag models-v3
-
-# 2. Standard build (succeeds in degraded demo/report mode if LFS stubs remain, printing a loud warning)
-docker build -t smart-ids-v3 .
-
-# 3. Strict production build (aborts Docker build if models/ contains unfetched LFS pointer stubs or missing weights)
-docker build --build-arg REQUIRE_MODELS=true -t smart-ids-v3 .
-
+git lfs install && git lfs pull   # Or: python scripts/download_models.py --repo <owner>/<repo> --tag models-v3
+docker build -t smart-ids-v3 .    # Add --build-arg REQUIRE_MODELS=true to fail if LFS stubs remain
 docker run --rm -p 8501:8501 smart-ids-v3
 ```
 
-## Model Artifacts (Git LFS & Release Fallback)
-
-- Large/retrain-volatile model binaries (`*.keras`, `*.pkl`, `models/xgb_model.json`, `*.h5`, `*.onnx`, `*.npz`, `*.parquet`) are tracked via **Git LFS** in [`.gitattributes`](.gitattributes) so retraining never bloats Git object history going forward (historical commits remain untouched).
-- On a fresh clone, fetch the binaries via Git LFS **or** the Release downloader before running inference or strict Docker builds:
-
-```bash
-# Option A: Git LFS
-git lfs install
-git lfs pull
-
-# Option B: GitHub Release fallback (configured via `models_download` in configs/config.yaml)
-.venv\Scripts\python.exe scripts/download_models.py --base-url https://github.com/<owner>/<repo>/releases/download/models-v3
-```
-
-- If `models/` is empty or contains unfetched Git LFS pointer stubs (for example, a Docker build without `git lfs pull` or an `lfs: false` checkout), the SOC dashboard degrades gracefully with a clear status banner, Dockerfile emits a prominent build-time warning unless `REQUIRE_MODELS=true`, and tests requiring full binaries skip with a clear reason. Core CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs `lint-and-test` with `lfs: false` so GitHub LFS bandwidth quotas never block code checks, alongside an optional `workflow_dispatch`-only `lfs-artifact-smoke` job (`lfs: true`).
-
-### Independent Evaluation & Optional ONNX Export
-
-```powershell
-# Re-evaluate persisted models on disk and regenerate reports/
-.venv\Scripts\python.exe scripts/evaluate.py
-
-# Optional ONNX export check (skips gracefully if optional tf2onnx/onnx are not installed)
-.venv\Scripts\python.exe scripts/export_onnx.py --verify
-```
-
-> **ONNX Export Feasibility:** `onnx` and `tf2onnx` are omitted from `requirements.txt` to avoid resolver conflicts on Python 3.13 + TensorFlow `2.21.0` + NumPy `2.x`. Single-flow latency paths in [`src/evaluation/benchmarking.py`](src/evaluation/benchmarking.py) and [`src/detection/inference.py`](src/detection/inference.py) instead use warmed concrete `tf.function` graphs (Keras) and `booster.inplace_predict(...)` (XGBoost). See [`docs/project_details.md`](docs/project_details.md#4-onnx-export-feasibility-notes).
+- Core CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs `ruff check`, `ruff format --check`, and `pytest` with `lfs: false` (skipping binary smoke tests cleanly when LFS pointers are unfetched; full results in [`reports/test_report.md`](reports/test_report.md)).
 
 ---
 
-## Measured Experimental Results & Evaluation Caveats
+## Limitations
 
-### Measured Results (Genuine CICIDS2017 Benchmark Run: 2,830,743 raw rows → 200,000 stratified sample → 191,268 deduplicated rows; 77 features, 13 classes)
-
-> **Dataset Provenance:** All 8 daily CICIDS2017 CSV exports in `data/raw/` (`138,190` train pre-SMOTE / `24,112` validation / `28,324` held-out test; `642` post-clipping/scaling cross-split collisions removed; `leakage_checks.passed = true` across `random`, `time_block`, and `by_day`). Per-model imbalance selection (`tolerance=0.0020`, `neural_epochs_cap=10`) picked `none` for `XGBoost`, `smote` for `MLP`, and `smote` for `1D-CNN`. Full tables live in [`reports/model_comparison_report.md`](reports/model_comparison_report.md), [`reports/experimental_results.md`](reports/experimental_results.md), and [`reports/model_comparison.csv`](reports/model_comparison.csv).
-
-| Model | Imbalance | Framing | Accuracy | F1 (W) | F1_Macro | ROC-AUC | Median / P95 (µs) | Batch (flows/s) |
-|---|---|---|---:|---:|---:|---:|---:|---:|
-| **XGBoost (Baseline, Rec.)** | `none` | 13-class supervised | **0.9989** | **0.9988** | **0.9603** | **0.9995** | 405.05 / 523.68 | **249,219.2** |
-| **1D-CNN (Neural Baseline)** | `smote` | 13-class supervised | 0.9904 | 0.9913 | 0.8447 | 0.9933 | 623.00 / 724.05 | 16,521.5 |
-| **MLP (Neural Baseline)** | `smote` | 13-class supervised | 0.9766 | 0.9772 | 0.7934 | 0.9962 | 173.85 / 221.99 | 24,457.6 |
-| **Autoencoder** | `benign_only` | Binary anomaly | **0.8934** | **0.6926** | **0.6926** | **0.8676** | 198.70 / 280.10 | 17,682.5 |
-| **Score-Level Fusion (degenerate: equals Autoencoder)** | `benign_only` | Binary anomaly (Val Sel.) | 0.8934 | 0.6926 | 0.6926 | 0.8676 | N/A | N/A |
-| **VAE** | `benign_only` | Binary anomaly | 0.8693 | 0.5910 | 0.5910 | 0.7755 | 208.55 / 268.89 | 24,408.6 |
-| **One-Class SVM** | `benign_only` | Binary anomaly | 0.8690 | 0.5898 | 0.5898 | 0.7467 | **136.45 / 166.06** | 23,264.0 |
-| **Autoencoder (Deep Reg)** | `benign_only` | Binary anomaly | 0.8668 | 0.5831 | 0.5831 | 0.7908 | 233.50 / 308.93 | 22,696.0 |
-| **LOF** | `benign_only` | Binary anomaly | 0.8421 | 0.4647 | 0.4647 | 0.8607 | 1,368.80 / 1,965.23 | 41,327.3 |
-| **Isolation Forest** | `benign_only` | Binary anomaly | 0.8385 | 0.4394 | 0.4394 | 0.7710 | 6,958.00 / 7,768.49 | 79,549.0 |
-
-> Validation selected a single-detector fusion; no gain from fusing detectors on this data. Detailed tables in [`reports/model_comparison_report.md`](reports/model_comparison_report.md) also display `F1_Macro_Reliable` (excluding classes with support `< 30` on that partition) strictly beside all-class `F1_Macro`, which remains the headline metric here.
-
-- **Per-Model Imbalance Selection, Neural Trials, CV, Optuna & Stacking Significance:** Evaluating `{none, class_weight, smote}` per model lifted `MLP` Test `F1_Macro` from Round 2's `0.6728` (Bot F1 `0.0000`) to `0.7934` (`smote` val `F1_Macro` `0.7695` vs `none` `0.6924`; `1D-CNN` chose `smote` `0.7501`; `XGBoost` stayed `none` `0.9518`). Bounded neural loss regularization trials (`label_smoothing`, `focal_loss`, capped at `3.0` min) underperformed baseline `cross_entropy` (`MLP 0.7138/0.7618` vs `0.8134`; `1D-CNN 0.6562` vs `0.8701`, focal skipped at time budget) and were automatically reverted; both neural models are explicitly positioned as **neural baselines for comparison** with **`XGBoost`** recommended for production. Unified 5-fold CV on the `162,577`-row dev pool yielded `0.9535 ± 0.0121` `F1_Macro` (`161,042`-row pooled OOF `F1_Macro` `0.9550`); `40` Optuna TPE trials reached val `F1_Macro` `0.9561` vs `0.9504` (`+0.0056 ≤ 0.0121`), so gating retained `baseline` (`95%` test CI `[0.9013, 0.9849]`). Validation temperature scaling gave `T = 0.7948` (`MLP`), `0.8749` (`1D-CNN`), `0.9095` (`XGBoost`); validation `stacking` reached Test `F1_Macro` `0.9725`, statistically indistinguishable from standalone `XGBoost` (`0.9603`, delta `+0.0123`, paired bootstrap `95%` CI `[-0.0040, +0.0538]` includes `0`), so `XGBoost` remains the default supervised engine.
-- **Chronological Drift (`time_block`):** Evaluating the canonical models on per-class chronological splits (`time_block ordering = CSV row order (no real Timestamp)`, `leakage_checks.passed = true`) shifted `XGBoost` Test `F1_Macro` from `0.9603` (`random`) to `0.7518` (`95%` CI `[0.7098, 0.8250]`, Accuracy `0.9924`), `1D-CNN` to `0.4376`, `MLP` to `0.2767`, and benign-only `Autoencoder` to binary `F1 = 0.5003` (`ROC-AUC = 0.8263`, `FPR = 0.0589`). Retraining from scratch directly under `split_strategy=time_block` (per-model imbalance `MLP=smote`, `CNN=class_weight`, `XGBoost=smote`, `leakage_checks.passed = true`) yielded `XGBoost` Test `F1_Macro` `0.8427`, `MLP` `0.6703`, `1D-CNN` `0.3919`.
-- **Open-Set Cross-Day Detection (`by_day`):** By construction in CICIDS2017, all five Thursday–Friday attack families (`Bot`, `DDoS`, `Infiltration`, `PortScan`, `Web Attack`) never appear in Monday–Wednesday training data (closed-set `XGBoost` `F1_Macro` `0.0860`; full primary `by_day` retrain `0.0952`, `leakage_checks.passed = true`). Under binary novelty evaluation against unseen attacks, `XGBoost (1 - P_Benign)` reached recall `0.2876` (`F1 = 0.4467`, precision `0.9991`, `FPR = 0.0001` — missing `71.24%` of unseen attack flows), `MLP (1 - P_Benign)` recall `0.2839` (`F1 = 0.4417`), and benign-only `Autoencoder` recall `0.3419` (`F1 = 0.4676`, `ROC-AUC = 0.8784`, `FPR = 0.0549`).
-- **Sample-Size Sensitivity (`200k` vs. `500k`):** Scaling `XGBoost` (`none`) from `200,000` requested rows (`191,268` deduplicated, `28,324` test) to `500,000` (`470,048` deduplicated, `69,026` test) shifted `F1_Macro` from `0.9603` (`[0.9013, 0.9849]`) to `0.9894` (`[0.9837, 0.9943]`, `+0.0291` delta, overlapping `95%` CIs, `conclusions_change = False`).
-
-### Evaluation Caveats
-
-- **Random Flow-Level Split Optimism (`random` vs. `time_block` & `by_day`):** Random flow splitting (`data.split_strategy: random`) mixes adjacent flows from identical capture bursts across splits, yielding optimistic supervised metrics. `configs/config.yaml` supports both closed-set chronological drift (`split_strategy: time_block`, earliest ~60% / middle ~20% / latest ~20% per class) and open-set cross-day (`split_strategy: by_day`, Mon–Wed train, part of Thu val, Thu+Fri unseen attacks), both reported alongside `random` in [`reports/model_comparison_report.md`](reports/model_comparison_report.md).
-- **Optional Real-Timestamp Alignment for `time_block` (`data.timestamp_source_dir`):** Standard `MachineLearningCVE` CSVs in `data/raw/` omit `Timestamp`, so `time_block` defaults to session + CSV row order (`time_block ordering = CSV row order (no real Timestamp)`). To sort strictly by true capture timestamps, follow [`docs/optional_data.md`](docs/optional_data.md) (download CICIDS2017 **`GeneratedLabelledFlows` / `TrafficLabelling_.zip`** into `data/TrafficLabelling/`, verify via `python scripts/check_optional_data.py`, and run `python scripts/evaluate.py --time-block-only`). When present, [`align_real_timestamps`](src/data/loader.py) merges timestamps via `Flow ID` + 5-tuple or deterministic session telemetry signatures, logs matched/unmatched counts, and excludes `Timestamp` from features. *(Note: `data/TrafficLabelling/` was not present locally during training/evaluation; real-timestamp `time_block` ordering is unit-tested on timestamped fixtures and NOT VERIFIED on full CICIDS2017 TrafficLabelling CSVs.)*
-- **Shortcut-Feature Risk (`Destination Port`):** Global SHAP on `XGBoost` is dominated by `Destination Port` (`0.8610` vs. `0.3711` for runner-up `Init_Win_bytes_backward`). Setting `data.drop_features: ["Destination Port"]` tests generalization without port memorization while preserving port metadata for the SOC map. When evaluated apples-to-apples on the identical `28,324` held-out test rows (verified via `sha256` row-index parity after full 77-feature deduplication), removing `Destination Port` shifts `XGBoost` Test Macro-F1 from `0.9603` to `0.9540` (`delta = -0.0063`).
-- **Statistically Unreliable Rare Classes (`Heartbleed`, `Infiltration`, `Bot`, `Web Attack`):** In CICIDS2017 held-out test partitions (~15% of the `200k` sample, and smaller still in `time_block`), **`Heartbleed`** (`2` test flows / `11` total), **`Infiltration`** (`5`–`7` test), **`Bot`** (`21`–`28` test), and **`Web Attack`** (`26` random test) fall below `evaluation.reliable_support_threshold = 30`. With `< 30` test flows, binomial confidence intervals span tens of percentage points and 1–2 misclassifications swing unweighted `F1_Macro` drastically. All tables in [`reports/model_comparison_report.md`](reports/model_comparison_report.md) supplement per-partition evaluations with a **pooled 5-fold CV Out-of-Fold (OOF)** table (`161,042` flows; `Bot` OOF `n=116` recall `0.6983 [0.6095, 0.7743]`, `Infiltration` `n=31` recall `0.7097 [0.5341, 0.8390]`, `Web Attack` `n=150` recall `0.9267 [0.8735, 0.9586]`, `Heartbleed` `n=9` recall `0.8889 [0.5650, 0.9801]`).
-- **Known CICIDS2017 Labeling Issues & Optional Corrected-Label Support (Engelen et al., 2021):** Upstream CICIDS2017 CSVs exhibit flow-construction bugs, duplicated TCP teardown packets, infinite/NaN fields, and label assignments that can misrepresent DoS/Heartbleed/Bot behaviors (Engelen et al., *IEEE S&P Workshops*, 2021). See [`docs/optional_data.md`](docs/optional_data.md) for downloading corrected labels from Distrinet KU Leuven (`https://intrusion-detection.distrinet-research.be/CNS2021/`), placing them at `data/engelen2021_label_corrections.csv` (`data.label_correction_file`), and re-evaluating cleanly via [`apply_label_corrections`](src/data/loader.py). *(Note: the external Engelen et al. CSV was absent locally and skipped cleanly during benchmark runs; corrected-label results are NOT VERIFIED on real CICIDS2017 and are unit-tested on fixtures only.)*
-- **Stratified Downsampling (`data.sample_size` / `data.use_full_dataset`):** Because the combined 8 CICIDS2017 CSVs span `2,830,743` raw flows, default training uses `data.sample_size: 200000` (`data.use_full_dataset: false`) via [`stratified_downsample`](src/data/loader.py): majority/mid-size classes are sampled proportionally while preserving at least `min(class_count, 50)` real rows for rare classes prior to deduplication. Setting `data.use_full_dataset: true` disables downsampling cleanly.
-- **Limitations — Temporal Concept Drift, Unseen Attacks & Recall–FPR Trade-off:** Under `time_block`, `XGBoost` fails on `Bot` (`28/28` misclassified as `BENIGN`, recall `0.0000`, KS `1.0000` shift on `Flow Duration` and `Total Length of Fwd Packets`), `Heartbleed` (`2/2` -> `BENIGN`), `Web Attack` (recall `0.4000`, `45.7%` -> `BENIGN`), `Infiltration` (`0.4286`), and `DoS slowloris` (`0.7160`). Both validation screening and descriptive held-out test tables (plus ranking agreement) for `class_weight`, `Hybrid Override (XGBoost OR AE)`, and lowered `1 - P(BENIGN)` gates live in [`reports/model_comparison_report.md`](reports/model_comparison_report.md); the test tables are reported strictly for description, not selection.
-- **Unsupervised Anomaly Detectors as Supplementary Zero-Day Signals Only:** Across all 7 benign-only detectors evaluated in [`reports/model_comparison_report.md`](reports/model_comparison_report.md), standard `Autoencoder` (`F1 = 0.6926 [0.6820, 0.7020]`, `ROC-AUC = 0.8676`) outperformed `VAE` (`0.5910`), `One-Class SVM` (`0.5898`), `Autoencoder (Deep Reg)` (`0.5831`), `LOF` (`0.4647`), and `Isolation Forest` (`0.4394`); non-test leave-attack-out validation selected `Score-Level Fusion` with weight `Autoencoder=1.00`. Under `time_block`, Autoencoder binary F1 dropped to `0.5003`. These remain **supplementary zero-day signals**, not replacements for supervised `XGBoost`.
-
-## Deployment Profiles
-
-The persisted `models/xgb_model.json` artifact was trained with `XGBoost` imbalance strategy **`none`**; no `class_weight` binary is persisted in `models/`, so switching profiles **requires retraining** (`data.imbalance.strategy: class_weight` with `imbalance_selection.per_model: false`):
-
-| Profile | Persistence Status | Random `F1_Macro` | `time_block` Benign FPR | `time_block` Focus Mean Recall | Operational Trade-off |
-|---|---|---:|---:|---:|---|
-| **Default `'none'`** | Persisted in `models/` | `0.9603` | `0.0001` | `0.4276` (`Macro-F1 = 0.7518`) | Lowest false positives on benign traffic, but weak recall on drifted/rare attacks (`Bot = 0.000`, `Heartbleed = 0.000`, `Web Attack = 0.400`, `Infiltration = 0.429`). |
-| **`'class_weight'`** | **Requires retraining** | *(see protocol table)* | `0.0144` (~`1.4%`) | `0.7816` (`Macro-F1 = 0.8512`) | Higher recall on drifted classes (`Web Attack = 0.714`, `DoS slowloris = 0.975`) at ~`1.4%` Benign FPR (`144x` baseline false-alarm rate). |
-
-- Choice between profiles depends strictly on SOC operational tolerance for false alarms vs. missed drifted attacks. Under every mitigation option tested (`none`, `class_weight`, `Hybrid Override`, lowered `P(Benign)` gates), **`Bot` recall stays `0.000` on `time_block` and `~0.015` (`0.015` max) on `by_day`**.
+- **Random Split Optimism & Missing Real Timestamps:** Random flow splitting mixes burst neighbors; `data/TrafficLabelling/` was absent (`time_block ordering = CSV row order (no real Timestamp)`). See [`docs/optional_data.md`](docs/optional_data.md) and [`docs/evaluation_caveats.md`](docs/evaluation_caveats.md).
+- **Rare-Class Instability & Upstream Labels:** `Heartbleed`, `Infiltration`, `Bot`, and `Web Attack` have `< 30` test flows (`< 30` reliability threshold), and Engelen et al. (2021) label corrections were absent/not applied ([`docs/optional_data.md`](docs/optional_data.md)).
+- **Shortcut-Feature & Zero-Day Limits:** Global SHAP relies strongly on `Destination Port` (`delta = -0.0063` when dropped), `by_day` misses `71.24%` of unseen attacks, and unsupervised detectors (`AE`/`VAE`/`OCSVM`/`IF`/`LOF`) are supplementary signals only.
+- **Offline Batch & Dry-Run Response Scope:** Live `libpcap`/`eBPF` capture is out of scope, and `ActiveResponseEngine` outputs `NOT EXECUTED (dry-run)` firewall command previews rather than executing host rules ([`docs/evaluation_caveats.md`](docs/evaluation_caveats.md)).
 
 ---
 
-## How to Reproduce
+## Security & License
 
-To verify code style, tests, and end-to-end training reproducibility from a clean checkout:
-
-```powershell
-# Lint, formatting verification, and unit/smoke tests (or regenerate reports/test_report.md)
-.venv\Scripts\ruff.exe check src dashboard scripts tests app.py
-.venv\Scripts\ruff.exe format --check src dashboard scripts tests app.py
-.venv\Scripts\python.exe -m pytest tests/ -v --tb=short
-.venv\Scripts\python.exe scripts/generate_test_report.py
-
-# End-to-end training + evaluation (synthetic quick sanity run or genuine data/raw/*.csv)
-.venv\Scripts\python.exe scripts/train.py --synthetic --max-rows 20000 --epochs 5 --optuna-trials 3 --run-eval
-```
-
-All PRs and pushes to `main` run these Ruff and pytest checks automatically via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
-
----
-
-## Repository Layout
-
-```text
-NHA-5-211/
-├── .gitattributes             # Git LFS tracking for *.keras, *.pkl & large model files
-├── .github/workflows/ci.yml   # GitHub Actions CI (lfs:false lint/pytest + manual LFS smoke job)
-├── Dockerfile                 # Containerized Streamlit SOC deployment (REQUIRE_MODELS guard)
-├── LICENSE                    # MIT License
-├── app.py                     # Streamlit SOC dashboard entrypoint (7 tabs)
-├── configs/                   # YAML pipeline & hyperparameter configs
-├── docs/                      # Architecture, methodology, specs & extended notes
-├── data/                      # raw/ (CICIDS2017 CSVs), processed/, synthetic/
-├── src/                       # Modular data, models, training, eval, XAI & response
-├── dashboard/                 # Modular Streamlit pages, components & theme
-├── scripts/                   # train.py, evaluate.py, run_dashboard.py, export_onnx.py, generate_test_report.py
-├── models/ & reports/         # Saved artifacts, CSV/JSON metrics, reports & figures
-└── tests/                     # Pytest suite (pipeline, leakage, models, dashboard, CLI)
-```
-
----
-
-## Limitations, Security & License
-
-- **Artifact Deserialization Security & SHA-256 Verification (`*.pkl` via `joblib`):** Serialized model and preprocessing files (`*.pkl` loaded via `joblib`) execute arbitrary code on deserialization and **must only be loaded from trusted sources**. During training, `models/MANIFEST.json` is generated with SHA-256 digests of every model artifact; [`ModelRegistry`](src/utils/model_registry.py) (controlled by `security.verify_model_hashes: true` in [`configs/config.yaml`](configs/config.yaml)) verifies each artifact's SHA-256 digest before calling `joblib.load`, refuses to load tampered or mismatched files with `ModelIntegrityError`, and skips unfetched Git LFS pointer stubs gracefully.
-
-- **Dry-Run Mitigation & Non-Executed Command Previews:** `ActiveResponseEngine` runs strictly in `NOT EXECUTED (dry-run)` preview mode, validating source IPs with `ipaddress`, refusing private/loopback/link-local/multicast/reserved/unspecified IP ranges, recording append-only JSON/text audit logs, and surfacing OS-specific firewall command previews (`iptables`/`nftables`, Windows `netsh`/`New-NetFirewallRule`). Live firewall execution is intentionally out of scope for this academic project.
-- **Offline Batch Telemetry:** Live packet capture (`libpcap`/`eBPF`) and streaming CICFlowMeter extraction are outside project scope.
-- **Open-Set Unseen-Attack Miss Rate:** On open-set cross-day evaluation (`by_day`), supervised models detect only `~28.8%` of unseen attack flows (`XGBoost (1 - P_Benign)` recall `0.2876` at precision `0.9991`; binary `XGBoost` recall `0.2690` at precision `0.9981`; `MLP` recall `0.2839` at precision `0.9942`); anomaly detectors are therefore kept as a supplementary zero-day signal.
-- **Supplementary Anomaly Detection:** Unsupervised detectors (`Autoencoder`, `IsolationForest`, `OneClassSVM`, `LOF`) struggle on stealthy application-layer flows mimicking benign HTTP statistics and act purely as supplementary zero-day alerts alongside supervised `XGBoost`.
-- **License:** Distributed under the terms of the [MIT License](LICENSE).
+- **Artifact Deserialization & Integrity:** Deserializing `*.pkl` files via `joblib` executes arbitrary code. `models/MANIFEST.json` protects against corrupted or accidentally swapped artifacts, but is NOT a defense against a malicious actor who can modify both the model and the manifest; only load artifacts from trusted sources.
+- **License:** Distributed under the [MIT License](LICENSE). Full metric tables & caveats: [`docs/results_details.md`](docs/results_details.md) · [`docs/evaluation_caveats.md`](docs/evaluation_caveats.md) · [`docs/architecture.md`](docs/architecture.md) · [`docs/project_details.md`](docs/project_details.md).

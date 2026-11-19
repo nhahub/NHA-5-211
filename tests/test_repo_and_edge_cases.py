@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from scripts.check_optional_data import check_optional_data_status, format_optional_data_report
+from scripts.check_readme_numbers import check_readme_numbers
 from scripts.download_models import download_model_assets
 from scripts.export_onnx import check_onnx_environment
 from scripts.export_onnx import main as export_onnx_main
@@ -633,3 +634,22 @@ def test_check_optional_data_present_and_missing(tmp_path: Path) -> None:
     )
     assert present_status["label_correction"]["ready"] is True
     assert present_status["all_optional_present"] is True
+
+
+def test_readme_numbers_match_generated_reports_and_detect_drift(tmp_path: Path) -> None:
+    """README numeric claims match evaluation_summary.json/test_report.md and tamper detection works."""
+    mismatches = check_readme_numbers()
+    assert mismatches == [], f"README/doc mismatches: {mismatches}"
+
+    readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    assert len(readme_text.splitlines()) <= 150
+    assert (
+        "models/MANIFEST.json protects against corrupted or accidentally swapped artifacts"
+        in readme_text.replace("`", "")
+    )
+
+    # Negative check: altering an F1_Macro value in a temporary README copy must be flagged
+    tampered_readme = tmp_path / "README.md"
+    tampered_readme.write_text(readme_text.replace("0.9603", "0.9999", 1), encoding="utf-8")
+    tamper_errs = check_readme_numbers(readme_path=tampered_readme)
+    assert any("XGBoost random F1_Macro" in e for e in tamper_errs)
