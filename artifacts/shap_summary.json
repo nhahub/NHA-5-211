@@ -2,7 +2,7 @@
   "XGBoost": {
     "explainer_type": "TreeExplainer",
     "n_samples_explained": 500,
-    "elapsed_sec": 0.652883299975656,
+    "elapsed_sec": 0.4377434000016365,
     "top_features": [
       {
         "feature": "Destination Port",
@@ -89,87 +89,87 @@
   "MLP": {
     "explainer_type": "GradientExplainer",
     "n_samples_explained": 20,
-    "elapsed_sec": 2.813519500021357,
+    "elapsed_sec": 2.328102100000251,
     "top_features": [
       {
-        "feature": "ACK Flag Count",
-        "mean_abs_shap": 0.0072585532365545685
+        "feature": "Min Packet Length",
+        "mean_abs_shap": 0.007811681919132732
       },
       {
-        "feature": "Min Packet Length",
-        "mean_abs_shap": 0.0054484972840600585
+        "feature": "ACK Flag Count",
+        "mean_abs_shap": 0.0070935269285271
       },
       {
         "feature": "PSH Flag Count",
-        "mean_abs_shap": 0.00544022790005019
-      },
-      {
-        "feature": "Flow IAT Std",
-        "mean_abs_shap": 0.004907282949638691
+        "mean_abs_shap": 0.006165388208841669
       },
       {
         "feature": "Packet Length Variance",
-        "mean_abs_shap": 0.004321194137445325
+        "mean_abs_shap": 0.004371093512433081
       },
       {
         "feature": "Packet Length Std",
-        "mean_abs_shap": 0.003697072794195031
+        "mean_abs_shap": 0.004222427442398941
       },
       {
         "feature": "Down/Up Ratio",
-        "mean_abs_shap": 0.0036210297174426574
-      },
-      {
-        "feature": "Average Packet Size",
-        "mean_abs_shap": 0.0034081890472051233
-      },
-      {
-        "feature": "Bwd Packets/s",
-        "mean_abs_shap": 0.0033163449677141668
-      },
-      {
-        "feature": "Bwd Packet Length Std",
-        "mean_abs_shap": 0.003240672623455344
-      },
-      {
-        "feature": "Idle Max",
-        "mean_abs_shap": 0.002990416568458333
+        "mean_abs_shap": 0.004119692234489301
       },
       {
         "feature": "Init_Win_bytes_forward",
-        "mean_abs_shap": 0.0027799724992131195
+        "mean_abs_shap": 0.003485763321167213
       },
       {
-        "feature": "Max Packet Length",
-        "mean_abs_shap": 0.00262646060392812
+        "feature": "Average Packet Size",
+        "mean_abs_shap": 0.003431552772255978
       },
       {
-        "feature": "Flow IAT Mean",
-        "mean_abs_shap": 0.002571768303170785
+        "feature": "Flow IAT Std",
+        "mean_abs_shap": 0.0033190728994101117
+      },
+      {
+        "feature": "Idle Max",
+        "mean_abs_shap": 0.003180985576761725
       },
       {
         "feature": "Bwd Packet Length Max",
-        "mean_abs_shap": 0.002506975591083228
-      },
-      {
-        "feature": "Packet Length Mean",
-        "mean_abs_shap": 0.0024531647455464057
-      },
-      {
-        "feature": "Fwd Packet Length Std",
-        "mean_abs_shap": 0.002349795147047254
-      },
-      {
-        "feature": "Bwd Packet Length Min",
-        "mean_abs_shap": 0.0023073964493341005
+        "mean_abs_shap": 0.002974527971680848
       },
       {
         "feature": "Fwd IAT Std",
-        "mean_abs_shap": 0.002165372138294084
+        "mean_abs_shap": 0.002848508961020822
       },
       {
-        "feature": "Idle Mean",
-        "mean_abs_shap": 0.002117653484493263
+        "feature": "Destination Port",
+        "mean_abs_shap": 0.0027924345749644666
+      },
+      {
+        "feature": "Bwd Packets/s",
+        "mean_abs_shap": 0.0025370853930559373
+      },
+      {
+        "feature": "Bwd Packet Length Std",
+        "mean_abs_shap": 0.0025178237284368657
+      },
+      {
+        "feature": "Fwd IAT Mean",
+        "mean_abs_shap": 0.0024991064898788828
+      },
+      {
+        "feature": "Bwd Packet Length Min",
+        "mean_abs_shap": 0.002439376695875294
+      },
+      {
+        "feature": "Fwd IAT Max",
+        "mean_abs_shap": 0.0024260544601275207
+      },
+      {
+        "feature": "Fwd Packet Length Std",
+        "mean_abs_shap": 0.0022115046049272836
+      },
+      {
+        "feature": "Fwd IAT Total",
+        "mean_abs_shap": 0.002203839360469081
       }
     ],
     "explainer_benchmark": {
@@ -177,117 +177,117 @@
         "status": "success",
         "n_background": 50,
         "n_explained": 20,
-        "elapsed_sec": 2.8135
+        "elapsed_sec": 2.3281
       },
       "kernel_explainer": {
         "status": "success",
         "n_background": 10,
         "n_explained": 10,
-        "elapsed_sec": 9.0226
+        "elapsed_sec": 6.5627
       },
-      "spearman_rank_agreement": 0.6026,
-      "speedup_vs_kernel": 3.21
+      "spearman_rank_agreement": 0.6694,
+      "speedup_vs_kernel": 2.82
     }
   },
   "local_example": {
-    "sample_test_index": 44,
-    "true_class": "DDoS",
+    "sample_test_index": 4724,
+    "true_class": "Bot",
     "model": "XGBoost",
     "explainer": "TreeExplainer",
-    "target_class": "DDoS",
-    "target_class_idx": 2,
-    "base_value": 1.9008734226226807,
-    "shap_sum_plus_base": 9.772632135089225,
+    "target_class": "Bot",
+    "target_class_idx": 1,
+    "base_value": -0.5423840284347534,
+    "shap_sum_plus_base": 3.8239350810763426,
     "top_features": [
       {
-        "feature": "Bwd Packet Length Mean",
-        "shap_value": 1.647918462753296,
-        "abs_shap": 1.647918462753296,
-        "scaled_value": 3.2673842906951904
+        "feature": "Destination Port",
+        "shap_value": 3.1623897552490234,
+        "abs_shap": 3.1623897552490234,
+        "scaled_value": -0.015670232474803925
       },
       {
-        "feature": "Fwd Packet Length Max",
-        "shap_value": 0.9231637120246887,
-        "abs_shap": 0.9231637120246887,
-        "scaled_value": -0.3548681437969208
+        "feature": "Bwd IAT Min",
+        "shap_value": 1.5385591983795166,
+        "abs_shap": 1.5385591983795166,
+        "scaled_value": -0.03462198004126549
       },
       {
-        "feature": "act_data_pkt_fwd",
-        "shap_value": 0.8124045729637146,
-        "abs_shap": 0.8124045729637146,
-        "scaled_value": -0.037593450397253036
+        "feature": "Flow IAT Max",
+        "shap_value": -0.5934652090072632,
+        "abs_shap": 0.5934652090072632,
+        "scaled_value": -0.36455658078193665
+      },
+      {
+        "feature": "Flow IAT Min",
+        "shap_value": -0.5801247954368591,
+        "abs_shap": 0.5801247954368591,
+        "scaled_value": -0.07935972511768341
+      },
+      {
+        "feature": "Bwd IAT Std",
+        "shap_value": 0.5773105025291443,
+        "abs_shap": 0.5773105025291443,
+        "scaled_value": -0.2555336356163025
+      },
+      {
+        "feature": "Fwd IAT Std",
+        "shap_value": 0.4112991988658905,
+        "abs_shap": 0.4112991988658905,
+        "scaled_value": -0.34670066833496094
+      },
+      {
+        "feature": "Flow Duration",
+        "shap_value": -0.3365481197834015,
+        "abs_shap": 0.3365481197834015,
+        "scaled_value": -0.4216732680797577
+      },
+      {
+        "feature": "Fwd IAT Max",
+        "shap_value": 0.332839697599411,
+        "abs_shap": 0.332839697599411,
+        "scaled_value": -0.3571522533893585
       },
       {
         "feature": "Init_Win_bytes_backward",
-        "shap_value": 0.8093164563179016,
-        "abs_shap": 0.8093164563179016,
-        "scaled_value": -0.22375570237636566
-      },
-      {
-        "feature": "min_seg_size_forward",
-        "shap_value": 0.6859063506126404,
-        "abs_shap": 0.6859063506126404,
-        "scaled_value": 0.007050924003124237
-      },
-      {
-        "feature": "Total Length of Fwd Packets",
-        "shap_value": 0.5584886074066162,
-        "abs_shap": 0.5584886074066162,
-        "scaled_value": -0.1537063866853714
-      },
-      {
-        "feature": "Total Length of Bwd Packets",
-        "shap_value": 0.5139824748039246,
-        "abs_shap": 0.5139824748039246,
-        "scaled_value": 0.040650028735399246
-      },
-      {
-        "feature": "Destination Port",
-        "shap_value": 0.44062280654907227,
-        "abs_shap": 0.44062280654907227,
-        "scaled_value": -0.4460160434246063
-      },
-      {
-        "feature": "Init_Win_bytes_forward",
-        "shap_value": -0.3449964225292206,
-        "abs_shap": 0.3449964225292206,
-        "scaled_value": 0.06835047900676727
-      },
-      {
-        "feature": "Packet Length Mean",
-        "shap_value": 0.29003503918647766,
-        "abs_shap": 0.29003503918647766,
-        "scaled_value": 3.605177879333496
-      },
-      {
-        "feature": "Fwd Packet Length Mean",
-        "shap_value": 0.2890080511569977,
-        "abs_shap": 0.2890080511569977,
-        "scaled_value": -0.37644025683403015
+        "shap_value": -0.3072047829627991,
+        "abs_shap": 0.3072047829627991,
+        "scaled_value": -0.25417789816856384
       },
       {
         "feature": "Average Packet Size",
-        "shap_value": 0.24805784225463867,
-        "abs_shap": 0.24805784225463867,
-        "scaled_value": 3.742415428161621
+        "shap_value": -0.2237655222415924,
+        "abs_shap": 0.2237655222415924,
+        "scaled_value": -0.5853456854820251
       },
       {
-        "feature": "Flow IAT Mean",
-        "shap_value": 0.22576884925365448,
-        "abs_shap": 0.22576884925365448,
-        "scaled_value": -0.3554140329360962
+        "feature": "Fwd IAT Total",
+        "shap_value": 0.2142549455165863,
+        "abs_shap": 0.2142549455165863,
+        "scaled_value": -0.412952184677124
       },
       {
-        "feature": "Subflow Fwd Bytes",
-        "shap_value": 0.19163326919078827,
-        "abs_shap": 0.19163326919078827,
-        "scaled_value": -0.15380702912807465
+        "feature": "Total Length of Bwd Packets",
+        "shap_value": 0.2041989266872406,
+        "abs_shap": 0.2041989266872406,
+        "scaled_value": -0.05654929205775261
       },
       {
-        "feature": "Min Packet Length",
-        "shap_value": -0.16301675140857697,
-        "abs_shap": 0.16301675140857697,
-        "scaled_value": -0.7576842308044434
+        "feature": "Bwd IAT Total",
+        "shap_value": 0.1599893718957901,
+        "abs_shap": 0.1599893718957901,
+        "scaled_value": -0.3192017376422882
+      },
+      {
+        "feature": "Flow Bytes/s",
+        "shap_value": -0.15085308253765106,
+        "abs_shap": 0.15085308253765106,
+        "scaled_value": -0.13604900240898132
+      },
+      {
+        "feature": "Fwd Header Length",
+        "shap_value": -0.0988803580403328,
+        "abs_shap": 0.0988803580403328,
+        "scaled_value": 0.005842647980898619
       }
     ]
   }

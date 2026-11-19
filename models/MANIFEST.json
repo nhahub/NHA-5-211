@@ -1,0 +1,79 @@
+{
+  "algorithm": "sha256",
+  "generated_at_utc": "2026-11-19T18:23:01.852851+00:00",
+  "artifact_count": 18,
+  "artifacts": {
+    "anomaly_baselines.pkl": {
+      "sha256": "644f8d83eb4d5a9749a322e610561114f42d80473ed001f78a3b72fcfa5f98c7",
+      "size_bytes": 8639301
+    },
+    "anomaly_fusion.pkl": {
+      "sha256": "c22d330939b3fc5abafdf30d36a742399ef1b3e3be370fa07ae0bf6fc234ca3f",
+      "size_bytes": 1070
+    },
+    "anomaly_threshold.json": {
+      "sha256": "9cffb5b9affd2347726259854ad072e904f2d0f27bb72b1e7b16d2267ad46630",
+      "size_bytes": 499
+    },
+    "best_autoencoder.keras": {
+      "sha256": "5c42949a55d9d73fefc65dad8ca836303869ec6637ae9dcd846c587c5b2b9b3f",
+      "size_bytes": 1623511
+    },
+    "best_autoencoder_deep.keras": {
+      "sha256": "d86f0e9c1e2e0cb57704e5f9c258c6bf90942cf450364432e9169c584b648434",
+      "size_bytes": 5315844
+    },
+    "best_cnn.keras": {
+      "sha256": "2ba6b7b64c45ec0dc77c58b5f835c7262e5650f0ee16f4af4b115f47f7ef2c41",
+      "size_bytes": 1374000
+    },
+    "best_mlp.keras": {
+      "sha256": "802c2886f69fac7ecc1d077d52701f015a1caf3babf03dfe6533bf6cc917c529",
+      "size_bytes": 2657118
+    },
+    "best_vae.keras": {
+      "sha256": "619dfee9dc30cac0ba2188b72af9258110b5363e1ea5aed7b2b293278273cb23",
+      "size_bytes": 1647599
+    },
+    "calibrators.pkl": {
+      "sha256": "93b6afba20c7614c0de12393a70deff7204a41af8d5dfa5b5b63467fb4aef720",
+      "size_bytes": 242
+    },
+    "feature_names.json": {
+      "sha256": "c4e51244bb638a5d7c886d75dbcc01b639c30eb174589fd7833d817e797309be",
+      "size_bytes": 1749
+    },
+    "imputer.pkl": {
+      "sha256": "c9e0e62f7adf03b3388a6df9d5485989371d46ee267c91e5faba826a3e10b757",
+      "size_bytes": 2250
+    },
+    "label_encoder.pkl": {
+      "sha256": "246a20c23557c330363f338bd7c196efdb1be0113fd0b26b130dc33ea85e1722",
+      "size_bytes": 637
+    },
+    "model_metadata.json": {
+      "sha256": "33d68e362fd31248d483608e5fcd1a6956d3dfe07147b0d17ab9dd6980f839e1",
+      "size_bytes": 580
+    },
+    "outlier_clipper.pkl": {
+      "sha256": "77579c1ff07cee73d266b803bddc59df64327a8c1a866942a9e0580fcf7fbe03",
+      "size_bytes": 2791
+    },
+    "scaler.pkl": {
+      "sha256": "a26c9d2ddb0ccc92422ec3074efe8995f4d1c602c9faf8cde36e1abc668c8316",
+      "size_bytes": 4095
+    },
+    "stacking_meta.pkl": {
+      "sha256": "eb2f6edc08c8078310e28f602212994b5f9273e529169f74bc950a71ef4aec39",
+      "size_bytes": 5387
+    },
+    "training_histories.json": {
+      "sha256": "6810dabe72acec99d6ea81f9fbf7d75a82de3c510b1d28243fcd3d7ccaa85b50",
+      "size_bytes": 18988
+    },
+    "xgb_model.json": {
+      "sha256": "07e4dfe1f9a8c3fded20547933337f7a64ad908e411af9bef9457a97a400c706",
+      "size_bytes": 3097766
+    }
+  }
+}

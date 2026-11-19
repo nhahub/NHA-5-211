@@ -1,8 +1,11 @@
-Model,Evaluation_Framing,Accuracy,Precision_Weighted,Recall_Weighted,F1_Weighted,F1_Macro,F1_Macro_CI95_Low,F1_Macro_CI95_High,ROC_AUC,PR_AUC,Latency_Median_us,Latency_P95_us,Latency_Mean_us,Samples_Per_Sec,Model_Size_MB,Training_Duration_s
-MLP,13-class supervised,0.978,0.9762,0.978,0.9767,0.6728,0.6236,0.7067,0.9905,0.8117,201.35,298.32,205.43,21257.9,2.534,37.94
-1D-CNN,13-class supervised,0.9946,0.9936,0.9946,0.994,0.8499,0.7942,0.8827,0.9853,0.8735,710.65,937.27,747.67,14826.1,1.31,1115.12
-XGBoost,13-class supervised,0.9989,0.9989,0.9989,0.9988,0.9603,0.9013,0.9849,0.9995,0.9773,534.65,893.4,595.19,241249.6,2.954,194.69
-Autoencoder,Binary anomaly (Benign vs Anomalous),0.8678,0.689,0.513,0.5881,0.5881,0.5759,0.6001,0.8384,0.6651,246.5,397.02,257.85,19849.4,1.548,68.16
-Isolation Forest,Binary anomaly (Benign vs Anomalous),0.8385,0.6085,0.3438,0.4394,0.4394,0.4253,0.4531,0.771,0.5005,8432.65,9460.15,8502.07,68301.3,2.096,0.76
-One-Class SVM,Binary anomaly (Benign vs Anomalous),0.869,0.696,0.5117,0.5898,0.5898,0.577,0.602,0.7467,0.5649,163.25,313.91,185.5,17845.6,0.478,2.31
-LOF,Binary anomaly (Benign vs Anomalous),0.8421,0.6178,0.3724,0.4647,0.4647,0.4516,0.4775,0.8607,0.5391,2399.8,3838.51,2499.76,33666.1,5.666,0.6
+Model,Imbalance_Strategy,Evaluation_Framing,Accuracy,Precision_Weighted,Recall_Weighted,F1_Weighted,F1_Macro,F1_Macro_Reliable,F1_Macro_CI95_Low,F1_Macro_CI95_High,ROC_AUC,PR_AUC,Latency_Median_us,Latency_P95_us,Latency_Mean_us,Samples_Per_Sec,Model_Size_MB,Training_Duration_s
+MLP,smote,13-class supervised,0.9766,0.979,0.9766,0.9772,0.7934,0.9286,0.7544,0.8176,0.9962,0.8487,173.85,221.99,174.96,24457.6,2.534,57.84
+1D-CNN,smote,13-class supervised,0.9904,0.9925,0.9904,0.9913,0.8447,0.9562,0.7649,0.8819,0.9933,0.8752,623.0,724.05,632.81,16521.5,1.31,859.55
+XGBoost,none,13-class supervised,0.9989,0.9989,0.9989,0.9988,0.9603,0.9972,0.9013,0.9849,0.9995,0.9773,405.05,523.68,459.02,249219.2,2.954,320.33
+Autoencoder,benign_only,Binary anomaly (Benign vs Anomalous),0.8934,0.7382,0.6523,0.6926,0.6926,,0.682,0.702,0.8676,0.729,198.7,280.1,215.25,17682.5,1.548,68.8
+Autoencoder (Deep Reg),benign_only,Binary anomaly (Benign vs Anomalous),0.8668,0.6872,0.5063,0.5831,0.5831,,0.5704,0.5947,0.7908,0.6293,233.5,308.93,236.52,22696.0,5.07,53.46
+VAE,benign_only,Binary anomaly (Benign vs Anomalous),0.8693,0.6964,0.5132,0.591,0.591,,0.578,0.6025,0.7755,0.6231,208.55,268.89,208.99,24408.6,1.571,33.46
+Isolation Forest,benign_only,Binary anomaly (Benign vs Anomalous),0.8385,0.6085,0.3438,0.4394,0.4394,,0.4253,0.4531,0.771,0.5005,6958.0,7768.49,7054.16,79549.0,2.096,0.48
+One-Class SVM,benign_only,Binary anomaly (Benign vs Anomalous),0.869,0.696,0.5117,0.5898,0.5898,,0.577,0.602,0.7467,0.5649,136.45,166.06,145.06,23264.0,0.478,1.49
+LOF,benign_only,Binary anomaly (Benign vs Anomalous),0.8421,0.6178,0.3724,0.4647,0.4647,,0.4516,0.4775,0.8607,0.5391,1368.8,1965.23,1367.67,41327.3,5.666,0.49
+Score-Level Fusion (AE+OCSVM+IF),benign_only,Binary anomaly (Benign vs Anomalous),0.8934,0.7382,0.6523,0.6926,0.6926,,0.682,0.702,0.8676,0.729,0.0,0.0,0.0,0.0,0.0,0.0

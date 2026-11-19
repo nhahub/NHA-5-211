@@ -14,7 +14,47 @@
     ],
     "raw_row_count": 2830743,
     "sampled_row_count": 200000,
-    "warning_message": null
+    "warning_message": null,
+    "timestamp_alignment": {
+      "status": "directory_not_found",
+      "source_dir": "D:\\IDS_Final\\data\\TrafficLabelling",
+      "directory_exists": false,
+      "csv_files_found": 0,
+      "real_timestamps_available": false,
+      "join_strategy": "none (CSV row order fallback)",
+      "join_keys_used": [],
+      "total_rows": 2830743,
+      "matched_rows": 0,
+      "unmatched_rows": 2830743,
+      "match_rate": 0.0
+    },
+    "label_correction": {
+      "status": "file_not_found",
+      "applied": false,
+      "file_path": "D:\\IDS_Final\\data\\engelen2021_label_corrections.csv",
+      "join_strategy": "none",
+      "join_keys_used": [],
+      "total_rows": 2830743,
+      "matched_rows": 0,
+      "rows_relabeled": 0,
+      "rows_dropped": 0,
+      "relabel_transitions": {}
+    },
+    "use_full_dataset": false,
+    "effective_sample_size": 200000
+  },
+  "timestamp_alignment": {
+    "status": "directory_not_found",
+    "source_dir": "D:\\IDS_Final\\data\\TrafficLabelling",
+    "directory_exists": false,
+    "csv_files_found": 0,
+    "real_timestamps_available": false,
+    "join_strategy": "none (CSV row order fallback)",
+    "join_keys_used": [],
+    "total_rows": 2830743,
+    "matched_rows": 0,
+    "unmatched_rows": 2830743,
+    "match_rate": 0.0
   },
   "original_shape": [
     200000,

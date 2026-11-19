@@ -1,40 +1,56 @@
 {
   "training_durations_sec": {
-    "MLP": 37.94196509994799,
-    "CNN": 1115.1228030000348,
-    "Autoencoder": 68.15938520000782,
-    "Isolation Forest": 0.7648540000081994,
-    "One-Class SVM": 2.31156960001681,
-    "LOF": 0.600675499998033,
-    "XGBoost": 194.68522339995252
+    "MLP": 57.83748859999832,
+    "CNN": 859.5482340999988,
+    "Autoencoder": 68.80057429999943,
+    "Isolation Forest": 0.4806799999969371,
+    "One-Class SVM": 1.4908027999990736,
+    "LOF": 0.4940686000009009,
+    "Autoencoder (Deep Reg)": 53.45700869999928,
+    "VAE": 33.46365119999973,
+    "XGBoost": 320.3317233000016
   },
   "overfitting_analysis": {
     "MLP": {
-      "best_epoch": 8.0,
-      "total_epochs_run": 16.0,
-      "best_train_loss": 0.11819467693567276,
-      "best_val_loss": 0.10006469488143921,
-      "loss_generalization_gap": -0.01812998205423355,
-      "best_train_acc": 0.9715536832809448,
-      "best_val_acc": 0.977645993232727,
-      "acc_generalization_gap": -0.0060923099517822266
+      "best_epoch": 20.0,
+      "total_epochs_run": 28.0,
+      "best_train_loss": 0.20974361896514893,
+      "best_val_loss": 0.09738368541002274,
+      "loss_generalization_gap": -0.11235993355512619,
+      "best_train_acc": 0.9683215022087097,
+      "best_val_acc": 0.9774801135063171,
+      "acc_generalization_gap": -0.009158611297607422
     },
     "CNN": {
-      "best_epoch": 48.0,
+      "best_epoch": 49.0,
       "total_epochs_run": 50.0,
-      "best_train_loss": 0.03252016007900238,
-      "best_val_loss": 0.024143798276782036,
-      "loss_generalization_gap": -0.008376361802220345,
-      "best_train_acc": 0.9920833706855774,
-      "best_val_acc": 0.9953964948654175,
-      "acc_generalization_gap": -0.003313124179840088
+      "best_train_loss": 0.06238274276256561,
+      "best_val_loss": 0.03374629467725754,
+      "loss_generalization_gap": -0.028636448085308075,
+      "best_train_acc": 0.984387218952179,
+      "best_val_acc": 0.9924933910369873,
+      "acc_generalization_gap": -0.00810617208480835
     },
     "Autoencoder": {
-      "best_epoch": 18.0,
-      "total_epochs_run": 28.0,
-      "best_train_loss": 0.019154507666826248,
-      "best_val_loss": 0.03435177728533745,
-      "loss_generalization_gap": 0.0151972696185112
+      "best_epoch": 38.0,
+      "total_epochs_run": 48.0,
+      "best_train_loss": 0.010094809345901012,
+      "best_val_loss": 0.022215891629457474,
+      "loss_generalization_gap": 0.012121082283556461
+    },
+    "Autoencoder (Deep Reg)": {
+      "best_epoch": 9.0,
+      "total_epochs_run": 19.0,
+      "best_train_loss": 0.16334840655326843,
+      "best_val_loss": 0.22353941202163696,
+      "loss_generalization_gap": 0.06019100546836853
+    },
+    "VAE": {
+      "best_epoch": 15.0,
+      "total_epochs_run": 20.0,
+      "best_train_loss": 0.08702435344457626,
+      "best_val_loss": 0.1080927848815918,
+      "loss_generalization_gap": 0.021068431437015533
     }
   },
   "imbalance_experiment": {
@@ -57,7 +73,199 @@
       "val_mlogloss": 0.004600005391938414
     },
     "selected_strategy": "none",
-    "justification": "Tie within tolerance (tol=0.0020): Unweighted ('none') Macro-F1=0.9518, Hybrid SMOTE ('smote') Macro-F1=0.9518 fall within 0.0020 of peak validation Macro-F1=0.9518 (gap=0.0000 vs 'smote'); tie within tolerance, simplest strategy selected -> 'none' (Weighted-F1=0.9989, Macro-Recall=0.9323, mlogloss=0.0046; Hybrid SMOTE ('smote') Macro-F1=0.9518 (Weighted-F1=0.9989, mlogloss=0.0044); Class-Weight ('class_weight') Macro-F1=0.9446 (Weighted-F1=0.9981, mlogloss=0.0092))."
+    "justification": "Per-model imbalance selection (independent validation Macro-F1 with tie_tolerance=0.0020, neural_epochs_cap=10): MLP -> 'smote', CNN -> 'smote', XGBoost -> 'none'.",
+    "per_model": {
+      "MLP": {
+        "model_name": "MLP",
+        "metrics_by_strategy": {
+          "none": {
+            "val_macro_f1": 0.6924485266288857,
+            "val_weighted_f1": 0.9763203305092825,
+            "val_macro_recall": 0.6586282655118141,
+            "val_mlogloss": 0.06258580833673477
+          },
+          "class_weight": {
+            "val_macro_f1": 0.4045762033845185,
+            "val_weighted_f1": 0.8575114115976339,
+            "val_macro_recall": 0.9270283560309119,
+            "val_mlogloss": 0.5528191328048706
+          },
+          "smote": {
+            "val_macro_f1": 0.7694778566901552,
+            "val_weighted_f1": 0.9788000455730407,
+            "val_macro_recall": 0.7923849068444291,
+            "val_mlogloss": 0.056858986616134644
+          }
+        },
+        "selected_strategy": "smote",
+        "justification": "Data-driven selection chose 'smote' with highest validation Macro-F1=0.7695 (Weighted-F1=0.9788, Macro-Recall=0.7924, mlogloss=0.0569), beating runner-up 'none' by +0.0770 Macro-F1 (> tolerance=0.0020; Unweighted ('none') Macro-F1=0.6924 (Weighted-F1=0.9763, mlogloss=0.0626); Class-Weight ('class_weight') Macro-F1=0.4046 (Weighted-F1=0.8575, mlogloss=0.5528)).",
+        "epochs_cap_applied": 10
+      },
+      "CNN": {
+        "model_name": "CNN",
+        "metrics_by_strategy": {
+          "none": {
+            "val_macro_f1": 0.5094131018088606,
+            "val_weighted_f1": 0.9779745921042076,
+            "val_macro_recall": 0.46344939305801575,
+            "val_mlogloss": 0.07224766165018082
+          },
+          "class_weight": {
+            "val_macro_f1": 0.4149776073249329,
+            "val_weighted_f1": 0.8395234732335662,
+            "val_macro_recall": 0.8839875026359054,
+            "val_mlogloss": 0.49486544728279114
+          },
+          "smote": {
+            "val_macro_f1": 0.7501191600379367,
+            "val_weighted_f1": 0.9786915308526862,
+            "val_macro_recall": 0.8454981915344777,
+            "val_mlogloss": 0.06421962380409241
+          }
+        },
+        "selected_strategy": "smote",
+        "justification": "Data-driven selection chose 'smote' with highest validation Macro-F1=0.7501 (Weighted-F1=0.9787, Macro-Recall=0.8455, mlogloss=0.0642), beating runner-up 'none' by +0.2407 Macro-F1 (> tolerance=0.0020; Unweighted ('none') Macro-F1=0.5094 (Weighted-F1=0.9780, mlogloss=0.0722); Class-Weight ('class_weight') Macro-F1=0.4150 (Weighted-F1=0.8395, mlogloss=0.4949)).",
+        "epochs_cap_applied": 10
+      },
+      "XGBoost": {
+        "model_name": "XGBoost",
+        "metrics_by_strategy": {
+          "none": {
+            "val_macro_f1": 0.9517974756673102,
+            "val_weighted_f1": 0.9988524291853114,
+            "val_macro_recall": 0.9322891059260157,
+            "val_mlogloss": 0.004600005391938414
+          },
+          "class_weight": {
+            "val_macro_f1": 0.9446072169099724,
+            "val_weighted_f1": 0.9980690352099042,
+            "val_macro_recall": 0.9583415581335186,
+            "val_mlogloss": 0.009216071855883388
+          },
+          "smote": {
+            "val_macro_f1": 0.9518076534286934,
+            "val_weighted_f1": 0.9988533794554174,
+            "val_macro_recall": 0.9438809487285276,
+            "val_mlogloss": 0.004437000909657784
+          }
+        },
+        "selected_strategy": "none",
+        "justification": "Tie within tolerance (tol=0.0020): Unweighted ('none') Macro-F1=0.9518, Hybrid SMOTE ('smote') Macro-F1=0.9518 fall within 0.0020 of peak validation Macro-F1=0.9518 (gap=0.0000 vs 'smote'); tie within tolerance, simplest strategy selected -> 'none' (Weighted-F1=0.9989, Macro-Recall=0.9323, mlogloss=0.0046; Hybrid SMOTE ('smote') Macro-F1=0.9518 (Weighted-F1=0.9989, mlogloss=0.0044); Class-Weight ('class_weight') Macro-F1=0.9446 (Weighted-F1=0.9981, mlogloss=0.0092)).",
+        "epochs_cap_applied": null
+      }
+    },
+    "selected_strategies_by_model": {
+      "MLP": "smote",
+      "CNN": "smote",
+      "XGBoost": "none"
+    },
+    "neural_epochs_cap": 10,
+    "selection_mode": "per_model"
+  },
+  "imbalance_strategies_by_model": {
+    "MLP": "smote",
+    "CNN": "smote",
+    "XGBoost": "none"
+  },
+  "neural_loss_experiments": {
+    "MLP": {
+      "model": "MLP",
+      "kept_variant": "cross_entropy",
+      "baseline_val_macro_f1": 0.813398,
+      "kept_val_macro_f1": 0.813398,
+      "improvement_tolerance": 0.002,
+      "decision": "Reverted to baseline 'cross_entropy' for MLP (baseline val Macro-F1=0.8134; no variant exceeded +0.0020 tolerance within bounded neural budget).",
+      "candidates": [
+        {
+          "loss_variant": "cross_entropy (baseline)",
+          "status": "baseline",
+          "val_macro_f1": 0.813398223424067,
+          "val_weighted_f1": 0.9778465683638119,
+          "val_macro_recall": 0.8499818484421406,
+          "val_mlogloss": 0.049821846187114716,
+          "delta_val_macro_f1": 0.0,
+          "elapsed_sec": 0.0
+        },
+        {
+          "loss_variant": "label_smoothing",
+          "status": "reverted",
+          "val_macro_f1": 0.7138176562328936,
+          "val_weighted_f1": 0.978680973666428,
+          "val_macro_recall": 0.7874611269193311,
+          "val_mlogloss": 0.09456983208656311,
+          "delta_val_macro_f1": -0.099581,
+          "elapsed_sec": 31.37
+        },
+        {
+          "loss_variant": "focal_loss",
+          "status": "reverted",
+          "val_macro_f1": 0.761809290738804,
+          "val_weighted_f1": 0.9712038106821329,
+          "val_macro_recall": 0.8435891985282222,
+          "val_mlogloss": 0.10749845951795578,
+          "delta_val_macro_f1": -0.051589,
+          "elapsed_sec": 31.11
+        }
+      ]
+    },
+    "CNN": {
+      "model": "CNN",
+      "kept_variant": "cross_entropy",
+      "baseline_val_macro_f1": 0.870063,
+      "kept_val_macro_f1": 0.870063,
+      "improvement_tolerance": 0.002,
+      "decision": "Reverted to baseline 'cross_entropy' for CNN (baseline val Macro-F1=0.8701; no variant exceeded +0.0020 tolerance within bounded neural budget).",
+      "candidates": [
+        {
+          "loss_variant": "cross_entropy (baseline)",
+          "status": "baseline",
+          "val_macro_f1": 0.8700633393482798,
+          "val_weighted_f1": 0.9933215748012042,
+          "val_macro_recall": 0.9119891314352997,
+          "val_mlogloss": 0.02195141091942787,
+          "delta_val_macro_f1": 0.0,
+          "elapsed_sec": 0.0
+        },
+        {
+          "loss_variant": "label_smoothing",
+          "status": "reverted",
+          "val_macro_f1": 0.6562160515089803,
+          "val_weighted_f1": 0.9695988537359976,
+          "val_macro_recall": 0.7350489966493995,
+          "val_mlogloss": 0.11527256667613983,
+          "delta_val_macro_f1": -0.213847,
+          "elapsed_sec": 120.94
+        },
+        {
+          "loss_variant": "focal_loss",
+          "status": "skipped_time_budget",
+          "val_macro_f1": null,
+          "delta_val_macro_f1": null,
+          "elapsed_sec": 0.0
+        }
+      ]
+    }
+  },
+  "model_metadata": {
+    "MLP": {
+      "imbalance_strategy": "smote",
+      "loss_function": "cross_entropy",
+      "train_samples": 145714
+    },
+    "CNN": {
+      "imbalance_strategy": "smote",
+      "loss_function": "cross_entropy",
+      "train_samples": 145714
+    },
+    "XGBoost": {
+      "imbalance_strategy": "none",
+      "train_samples": 138190,
+      "selected_variant": "baseline"
+    },
+    "Autoencoder": {
+      "imbalance_strategy": "benign_only",
+      "train_samples": 113056
+    }
   },
   "xgboost_optimization": {
     "baseline_val_metrics": {
@@ -67,53 +275,53 @@
       "val_mlogloss": 0.004170339658721196
     },
     "tuned_val_metrics": {
-      "val_macro_f1": 0.9563279624175097,
-      "val_weighted_f1": 0.9989375694722029,
-      "val_macro_recall": 0.9381472440055,
-      "val_mlogloss": 0.0038349802671946037
+      "val_macro_f1": 0.9560620984243312,
+      "val_weighted_f1": 0.9989826954071829,
+      "val_macro_recall": 0.9397611508571609,
+      "val_mlogloss": 0.003983351133812845
     },
     "best_params": {
-      "n_estimators": 250,
+      "n_estimators": 200,
       "max_depth": 9,
-      "learning_rate": 0.16509374430131643,
-      "subsample": 0.7454404070203796,
-      "colsample_bytree": 0.6743552524164498,
-      "min_child_weight": 1,
-      "gamma": 0.04707107273372477,
-      "reg_alpha": 0.11296128986827052,
-      "reg_lambda": 3.3653939041707224
+      "learning_rate": 0.169343074851378,
+      "subsample": 0.7368670229152348,
+      "colsample_bytree": 0.781508634847684,
+      "min_child_weight": 2,
+      "gamma": 0.008472373470178672,
+      "reg_alpha": 0.026381555681519116,
+      "reg_lambda": 4.382866901278823
     },
-    "n_trials_completed": 12,
+    "n_trials_completed": 40,
     "selected_variant": "baseline",
     "cv_macro_f1_mean": 0.953464,
     "cv_macro_f1_std": 0.012051,
-    "macro_f1_improvement": 0.005898,
+    "macro_f1_improvement": 0.005632,
     "meaningful_improvement": false,
-    "selection_note": "No meaningful improvement: Optuna tuned val Macro-F1 (0.9563) changed by +0.0059 vs baseline (0.9504), within baseline CV std=0.0121; retaining baseline.",
+    "selection_note": "No meaningful improvement: Optuna tuned val Macro-F1 (0.9561) changed by +0.0056 vs baseline (0.9504), within baseline CV std=0.0121; retaining baseline.",
     "cv_method_note": "Unified 5-fold StratifiedKFold on the development pool (162,577 rows = train+val, held-out test excluded) with per-fold preprocessing and 'none' imbalance handling (sample ddof=1 std across folds)."
   },
   "calibration_report": {
     "MLP": {
-      "temperature": 1.0142,
-      "ece_before": 0.008125,
-      "ece_after": 0.008348,
-      "ece_delta": 0.000223,
-      "brier_before": 0.035087,
-      "brier_after": 0.035132,
-      "nll_before": 0.062586,
-      "nll_after": 0.062578,
-      "status": "Already well-calibrated near T=1.0"
+      "temperature": 0.7948,
+      "ece_before": 0.008277,
+      "ece_after": 0.005742,
+      "ece_delta": -0.002535,
+      "brier_before": 0.029947,
+      "brier_after": 0.029742,
+      "nll_before": 0.049822,
+      "nll_after": 0.048329,
+      "status": "Recalibrated (T=0.7948, ECE delta=-0.002535)"
     },
     "CNN": {
-      "temperature": 0.921,
-      "ece_before": 0.002372,
-      "ece_after": 0.001602,
-      "ece_delta": -0.00077,
-      "brier_before": 0.007808,
-      "brier_after": 0.007704,
-      "nll_before": 0.017454,
-      "nll_after": 0.017348,
-      "status": "Recalibrated (T=0.9210, ECE delta=-0.000770)"
+      "temperature": 0.8749,
+      "ece_before": 0.004522,
+      "ece_after": 0.003263,
+      "ece_delta": -0.001259,
+      "brier_before": 0.011284,
+      "brier_after": 0.011141,
+      "nll_before": 0.022045,
+      "nll_after": 0.021755,
+      "status": "Recalibrated (T=0.8749, ECE delta=-0.001259)"
     },
     "XGBoost": {
       "temperature": 0.9095,
@@ -134,18 +342,18 @@
       "XGBoost"
     ],
     "val_weights": {
-      "CNN": 0.34321,
-      "MLP": 0.299655,
-      "XGBoost": 0.357135
+      "CNN": 0.335819,
+      "MLP": 0.310086,
+      "XGBoost": 0.354094
     },
     "val_logloss": {
-      "CNN": 0.017348,
-      "MLP": 0.062586,
+      "CNN": 0.021755,
+      "MLP": 0.048329,
       "XGBoost": 0.004091
     },
     "val_macro_f1": {
-      "CNN": 0.798505,
-      "MLP": 0.692449,
+      "CNN": 0.870063,
+      "MLP": 0.813398,
       "XGBoost": 0.95043
     },
     "meta_learner": "LogisticRegression(log_probs)"
@@ -164,6 +372,105 @@
       "threshold": 1.1482259273529045,
       "train_samples": 15000
     }
+  },
+  "anomaly_variants_meta": {
+    "Autoencoder (Deep Reg)": {
+      "threshold": 0.14344668686389903,
+      "stats": {
+        "mean": 0.13509664632639956,
+        "std": 11.64387034509228,
+        "median": 0.0057856556959450245,
+        "p90": 0.06980552673339845,
+        "p95": 0.14344668686389903,
+        "p97": 0.19971131891012192,
+        "p99": 0.4470578366518027,
+        "max": 1628.7364501953125
+      },
+      "epochs_cap": 20
+    },
+    "VAE": {
+      "threshold": 0.07048097178339954,
+      "stats": {
+        "mean": 0.05873506977261963,
+        "std": 4.927511583421245,
+        "median": 0.004526552278548479,
+        "p90": 0.03572662919759752,
+        "p95": 0.07048097178339954,
+        "p97": 0.09678774282336235,
+        "p99": 0.2106955042481427,
+        "max": 689.8318481445312
+      },
+      "epochs_cap": 20
+    }
+  },
+  "anomaly_validation_selection": {
+    "ae_component_selected": "Autoencoder",
+    "fusion_weights": {
+      "Autoencoder": 1.0,
+      "One-Class SVM": 0.0,
+      "Isolation Forest": 0.0
+    },
+    "fusion_threshold": 0.01789733940648615,
+    "best_single_validation_detector": "Autoencoder",
+    "best_overall_validation_detector": "Score-Level Fusion (AE+OCSVM+IF)",
+    "selection_table": [
+      {
+        "Detector": "Autoencoder",
+        "Type": "single",
+        "Weights": "Autoencoder",
+        "Val_LOO_F1": 0.1539,
+        "Val_LOO_ROC_AUC": 0.8554,
+        "Val_Selection_Objective": 0.4549
+      },
+      {
+        "Detector": "Autoencoder (Deep Reg)",
+        "Type": "single",
+        "Weights": "Autoencoder (Deep Reg)",
+        "Val_LOO_F1": 0.1202,
+        "Val_LOO_ROC_AUC": 0.8017,
+        "Val_Selection_Objective": 0.395
+      },
+      {
+        "Detector": "VAE",
+        "Type": "single",
+        "Weights": "VAE",
+        "Val_LOO_F1": 0.1221,
+        "Val_LOO_ROC_AUC": 0.8145,
+        "Val_Selection_Objective": 0.4001
+      },
+      {
+        "Detector": "Isolation Forest",
+        "Type": "single",
+        "Weights": "Isolation Forest",
+        "Val_LOO_F1": 0.0812,
+        "Val_LOO_ROC_AUC": 0.791,
+        "Val_Selection_Objective": 0.3347
+      },
+      {
+        "Detector": "One-Class SVM",
+        "Type": "single",
+        "Weights": "One-Class SVM",
+        "Val_LOO_F1": 0.1209,
+        "Val_LOO_ROC_AUC": 0.7131,
+        "Val_Selection_Objective": 0.3792
+      },
+      {
+        "Detector": "LOF",
+        "Type": "single",
+        "Weights": "LOF",
+        "Val_LOO_F1": 0.0969,
+        "Val_LOO_ROC_AUC": 0.7384,
+        "Val_Selection_Objective": 0.3366
+      },
+      {
+        "Detector": "Score-Level Fusion (AE+OCSVM+IF)",
+        "Type": "fusion",
+        "Weights": "Autoencoder=1.00",
+        "Val_LOO_F1": 0.1539,
+        "Val_LOO_ROC_AUC": 0.8554,
+        "Val_Selection_Objective": 0.4549
+      }
+    ]
   },
   "hardware": {
     "tf_device": "CPU",

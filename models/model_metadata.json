@@ -1,0 +1,24 @@
+{
+  "saved_at_utc": "2026-11-19T18:23:01.204224+00:00",
+  "models": {
+    "MLP": {
+      "imbalance_strategy": "smote",
+      "loss_function": "cross_entropy",
+      "train_samples": 145714
+    },
+    "CNN": {
+      "imbalance_strategy": "smote",
+      "loss_function": "cross_entropy",
+      "train_samples": 145714
+    },
+    "XGBoost": {
+      "imbalance_strategy": "none",
+      "train_samples": 138190,
+      "selected_variant": "baseline"
+    },
+    "Autoencoder": {
+      "imbalance_strategy": "benign_only",
+      "train_samples": 113056
+    }
+  }
+}

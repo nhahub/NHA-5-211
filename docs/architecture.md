@@ -63,7 +63,7 @@ flowchart LR
 
 | Model | Learning Paradigm | Topology / Hyperparameters | Training Target |
 |---|---|---|---|
-| **MLP** | Supervised Deep Neural Network | `Input(77) -> [Dense(512/256/128/64, no bias, L2=1e-4) -> BN -> LeakyReLU(0.1) -> Dropout(0.4)] -> Softmax` | SMOTE-balanced (or class-weighted) 8-class flows |
-| **1D-CNN** | Supervised Convolutional Network | `Input(77,1) -> Conv1D(64,k=3)x2 + MaxPool(2) + Drop(0.3) -> Conv1D(128,k=3)x2 + GAP + Drop(0.4) -> Dense(128) + Drop(0.3) -> Softmax` | SMOTE-balanced 8-class flows (pseudo-sequence) |
+| **MLP** | Supervised Deep Neural Network (Neural Baseline) | `Input(77) -> [Dense(512/256/128/64, no bias, L2=1e-4) -> BN -> LeakyReLU(0.1) -> Dropout(0.4)] -> Softmax` | Per-model selected strategy (`smote` or `class_weight`/`none`) on multi-class flows (13 CICIDS2017 classes) |
+| **1D-CNN** | Supervised Convolutional Network (Neural Baseline) | `Input(77,1) -> Conv1D(64,k=3)x2 + MaxPool(2) + Drop(0.3) -> Conv1D(128,k=3)x2 + GAP + Drop(0.4) -> Dense(128) + Drop(0.3) -> Softmax` | Per-model selected strategy on multi-class flows (13 CICIDS2017 classes) |
 | **Autoencoder** | Unsupervised Reconstruction | `Encoder(256->128->64->32) -> Decoder(64->128->256->77 linear)`, MSE loss, `Adam(lr=5e-4)` | **BENIGN training flows only** (zero attack labels) |
-| **XGBoost** | Gradient-Boosted Decision Trees | Baseline (`300` trees, `depth=6`, `lr=0.1`, `subsample=0.8`, `colsample=0.8`, `hist`) vs Optuna TPE-tuned | SMOTE-balanced 8-class flows |
+| **XGBoost** | Gradient-Boosted Decision Trees (Recommended Production) | Baseline (`300` trees, `depth=6`, `lr=0.1`, `subsample=0.8`, `colsample=0.8`, `hist`) vs CV-std-gated 40-trial Optuna TPE | Per-model selected strategy (`none`) on 13 CICIDS2017 classes |
