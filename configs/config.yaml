@@ -109,6 +109,10 @@ evaluation:
   bootstrap_n_resamples: 1000
   low_support_threshold: 30
   reliable_support_threshold: 30 # Minimum test support for Reliable-Class Macro-F1 (shown alongside all-class Macro-F1)
+  run_mitigation_analysis: true # Run time_block confusion/KS drift analysis + recall-vs-FPR mitigation tables
+  failing_class_recall_threshold: 0.85
+  drift_top_k_features: 5
+  mitigation_benign_percentiles: [90, 95, 97, 99]
   run_xgboost_cv: true
   cv_n_splits: 5
 

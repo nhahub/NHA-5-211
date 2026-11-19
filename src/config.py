@@ -151,6 +151,10 @@ class EvaluationConfig(BaseModel):
     bootstrap_n_resamples: int = Field(default=1000, ge=100)
     low_support_threshold: int = Field(default=30, ge=1)
     reliable_support_threshold: int | None = Field(default=None, ge=1)
+    run_mitigation_analysis: bool = True
+    failing_class_recall_threshold: float = Field(default=0.85, gt=0.0, le=1.0)
+    drift_top_k_features: int = Field(default=5, ge=1)
+    mitigation_benign_percentiles: list[float] = Field(default_factory=lambda: [90.0, 95.0, 97.0, 99.0])
     run_xgboost_cv: bool = True
     cv_n_splits: int = Field(default=5, ge=2)
 

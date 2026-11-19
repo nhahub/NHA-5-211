@@ -30,9 +30,11 @@ from src.evaluation.metrics import (
     wilson_score_interval,
 )
 from src.evaluation.protocols import (
+    analyze_time_block_failures,
     assert_ablation_row_parity,
     evaluate_by_day_protocol,
     evaluate_feature_ablation,
+    evaluate_mitigation_tradeoffs,
     evaluate_time_block_protocol,
     run_xgboost_stratified_cv,
 )
@@ -1128,3 +1130,103 @@ def test_small_class_reliability_oof_wilson_and_reliable_macro_f1(tmp_app_config
     assert "F1_Macro_Reliable" in md_text
     assert "Pooled Out-of-Fold (OOF) Per-Class Evaluation" in md_text
     assert "Recall_CI95_Low" in md_text
+
+
+def test_time_block_failure_analysis_ks_drift_and_mitigation_tradeoffs(tmp_app_config: AppConfig) -> None:
+    """Failure analysis identifies shifted KS features/confusion targets and compares Recall vs FPR mitigations."""
+    rng = np.random.default_rng(2025)
+    # Create 3 classes: BENIGN (0), DDoS (1), Bot (2) where Bot shifts sharply in Flow_IAT_Mean train->test
+    X_tr = rng.normal(0.0, 1.0, size=(120, 4)).astype(np.float32)
+    y_tr = np.array([0] * 60 + [1] * 30 + [2] * 30, dtype=np.int64)
+    X_te = rng.normal(0.0, 1.0, size=(90, 4)).astype(np.float32)
+    y_te = np.array([0] * 40 + [1] * 25 + [2] * 25, dtype=np.int64)
+    # Strong temporal shift on feature 2 ("Flow IAT Mean") for failing class Bot (2)
+    X_te[y_te == 2, 2] += 5.0
+
+    # Probabilities: Bot is mostly misclassified as BENIGN
+    p_base = np.zeros((len(y_te), 3), dtype=np.float64)
+    p_base[y_te == 0] = [0.95, 0.03, 0.02]
+    p_base[y_te == 1] = [0.02, 0.95, 0.03]
+    p_base[y_te == 2] = [0.85, 0.05, 0.10]  # predicted BENIGN -> Bot recall = 0.0
+    bot_first_idx = int(np.where(y_te == 2)[0][0])
+    p_base[bot_first_idx] = [0.10, 0.80, 0.10]  # 1 flow predicted as DDoS
+
+    class_names = ["BENIGN", "DDoS", "Bot"]
+    feat_names = ["Destination Port", "Flow Duration", "Flow IAT Mean", "SYN Flag Count"]
+    ev = evaluate_supervised_model(y_te, p_base, class_names, "XGBoost", bootstrap_n=0, seed=42)
+    fail_res = analyze_time_block_failures(
+        X_train=X_tr,
+        y_train=y_tr,
+        X_test=X_te,
+        y_test=y_te,
+        y_proba=p_base,
+        feature_names=feat_names,
+        class_names=class_names,
+        per_class_metrics=ev["per_class_metrics"],
+        recall_threshold=0.85,
+        top_k_features=2,
+    )
+    assert fail_res["failing_class_names"] == ["Bot"]
+    assert fail_res["confusion_breakdowns"][0]["Class"] == "Bot"
+    assert "BENIGN: 24" in fail_res["confusion_breakdowns"][0]["Predicted_As_Breakdown"]
+    assert fail_res["feature_drift_top_features"][0]["Feature"] == "Flow IAT Mean"
+    assert fail_res["feature_drift_top_features"][0]["KS_Statistic"] > 0.8
+
+    # Mitigation comparison across class_weight, hybrid anomaly override, and P(benign) gates
+    y_val = np.array([0] * 40 + [1] * 10 + [2] * 10, dtype=np.int64)
+    p_val = np.tile([0.96, 0.02, 0.02], (len(y_val), 1))
+    ae_val_ben = rng.uniform(0.0, 1.0, size=40)
+    ae_test = np.where(y_te == 2, 2.5, rng.uniform(0.0, 1.0, size=len(y_te)))
+    p_alt = p_base.copy()
+    p_alt[y_te == 2] = [0.10, 0.10, 0.80]  # class_weight recovers Bot in this synthetic case
+
+    mit = evaluate_mitigation_tradeoffs(
+        y_val=y_val,
+        benign_idx=0,
+        p_sup_base_val=p_val,
+        ae_val_benign_errors=ae_val_ben,
+        y_test=y_te,
+        p_sup_base_test=p_base,
+        ae_test_errors=ae_test,
+        class_names=class_names,
+        focus_class_indices=[2],
+        p_sup_alt_test=p_alt,
+        percentiles=[90.0, 95.0],
+    )
+    options = {r["Option"] for r in mit["rows"]}
+    assert "Baseline XGBoost" in options
+    assert "XGBoost ('class_weight' balanced)" in options
+    assert "Hybrid Override (XGBoost OR AE)" in options
+    assert "Lower P(Benign) Gate (1 - P_Benign > tau)" in options
+    assert mit["rows"][0]["Focus_Mean_Recall"] == pytest.approx(0.04)
+    assert any(
+        r["Option"] == "Hybrid Override (XGBoost OR AE)" and r["Focus_Mean_Recall"] == 1.0
+        for r in mit["rows"]
+    )
+
+    reports_dir = tmp_app_config.paths.resolve("reports_dir")
+    cmp_df = pd.DataFrame([{"Model": "XGBoost", "Accuracy": 0.9, "F1_Weighted": 0.9, "F1_Macro": 0.65}])
+    summary = {
+        "dataset_source": {"is_synthetic": False},
+        "split_strategy": "random",
+        "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+        "training_diagnostics": {},
+        "time_block_protocol": {
+            "executed": True,
+            "ordering_source": "Capture_Order",
+            "ordering_warning": "time_block ordering = CSV row order (no real Timestamp)",
+            "split_sizes": {"train_raw": 120, "validation": 60, "test": 90},
+            "leakage_checks": {"passed": True},
+            "models": {
+                "XGBoost": {"accuracy": 0.9, "f1_weighted": 0.9, "f1_macro": 0.65, "f1_macro_reliable": 0.65}
+            },
+            "failure_analysis": fail_res,
+            "mitigation_experiments": {"executed": True, **mit},
+        },
+    }
+    cmp_path, _ = write_academic_reports(summary, cmp_df, reports_dir)
+    md = cmp_path.read_text(encoding="utf-8")
+    assert "Time-Block Error Analysis" in md
+    assert "Confusion-Matrix Breakdown for Failing Classes" in md
+    assert "Top Shifted Features Train-vs-Test per Failing Class (KS Statistic)" in md
+    assert "Time-Block Recall-vs-FPR Mitigation Experiment" in md

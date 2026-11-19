@@ -7,7 +7,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import f1_score
+from scipy.stats import ks_2samp
+from sklearn.metrics import confusion_matrix, f1_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
@@ -200,7 +201,8 @@ def _fit_and_eval_in_memory_autoencoder(
     epochs: int,
     bootstrap_n: int = 0,
     seed: int = 42,
-) -> tuple[dict[str, Any], float]:
+    return_scores: bool = False,
+) -> tuple[Any, ...]:
     """Train in-memory benign-only Autoencoder and evaluate on dataset test flows."""
     num_features = dataset.X_train_scaled.shape[1]
     X_benign_train, benign_idx, _ = extract_benign_subset(
@@ -240,7 +242,294 @@ def _fit_and_eval_in_memory_autoencoder(
         bootstrap_n=bootstrap_n,
         seed=seed,
     )
+    if return_scores:
+        return ae_eval, float(ae_threshold), benign_val_errors, ae_test_errors
     return ae_eval, float(ae_threshold)
+
+
+def analyze_time_block_failures(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    y_proba: np.ndarray,
+    feature_names: list[str],
+    class_names: list[str],
+    per_class_metrics: list[dict[str, Any]],
+    recall_threshold: float = 0.85,
+    top_k_features: int = 5,
+) -> dict[str, Any]:
+    """Build per-failing-class confusion breakdown and top-K KS feature-drift summary."""
+    n_classes = len(class_names)
+    y_pred = np.argmax(y_proba, axis=1)
+    cm_raw = confusion_matrix(y_test, y_pred, labels=list(range(n_classes)))
+
+    failing = [
+        row
+        for row in per_class_metrics
+        if int(row.get("support", 0)) > 0 and float(row.get("recall", 1.0)) < float(recall_threshold)
+    ]
+    failing.sort(key=lambda r: (float(r.get("recall", 0.0)), -int(r.get("support", 0))))
+
+    confusion_rows: list[dict[str, Any]] = []
+    drift_rows: list[dict[str, Any]] = []
+    failing_names: list[str] = []
+
+    for row in failing:
+        cname = str(row["class_name"])
+        if cname not in class_names:
+            continue
+        failing_names.append(cname)
+        cls_idx = class_names.index(cname)
+        support = int(row["support"])
+        rec_val = float(row["recall"])
+
+        pred_counts = cm_raw[cls_idx]
+        destinations = [
+            (class_names[j], int(pred_counts[j]), round(float(pred_counts[j]) / max(support, 1), 4))
+            for j in np.argsort(-pred_counts)
+            if int(pred_counts[j]) > 0
+        ]
+        top_dest_str = ", ".join(f"{name}: {cnt} ({frac:.1%})" for name, cnt, frac in destinations[:4])
+        confusion_rows.append(
+            {
+                "Class": cname,
+                "Test_Support": support,
+                "Recall": round(rec_val, 4),
+                "F1_Score": round(float(row.get("f1_score", 0.0)), 4),
+                "Predicted_As_Breakdown": top_dest_str or "None",
+                "destinations": [
+                    {"predicted_class": n, "count": c, "fraction": f} for n, c, f in destinations
+                ],
+            }
+        )
+
+        tr_mask = y_train == cls_idx
+        te_mask = y_test == cls_idx
+        X_tr_c = X_train[tr_mask]
+        X_te_c = X_test[te_mask]
+        if len(X_tr_c) >= 2 and len(X_te_c) >= 2:
+            feat_stats: list[tuple[float, float, float, str]] = []
+            for f_i, fname in enumerate(feature_names):
+                col_tr = X_tr_c[:, f_i]
+                col_te = X_te_c[:, f_i]
+                if np.all(col_tr == col_tr[0]) and np.all(col_te == col_te[0]) and col_tr[0] == col_te[0]:
+                    continue
+                ks_res = ks_2samp(col_tr, col_te)
+                ks_val = float(ks_res.statistic)
+                p_val = float(ks_res.pvalue)
+                delta_mean = float(np.mean(col_te) - np.mean(col_tr))
+                feat_stats.append((ks_val, p_val, delta_mean, str(fname)))
+            feat_stats.sort(key=lambda item: item[0], reverse=True)
+            for rank, (ks_val, p_val, delta_mean, fname) in enumerate(
+                feat_stats[: max(1, int(top_k_features))], start=1
+            ):
+                drift_rows.append(
+                    {
+                        "Class": cname,
+                        "Train_Count": int(len(X_tr_c)),
+                        "Test_Count": int(len(X_te_c)),
+                        "Rank": rank,
+                        "Feature": fname,
+                        "KS_Statistic": round(ks_val, 4),
+                        "KS_PValue": round(p_val, 6),
+                        "Std_Mean_Shift": round(delta_mean, 4),
+                    }
+                )
+
+    return {
+        "recall_threshold": float(recall_threshold),
+        "top_k_features": int(top_k_features),
+        "failing_class_names": failing_names,
+        "confusion_breakdowns": confusion_rows,
+        "feature_drift_top_features": drift_rows,
+    }
+
+
+def _eval_binary_attack_option(
+    y_test: np.ndarray,
+    is_attack_pred: np.ndarray,
+    benign_idx: int,
+    class_names: list[str],
+    focus_class_indices: list[int],
+) -> tuple[float, float, float, float, dict[str, float]]:
+    """Compute benign FPR, overall attack recall, binary F1, and focus-group recall stats."""
+    ben_mask = y_test == benign_idx
+    atk_mask = ~ben_mask
+    y_bin_pred = np.asarray(is_attack_pred, dtype=bool).astype(np.int64)
+
+    ben_total = int(np.sum(ben_mask))
+    fp = int(np.sum((y_bin_pred == 1) & ben_mask))
+    benign_fpr = float(fp / max(1, ben_total))
+
+    tp = int(np.sum((y_bin_pred == 1) & atk_mask))
+    fn = int(np.sum((y_bin_pred == 0) & atk_mask))
+    overall_atk_recall = float(tp / max(1, tp + fn))
+    denom = 2 * tp + fp + fn
+    binary_f1 = float(2.0 * tp / denom) if denom > 0 else 0.0
+
+    focus_recalls: dict[str, float] = {}
+    for cls_idx in focus_class_indices:
+        cls_mask = y_test == cls_idx
+        n_cls = int(np.sum(cls_mask))
+        if n_cls > 0:
+            cname = class_names[cls_idx] if cls_idx < len(class_names) else str(cls_idx)
+            focus_recalls[cname] = round(float(np.mean(y_bin_pred[cls_mask] == 1)), 4)
+
+    focus_mean = float(np.mean(list(focus_recalls.values()))) if focus_recalls else overall_atk_recall
+    return benign_fpr, overall_atk_recall, binary_f1, focus_mean, focus_recalls
+
+
+def evaluate_mitigation_tradeoffs(
+    y_val: np.ndarray,
+    benign_idx: int,
+    p_sup_base_val: np.ndarray,
+    ae_val_benign_errors: np.ndarray,
+    y_test: np.ndarray,
+    p_sup_base_test: np.ndarray,
+    ae_test_errors: np.ndarray,
+    class_names: list[str],
+    focus_class_indices: list[int],
+    p_sup_alt_test: np.ndarray | None = None,
+    alt_label: str = "XGBoost ('class_weight' balanced)",
+    base_label: str = "Baseline XGBoost",
+    percentiles: list[float] | None = None,
+) -> dict[str, Any]:
+    """Compare class_weight, hybrid anomaly override, and P(benign) thresholds on Recall vs FPR."""
+    pcts = list(percentiles or [90.0, 95.0, 97.0, 99.0])
+    base_pred = np.argmax(p_sup_base_test, axis=1)
+    base_attack_flag = base_pred != benign_idx
+    base_macro_f1 = float(f1_score(y_test, base_pred, average="macro", zero_division=0))
+
+    rows: list[dict[str, Any]] = []
+
+    def _append_row(
+        option: str,
+        pct_str: str,
+        thresh_str: str,
+        pred_flag: np.ndarray,
+        mc_f1: float | None = None,
+    ) -> dict[str, Any]:
+        fpr, ov_rec, bin_f1, focus_rec, focus_map = _eval_binary_attack_option(
+            y_test=y_test,
+            is_attack_pred=pred_flag,
+            benign_idx=benign_idx,
+            class_names=class_names,
+            focus_class_indices=focus_class_indices,
+        )
+        focus_summary = ", ".join(f"{k}={v:.3f}" for k, v in focus_map.items())
+        entry = {
+            "Option": option,
+            "Benign_Val_Pct": pct_str,
+            "Threshold": thresh_str,
+            "Benign_FPR": round(fpr, 4),
+            "Overall_Attack_Recall": round(ov_rec, 4),
+            "Focus_Mean_Recall": round(focus_rec, 4),
+            "Binary_F1": round(bin_f1, 4),
+            "Multiclass_Macro_F1": round(mc_f1, 4) if mc_f1 is not None else None,
+            "Focus_Class_Recalls": focus_summary or "None",
+        }
+        rows.append(entry)
+        return entry
+
+    base_row = _append_row(base_label, "Argmax", "argmax P(c)", base_attack_flag, base_macro_f1)
+
+    if p_sup_alt_test is not None:
+        alt_pred = np.argmax(p_sup_alt_test, axis=1)
+        alt_macro_f1 = float(f1_score(y_test, alt_pred, average="macro", zero_division=0))
+        _append_row(alt_label, "Argmax", "argmax P(c)", alt_pred != benign_idx, alt_macro_f1)
+
+    # Calibrate anomaly score & attack-probability thresholds strictly on benign validation flows
+    val_ben_mask = y_val == benign_idx
+    val_ben_atk_prob = (
+        1.0 - p_sup_base_val[val_ben_mask, benign_idx]
+        if np.any(val_ben_mask)
+        else np.array([0.0], dtype=np.float64)
+    )
+    test_atk_prob = 1.0 - p_sup_base_test[:, benign_idx]
+    ae_val_arr = (
+        np.asarray(ae_val_benign_errors, dtype=np.float64)
+        if len(ae_val_benign_errors) > 0
+        else np.array([0.0], dtype=np.float64)
+    )
+
+    for pct in pcts:
+        ae_thresh = float(np.percentile(ae_val_arr, pct))
+        hybrid_flag = base_attack_flag | (ae_test_errors > ae_thresh)
+        _append_row(
+            "Hybrid Override (XGBoost OR AE)",
+            f"P{int(round(pct))}",
+            f"AE>{ae_thresh:.4f}",
+            hybrid_flag,
+        )
+
+        p_thresh = float(np.percentile(val_ben_atk_prob, pct))
+        # Clamp strictly below 0.5 only where benign percentile itself is < 0.5; otherwise still report exact P_pct cutoff
+        gate_flag = test_atk_prob > p_thresh
+        _append_row(
+            "Lower P(Benign) Gate (1 - P_Benign > tau)",
+            f"P{int(round(pct))}",
+            f"1-P(B)>{p_thresh:.4f}",
+            gate_flag,
+        )
+
+    best_focus_row = max(rows, key=lambda r: (float(r["Focus_Mean_Recall"]), -float(r["Benign_FPR"])))
+    low_fpr_gain = [
+        r
+        for r in rows[1:]
+        if float(r["Benign_FPR"]) <= base_row["Benign_FPR"] + 0.02
+        and float(r["Focus_Mean_Recall"]) > base_row["Focus_Mean_Recall"] + 0.05
+    ]
+    if low_fpr_gain:
+        best_low_fpr = max(low_fpr_gain, key=lambda r: float(r["Focus_Mean_Recall"]))
+        verdict = (
+            f"{best_low_fpr['Option']} ({best_low_fpr['Benign_Val_Pct']}) raises focus attack recall from "
+            f"{base_row['Focus_Mean_Recall']:.4f} to {best_low_fpr['Focus_Mean_Recall']:.4f} with bounded "
+            f"Benign FPR={best_low_fpr['Benign_FPR']:.4f} vs baseline {base_row['Benign_FPR']:.4f}."
+        )
+    else:
+        verdict = (
+            f"Raising recall above baseline ({base_row['Focus_Mean_Recall']:.4f} at Benign FPR="
+            f"{base_row['Benign_FPR']:.4f}; peak option '{best_focus_row['Option']}' "
+            f"[{best_focus_row['Benign_Val_Pct']}] reaches {best_focus_row['Focus_Mean_Recall']:.4f} at Benign FPR="
+            f"{best_focus_row['Benign_FPR']:.4f}) incurs an elevated false-positive rate cost (> +2% FPR); "
+            "the default production model is therefore kept unchanged and trade-offs are reported transparently."
+        )
+
+    return {
+        "rows": rows,
+        "baseline_benign_fpr": base_row["Benign_FPR"],
+        "baseline_focus_recall": base_row["Focus_Mean_Recall"],
+        "verdict": verdict,
+    }
+
+
+def _fit_and_predict_alt_xgb(
+    dataset: PreparedDataset,
+    model_cfg: ModelConfig,
+    xgb_params: dict[str, Any] | None,
+    imbalance_strategy: str,
+    xgb_device: str,
+    seed: int,
+) -> tuple[str, np.ndarray]:
+    """Fit alternative XGBoost weighting ('class_weight' vs 'none') for Recall-vs-FPR mitigation."""
+    alt_strat = "class_weight" if imbalance_strategy != "class_weight" else "none"
+    num_classes = len(dataset.class_names)
+    X_alt, y_alt, sw_alt, _ = _select_supervised_train_arrays(dataset, alt_strat)
+    alt_clf, alt_cls = fit_xgboost_safe_multiclass(
+        X_train=X_alt,
+        y_train=y_alt,
+        X_val=dataset.X_val_scaled,
+        y_val=dataset.y_val,
+        total_classes=num_classes,
+        cfg=model_cfg.xgboost,
+        params_override=xgb_params,
+        device=xgb_device,
+        seed=seed,
+        sample_weight=sw_alt,
+    )
+    p_alt = expand_xgboost_probas(alt_clf.predict_proba(dataset.X_test_scaled), alt_cls, num_classes)
+    return alt_strat, p_alt
 
 
 def evaluate_by_day_protocol(
@@ -372,13 +661,14 @@ def evaluate_by_day_protocol(
     )
 
     # 4. Autoencoder (BENIGN Mon-Wed train, threshold strictly calibrated on Thursday BENIGN val)
-    ae_eval, ae_threshold = _fit_and_eval_in_memory_autoencoder(
+    ae_eval, ae_threshold, ae_val_ben_err, ae_test_err = _fit_and_eval_in_memory_autoencoder(
         dataset=dataset,
         app_cfg=app_cfg,
         model_cfg=model_cfg,
         epochs=ep,
         bootstrap_n=0,
         seed=seed,
+        return_scores=True,
     )
     binary_table["Autoencoder"] = {
         k: float(ae_eval[k])
@@ -389,6 +679,39 @@ def evaluate_by_day_protocol(
     train_cls = split_cls.get("train", [])
     test_cls = split_cls.get("test", [])
     unseen_test_cls = sorted(c for c in set(test_cls) - set(train_cls) if c != benign_name)
+
+    mitigation_res: dict[str, Any] = {"executed": False}
+    if app_cfg.evaluation.run_mitigation_analysis:
+        p_xgb_val = expand_xgboost_probas(
+            xgb_clf.predict_proba(dataset.X_val_scaled), present_cls, num_classes
+        )
+        alt_strat, p_xgb_alt = _fit_and_predict_alt_xgb(
+            dataset=dataset,
+            model_cfg=model_cfg,
+            xgb_params=xgb_params,
+            imbalance_strategy=imbalance_strategy,
+            xgb_device=hardware.xgb_device,
+            seed=seed,
+        )
+        unseen_indices = [dataset.class_names.index(c) for c in unseen_test_cls if c in dataset.class_names]
+        mitigation_res = {
+            "executed": True,
+            **evaluate_mitigation_tradeoffs(
+                y_val=dataset.y_val,
+                benign_idx=benign_idx,
+                p_sup_base_val=p_xgb_val,
+                ae_val_benign_errors=ae_val_ben_err,
+                y_test=dataset.y_test,
+                p_sup_base_test=p_xgb,
+                ae_test_errors=ae_test_err,
+                class_names=dataset.class_names,
+                focus_class_indices=unseen_indices,
+                p_sup_alt_test=p_xgb_alt,
+                alt_label=f"XGBoost ('{alt_strat}')",
+                base_label=f"Baseline XGBoost ('{imbalance_strategy}')",
+                percentiles=app_cfg.evaluation.mitigation_benign_percentiles,
+            ),
+        }
 
     xgb_1p = binary_table.get("XGBoost (1 - P_Benign)", {})
     xgb_rec = float(xgb_1p.get("recall", 0.0))
@@ -411,6 +734,7 @@ def evaluate_by_day_protocol(
         "multiclass_models": multiclass_table,
         "binary_cross_day_models": binary_table,
         "autoencoder_threshold": float(ae_threshold),
+        "mitigation_experiments": mitigation_res,
         "caveat_note": (
             "Open-set cross-day protocol (by_day): by construction in CICIDS2017, all Thursday and Friday "
             f"attack families ({', '.join(unseen_test_cls)}) have zero training instances in Monday-Wednesday data. "
@@ -510,14 +834,66 @@ def evaluate_time_block_protocol(
         }
         per_class_by_model[display_name] = list(ev.get("per_class_metrics", []))
 
-    ae_eval, ae_threshold = _fit_and_eval_in_memory_autoencoder(
+    ae_eval, ae_threshold, ae_val_ben_err, ae_test_err = _fit_and_eval_in_memory_autoencoder(
         dataset=dataset,
         app_cfg=app_cfg,
         model_cfg=model_cfg,
         epochs=ep,
         bootstrap_n=boot_n,
         seed=seed,
+        return_scores=True,
     )
+
+    failure_analysis = analyze_time_block_failures(
+        X_train=dataset.X_train_scaled,
+        y_train=dataset.y_train,
+        X_test=dataset.X_test_scaled,
+        y_test=dataset.y_test,
+        y_proba=p_xgb,
+        feature_names=dataset.feature_names,
+        class_names=dataset.class_names,
+        per_class_metrics=per_class_by_model.get("XGBoost", []),
+        recall_threshold=float(app_cfg.evaluation.failing_class_recall_threshold),
+        top_k_features=int(app_cfg.evaluation.drift_top_k_features),
+    )
+
+    mitigation_res: dict[str, Any] = {"executed": False}
+    if app_cfg.evaluation.run_mitigation_analysis:
+        benign_idx, _ = find_benign_class_index(dataset.label_encoder)
+        p_xgb_val = expand_xgboost_probas(
+            xgb_clf.predict_proba(dataset.X_val_scaled), present_cls, num_classes
+        )
+        alt_strat, p_xgb_alt = _fit_and_predict_alt_xgb(
+            dataset=dataset,
+            model_cfg=model_cfg,
+            xgb_params=xgb_params,
+            imbalance_strategy=imbalance_strategy,
+            xgb_device=hardware.xgb_device,
+            seed=seed,
+        )
+        failing_indices = [
+            dataset.class_names.index(c)
+            for c in failure_analysis.get("failing_class_names", [])
+            if c in dataset.class_names
+        ]
+        mitigation_res = {
+            "executed": True,
+            **evaluate_mitigation_tradeoffs(
+                y_val=dataset.y_val,
+                benign_idx=benign_idx,
+                p_sup_base_val=p_xgb_val,
+                ae_val_benign_errors=ae_val_ben_err,
+                y_test=dataset.y_test,
+                p_sup_base_test=p_xgb,
+                ae_test_errors=ae_test_err,
+                class_names=dataset.class_names,
+                focus_class_indices=failing_indices,
+                p_sup_alt_test=p_xgb_alt,
+                alt_label=f"XGBoost ('{alt_strat}')",
+                base_label=f"Baseline XGBoost ('{imbalance_strategy}')",
+                percentiles=app_cfg.evaluation.mitigation_benign_percentiles,
+            ),
+        }
 
     tb_details = dataset.audit_report.get("time_block_details", {})
     ordering_src = str(tb_details.get("ordering_source", ""))
@@ -541,6 +917,8 @@ def evaluate_time_block_protocol(
         "leakage_checks": dataset.audit_report["leakage_checks"],
         "models": models_summary,
         "per_class_metrics": per_class_by_model,
+        "failure_analysis": failure_analysis,
+        "mitigation_experiments": mitigation_res,
         "autoencoder": {
             "accuracy": float(ae_eval["accuracy"]),
             "precision": float(ae_eval["precision"]),

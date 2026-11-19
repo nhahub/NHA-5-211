@@ -240,6 +240,39 @@ def write_academic_reports(
             ]
             comp_lines.append(_df_to_markdown(pd.DataFrame(tb_pc_rows)) + "\n\n")
 
+        tb_fail = time_block.get("failure_analysis", {})
+        conf_rows = tb_fail.get("confusion_breakdowns", [])
+        drift_rows = tb_fail.get("feature_drift_top_features", [])
+        if conf_rows or drift_rows:
+            comp_lines.append(
+                f"### Time-Block Error Analysis (Failing Classes with Recall < {tb_fail.get('recall_threshold', 0.85):.2f})\n\n"
+            )
+            if conf_rows:
+                comp_lines.append("#### Confusion-Matrix Breakdown for Failing Classes\n\n")
+                clean_conf = [
+                    {
+                        "Class": r["Class"],
+                        "Test_Support": r["Test_Support"],
+                        "Recall": r["Recall"],
+                        "F1_Score": r["F1_Score"],
+                        "Predicted_As_Breakdown": r["Predicted_As_Breakdown"],
+                    }
+                    for r in conf_rows
+                ]
+                comp_lines.append(_df_to_markdown(pd.DataFrame(clean_conf)) + "\n\n")
+            if drift_rows:
+                comp_lines.append(
+                    "#### Top Shifted Features Train-vs-Test per Failing Class (KS Statistic)\n\n"
+                )
+                comp_lines.append(_df_to_markdown(pd.DataFrame(drift_rows)) + "\n\n")
+
+        tb_mit = time_block.get("mitigation_experiments", {})
+        if tb_mit.get("executed") and tb_mit.get("rows"):
+            comp_lines.append("### Time-Block Recall-vs-FPR Mitigation Experiment\n\n")
+            comp_lines.append(_df_to_markdown(pd.DataFrame(tb_mit["rows"])) + "\n\n")
+            if tb_mit.get("verdict"):
+                comp_lines.append(f"- **Mitigation Assessment (`time_block`):** {tb_mit['verdict']}\n\n")
+
     if by_day.get("executed"):
         sec_num += 1
         bd_sizes = by_day.get("split_sizes", {})
@@ -288,6 +321,14 @@ def write_academic_reports(
             for name, vals in by_day.get("multiclass_models", {}).items()
         ]
         comp_lines.append(_df_to_markdown(pd.DataFrame(mc_rows)) + "\n\n")
+        bd_mit = by_day.get("mitigation_experiments", {})
+        if bd_mit.get("executed") and bd_mit.get("rows"):
+            comp_lines.append(
+                "### Open-Set Cross-Day Recall-vs-FPR Mitigation Experiment (Thu–Fri Unseen Attacks)\n\n"
+            )
+            comp_lines.append(_df_to_markdown(pd.DataFrame(bd_mit["rows"])) + "\n\n")
+            if bd_mit.get("verdict"):
+                comp_lines.append(f"- **Mitigation Assessment (`by_day`):** {bd_mit['verdict']}\n\n")
 
     if ablation.get("executed"):
         sec_num += 1
