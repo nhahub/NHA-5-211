@@ -119,6 +119,40 @@ def normalize_fusion_display_df(
     return out, is_deg, deg_note
 
 
+def extract_reliable_metadata(
+    eval_obj: dict[str, Any] | None = None,
+    per_class_rows: list[dict[str, Any]] | None = None,
+    default_threshold: int = 30,
+) -> tuple[int, list[str]]:
+    """Extract support threshold and excluded class names directly from evaluation data."""
+    obj = eval_obj or {}
+    thresh = int(obj.get("reliable_support_threshold") or default_threshold)
+    unrel = obj.get("unreliable_class_names")
+    if isinstance(unrel, list):
+        return thresh, [str(c) for c in unrel]
+    rows = per_class_rows if per_class_rows is not None else (obj.get("per_class_metrics") or [])
+    derived = [str(r["class_name"]) for r in rows if r.get("statistically_unreliable")]
+    return thresh, derived
+
+
+def format_reliable_f1_footnote(
+    threshold: int,
+    excluded_info: list[str] | str | None,
+) -> str:
+    """Format the standard F1_Macro_Reliable footnote with dynamic threshold and excluded classes."""
+    base = (
+        f"F1_Macro_Reliable excludes classes with support below {int(threshold)} on the evaluated "
+        "partition and is always shown next to the all-class F1_Macro; use F1_Macro (with its CI) as the headline number."
+    )
+    if isinstance(excluded_info, str):
+        detail = f" Excluded classes: {excluded_info}." if excluded_info.strip() else ""
+    elif excluded_info:
+        detail = f" Excluded classes: {', '.join(str(c) for c in excluded_info)}."
+    else:
+        detail = " Excluded classes: none (all classes met threshold)."
+    return f"> *Note:* {base}{detail}"
+
+
 def _append_mitigation_section(
     comp_lines: list[str],
     *,
@@ -204,8 +238,12 @@ def write_academic_reports(
         f"## {sec_num}. Unified Model Benchmark (Primary Split: `{split_strat}`)\n",
         "- **Supervised models (MLP, 1D-CNN, XGBoost):** Evaluated on multi-class attack attribution using weighted and macro metrics.\n",
         "- **Unsupervised anomaly detectors (Autoencoder, Isolation Forest, One-Class SVM, LOF):** Trained strictly on benign flows and evaluated under identical binary novelty framing (Benign vs. Anomalous).\n\n",
-        cmp_md + "\n\n",
     ]
+    comp_lines.append(cmp_md + "\n\n")
+    if "F1_Macro_Reliable" in norm_cmp_df.columns:
+        sup_ref = sup_evals.get("XGBoost") or next(iter(sup_evals.values()), {})
+        rel_t, rel_excl = extract_reliable_metadata(sup_ref)
+        comp_lines.append(format_reliable_f1_footnote(rel_t, rel_excl) + "\n\n")
     if fusion_is_deg and fusion_deg_note:
         comp_lines.append(f"{fusion_deg_note}\n\n")
     ci_lines: list[str] = []
@@ -284,7 +322,15 @@ def write_academic_reports(
                 }
             )
         if tb_rows:
-            comp_lines.append(_df_to_markdown(pd.DataFrame(tb_rows)) + "\n\n")
+            tb_df = pd.DataFrame(tb_rows)
+            comp_lines.append(_df_to_markdown(tb_df) + "\n\n")
+            if "F1_Macro_Reliable" in tb_df.columns:
+                tb_ref = (time_block.get("models") or {}).get("XGBoost") or next(
+                    iter((time_block.get("models") or {}).values()), {}
+                )
+                tb_pc = (time_block.get("per_class_metrics") or {}).get("XGBoost")
+                tb_t, tb_excl = extract_reliable_metadata(tb_ref, per_class_rows=tb_pc)
+                comp_lines.append(format_reliable_f1_footnote(tb_t, tb_excl) + "\n\n")
         for m_name, m_vals in time_block.get("models", {}).items():
             ci = m_vals.get("f1_macro_ci95", {})
             if ci.get("n_bootstrap", 0) > 0:
@@ -407,7 +453,17 @@ def write_academic_reports(
             }
             for name, vals in by_day.get("multiclass_models", {}).items()
         ]
-        comp_lines.append(_df_to_markdown(pd.DataFrame(mc_rows)) + "\n\n")
+        mc_df = pd.DataFrame(mc_rows)
+        comp_lines.append(_df_to_markdown(mc_df) + "\n\n")
+        if "F1_Macro_Reliable" in mc_df.columns and mc_rows:
+            bd_ref = (by_day.get("multiclass_models") or {}).get("XGBoost") or next(
+                iter((by_day.get("multiclass_models") or {}).values()), {}
+            )
+            bd_t, bd_excl = extract_reliable_metadata(bd_ref)
+            if not bd_excl and by_day.get("test_classes") and by_day.get("train_classes"):
+                # Fallback only if neither field present; primary path pulls unreliable_class_names
+                bd_excl = sorted(set(by_day.get("train_classes", [])) - set(by_day.get("test_classes", [])))
+            comp_lines.append(format_reliable_f1_footnote(bd_t, bd_excl) + "\n\n")
         bd_mit = by_day.get("mitigation_experiments", {})
         _append_mitigation_section(
             comp_lines,
@@ -531,7 +587,17 @@ def write_academic_reports(
             for f in xgb_cv.get("folds", [])
         ]
         if fold_rows:
-            comp_lines.append(_df_to_markdown(pd.DataFrame(fold_rows)) + "\n\n")
+            fold_df = pd.DataFrame(fold_rows)
+            comp_lines.append(_df_to_markdown(fold_df) + "\n\n")
+            if "F1_Macro_Reliable" in fold_df.columns:
+                cv_excl = xgb_cv.get("fold_unreliable_classes")
+                if not isinstance(cv_excl, list):
+                    cv_excl = [
+                        str(r["class_name"])
+                        for r in (xgb_cv.get("oof_per_class") or [])
+                        if r.get("statistically_unreliable")
+                    ]
+                comp_lines.append(format_reliable_f1_footnote(rel_thresh, cv_excl) + "\n\n")
         oof_per_cls = xgb_cv.get("oof_per_class", [])
         if oof_per_cls:
             comp_lines.append(
@@ -563,6 +629,17 @@ def write_academic_reports(
     if ens:
         ens_df = pd.DataFrame(ens).T.reset_index(names="Strategy")
         comp_lines.append(_df_to_markdown(ens_df) + "\n\n")
+        if "f1_macro_reliable" in ens_df.columns or "F1_Macro_Reliable" in ens_df.columns:
+            sup_ref = sup_evals.get("XGBoost") or next(iter(sup_evals.values()), {})
+            ens_t = int(
+                ens_analysis.get("reliable_support_threshold")
+                or sup_ref.get("reliable_support_threshold")
+                or 30
+            )
+            ens_excl = ens_analysis.get("unreliable_class_names")
+            if not isinstance(ens_excl, list):
+                _, ens_excl = extract_reliable_metadata(sup_ref, default_threshold=ens_t)
+            comp_lines.append(format_reliable_f1_footnote(ens_t, ens_excl) + "\n\n")
     paired_best = ens_analysis.get("paired_bootstrap_vs_best_single", {}) or {}
     if paired_best:
         pb_rows = [
@@ -661,7 +738,21 @@ def write_academic_reports(
             f"| **Sizes Tested:** `{sens_exp.get('requested_sizes', [])}` "
             f"| **Memory-Limited:** `{sens_exp.get('memory_limited', False)}`\n\n"
         )
-        comp_lines.append(_df_to_markdown(pd.DataFrame(sens_exp["rows"])) + "\n\n")
+        sens_df = pd.DataFrame(sens_exp["rows"])
+        comp_lines.append(_df_to_markdown(sens_df) + "\n\n")
+        if "F1_Macro_Reliable" in sens_df.columns:
+            sens_t = int(sens_exp.get("reliable_support_threshold", 30))
+            by_sz = sens_exp.get("unreliable_classes_by_size") or {}
+            if by_sz:
+                excl_summary = "; ".join(
+                    f"N={int(sz):,}: {', '.join(clss) if clss else 'none'}" for sz, clss in by_sz.items()
+                )
+            else:
+                _, fallback_excl = extract_reliable_metadata(
+                    sup_evals.get("XGBoost"), default_threshold=sens_t
+                )
+                excl_summary = ", ".join(fallback_excl) if fallback_excl else "none"
+            comp_lines.append(format_reliable_f1_footnote(sens_t, excl_summary) + "\n\n")
         if sens_exp.get("conclusion_note"):
             comp_lines.append(f"- **Sensitivity Verdict:** {sens_exp['conclusion_note']}\n\n")
 

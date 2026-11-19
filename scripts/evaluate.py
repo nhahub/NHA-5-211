@@ -299,6 +299,7 @@ def run_evaluation_suite(
         best_fusion_f1 > best_single_f1
         and paired_vs_best.get(best_fusion, {}).get("statistically_significant", False)
     )
+    sup_ref = next(iter(supervised_evals.values()), {})
     ensemble_analysis: dict[str, Any] = {
         "best_single_model": best_single,
         "best_single_f1_macro": round(best_single_f1, 6),
@@ -309,6 +310,8 @@ def run_evaluation_suite(
             paired_vs_best.get("stacking", {}).get("statistically_significant", False)
         ),
         "delta_vs_best_single": round(delta_ens, 6),
+        "reliable_support_threshold": int(sup_ref.get("reliable_support_threshold", low_sup)),
+        "unreliable_class_names": list(sup_ref.get("unreliable_class_names", [])),
         "val_weights": stacker.val_weights if stacker else {},
         "paired_bootstrap_vs_best_single": paired_vs_best,
         "paired_bootstrap_stacking_vs_all": paired_stacking_vs_all,

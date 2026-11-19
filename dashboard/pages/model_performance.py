@@ -14,7 +14,11 @@ from dashboard.data_access import (
     load_model_comparison_df,
     load_training_histories,
 )
-from src.evaluation.report_writer import normalize_fusion_display_df
+from src.evaluation.report_writer import (
+    extract_reliable_metadata,
+    format_reliable_f1_footnote,
+    normalize_fusion_display_df,
+)
 
 
 def _display_df_with_na(df: pd.DataFrame) -> pd.DataFrame:
@@ -64,6 +68,11 @@ def render_model_performance_page() -> None:
             df_cmp, eval_summary, name_col="Model"
         )
         st.dataframe(_display_df_with_na(df_cmp_norm), use_container_width=True, hide_index=True)
+        if "F1_Macro_Reliable" in df_cmp_norm.columns:
+            sup_evals = eval_summary.get("supervised_evaluations", {})
+            sup_ref = sup_evals.get("XGBoost") or next(iter(sup_evals.values()), {})
+            rel_t, rel_excl = extract_reliable_metadata(sup_ref)
+            st.caption(format_reliable_f1_footnote(rel_t, rel_excl).lstrip("> "))
         if is_deg_fusion and deg_fusion_note:
             st.caption(deg_fusion_note)
 
@@ -137,11 +146,16 @@ def render_model_performance_page() -> None:
         ens_cmp = eval_summary.get("ensemble_comparison", {})
         if ens_cmp:
             st.markdown("**Ensemble Decision Strategy Comparison (Test Split)**")
-            st.dataframe(
-                pd.DataFrame(ens_cmp).T.reset_index(names="Strategy"),
-                use_container_width=True,
-                hide_index=True,
-            )
+            ens_df_ui = pd.DataFrame(ens_cmp).T.reset_index(names="Strategy")
+            st.dataframe(ens_df_ui, use_container_width=True, hide_index=True)
+            if "f1_macro_reliable" in ens_df_ui.columns or "F1_Macro_Reliable" in ens_df_ui.columns:
+                sup_evals = eval_summary.get("supervised_evaluations", {})
+                sup_ref = sup_evals.get("XGBoost") or next(iter(sup_evals.values()), {})
+                ens_meta = eval_summary.get("ensemble_analysis", {})
+                ens_t, ens_excl = extract_reliable_metadata(
+                    ens_meta if "unreliable_class_names" in ens_meta else sup_ref
+                )
+                st.caption(format_reliable_f1_footnote(ens_t, ens_excl).lstrip("> "))
             ens_note = eval_summary.get("ensemble_analysis", {}).get("honest_verdict", "")
             if ens_note:
                 st.caption(ens_note)
@@ -280,7 +294,15 @@ def render_model_performance_page() -> None:
                     }
                 )
             if tb_rows:
-                st.dataframe(pd.DataFrame(tb_rows), use_container_width=True, hide_index=True)
+                tb_ui_df = pd.DataFrame(tb_rows)
+                st.dataframe(tb_ui_df, use_container_width=True, hide_index=True)
+                tb_ref = (time_blk.get("models") or {}).get("XGBoost") or next(
+                    iter((time_blk.get("models") or {}).values()), {}
+                )
+                tb_t, tb_excl = extract_reliable_metadata(
+                    tb_ref, per_class_rows=(time_blk.get("per_class_metrics") or {}).get("XGBoost")
+                )
+                st.caption(format_reliable_f1_footnote(tb_t, tb_excl).lstrip("> "))
             st.caption(
                 f"Ordering: `{time_blk.get('ordering_source', 'Timestamp')}` | "
                 f"Leakage Check Passed: `{time_blk.get('leakage_checks', {}).get('passed')}`."
@@ -305,7 +327,14 @@ def render_model_performance_page() -> None:
             mc_rows = [{"Model": name, **vals} for name, vals in by_day.get("multiclass_models", {}).items()]
             if mc_rows:
                 with st.expander("View Reference Closed-Set Multi-Class Scores (`by_day`)", expanded=False):
-                    st.dataframe(pd.DataFrame(mc_rows), use_container_width=True, hide_index=True)
+                    mc_ui_df = pd.DataFrame(mc_rows)
+                    st.dataframe(mc_ui_df, use_container_width=True, hide_index=True)
+                    if "f1_macro_reliable" in mc_ui_df.columns or "F1_Macro_Reliable" in mc_ui_df.columns:
+                        bd_ref = (by_day.get("multiclass_models") or {}).get("XGBoost") or next(
+                            iter((by_day.get("multiclass_models") or {}).values()), {}
+                        )
+                        bd_t, bd_excl = extract_reliable_metadata(bd_ref)
+                        st.caption(format_reliable_f1_footnote(bd_t, bd_excl).lstrip("> "))
 
     # Diagnostic Figures
     st.markdown("#### 🖼️ Confusion Matrices, ROC & Precision-Recall Curves")

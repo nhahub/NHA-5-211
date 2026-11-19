@@ -1108,7 +1108,14 @@ def test_small_class_reliability_oof_wilson_and_reliable_macro_f1(tmp_app_config
             "split_sizes": {"train_raw": 100, "validation": 30, "test": 30},
             "leakage_checks": {"passed": True},
             "models": {
-                "XGBoost": {"accuracy": 0.9, "f1_weighted": 0.9, "f1_macro": 0.7, "f1_macro_reliable": 0.92}
+                "XGBoost": {
+                    "accuracy": 0.9,
+                    "f1_weighted": 0.9,
+                    "f1_macro": 0.7,
+                    "f1_macro_reliable": 0.92,
+                    "reliable_support_threshold": 30,
+                    "unreliable_class_names": ["Bot", "Heartbleed"],
+                }
             },
         },
         "by_day_protocol": {
@@ -1126,6 +1133,8 @@ def test_small_class_reliability_oof_wilson_and_reliable_macro_f1(tmp_app_config
                     "f1_macro": 0.25,
                     "f1_macro_reliable": 0.80,
                     "f1_macro_present_test_classes": 0.30,
+                    "reliable_support_threshold": 30,
+                    "unreliable_class_names": ["DDoS"],
                     "roc_auc_macro_ovr": 0.75,
                 }
             },
@@ -1134,6 +1143,18 @@ def test_small_class_reliability_oof_wilson_and_reliable_macro_f1(tmp_app_config
     cmp_path, _ = write_academic_reports(summary, cmp_df, reports_dir)
     md_text = cmp_path.read_text(encoding="utf-8")
     assert "F1_Macro_Reliable" in md_text
+    assert (
+        md_text.count("F1_Macro_Reliable excludes classes with support below 30 on the evaluated partition")
+        == 3
+    )
+    assert (
+        md_text.count("F1_Macro_Reliable excludes classes with support below 25 on the evaluated partition")
+        == 1
+    )
+    assert "Excluded classes: Heartbleed." in md_text
+    assert "Excluded classes: Bot, Heartbleed." in md_text
+    assert "Excluded classes: DDoS." in md_text
+    assert "DDoS, DoS GoldenEye, DoS Hulk, FTP-Patator, PortScan, SSH-Patator, Web Attack." in md_text
     assert "Pooled Out-of-Fold (OOF) Per-Class Evaluation" in md_text
     assert "Recall_CI95_Low" in md_text
 

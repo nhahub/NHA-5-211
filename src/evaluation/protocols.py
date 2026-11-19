@@ -130,6 +130,7 @@ def _summarize_multiclass_by_day(
         "f1_weighted": float(eval_dict["f1_weighted"]),
         "f1_macro": float(eval_dict["f1_macro"]),
         "f1_macro_reliable": float(eval_dict.get("f1_macro_reliable", 0.0)),
+        "unreliable_class_names": list(eval_dict.get("unreliable_class_names", [])),
         "reliable_class_count": int(eval_dict.get("reliable_class_count", 0)),
         "reliable_support_threshold": int(eval_dict.get("reliable_support_threshold", 30)),
         "f1_macro_present_test_classes": f1_macro_present,
@@ -948,6 +949,7 @@ def evaluate_time_block_protocol(
             "f1_weighted": float(ev["f1_weighted"]),
             "f1_macro": float(ev["f1_macro"]),
             "f1_macro_reliable": float(ev["f1_macro_reliable"]),
+            "unreliable_class_names": list(ev.get("unreliable_class_names", [])),
             "reliable_class_count": int(ev["reliable_class_count"]),
             "reliable_support_threshold": int(ev["reliable_support_threshold"]),
             "f1_macro_ci95": ci,
@@ -1430,6 +1432,7 @@ def run_xgboost_stratified_cv(
                 "f1_weighted": float(ev["f1_weighted"]),
                 "f1_macro": float(ev["f1_macro"]),
                 "f1_macro_reliable": float(ev["f1_macro_reliable"]),
+                "unreliable_class_names": list(ev.get("unreliable_class_names", [])),
                 "roc_auc_macro_ovr": float(ev["roc_auc_macro_ovr"]),
             }
         )
@@ -1469,6 +1472,7 @@ def run_xgboost_stratified_cv(
         float(oof_eval.get("f1_macro", 0.0)),
         float(oof_eval.get("f1_macro_reliable", 0.0)),
     )
+    fold_excluded_union = sorted({c for fr in fold_results for c in fr.get("unreliable_class_names", [])})
     return {
         "executed": True,
         "variant": "tuned" if xgb_params else "baseline",
@@ -1479,6 +1483,8 @@ def run_xgboost_stratified_cv(
         "oof_total_rows": int(len(oof_y_true)),
         "oof_f1_macro": float(oof_eval.get("f1_macro", 0.0)),
         "oof_f1_macro_reliable": float(oof_eval.get("f1_macro_reliable", 0.0)),
+        "oof_unreliable_classes": list(oof_eval.get("unreliable_class_names", [])),
+        "fold_unreliable_classes": fold_excluded_union,
         "oof_f1_weighted": float(oof_eval.get("f1_weighted", 0.0)),
         "oof_accuracy": float(oof_eval.get("accuracy", 0.0)),
         "oof_per_class": list(oof_eval.get("per_class_metrics", [])),
@@ -1521,6 +1527,7 @@ def run_sample_size_sensitivity(
     low_sup = int(app_cfg.evaluation.effective_reliable_support_threshold)
 
     results: list[dict[str, Any]] = []
+    unreliable_by_size: dict[str, list[str]] = {}
     memory_limited = False
     for target_size in sizes:
         sub_cfg = app_cfg.model_copy(deep=True)
@@ -1558,6 +1565,7 @@ def run_sample_size_sensitivity(
                 seed=seed,
             )
             ci = ev.get("f1_macro_ci95", {})
+            unreliable_by_size[str(target_size)] = list(ev.get("unreliable_class_names", []))
             results.append(
                 {
                     "Requested_Sample_Size": int(target_size),
@@ -1582,16 +1590,16 @@ def run_sample_size_sensitivity(
             results.append(
                 {
                     "Requested_Sample_Size": int(target_size),
-                    "Rows_After_Dedup": 0,
-                    "Train_Rows": 0,
-                    "Test_Rows": 0,
-                    "Accuracy": 0.0,
-                    "F1_Weighted": 0.0,
-                    "F1_Macro": 0.0,
-                    "F1_Macro_Reliable": 0.0,
-                    "CI95_Low": 0.0,
-                    "CI95_High": 0.0,
-                    "ROC_AUC": 0.0,
+                    "Rows_After_Dedup": None,
+                    "Train_Rows": None,
+                    "Test_Rows": None,
+                    "Accuracy": None,
+                    "F1_Weighted": None,
+                    "F1_Macro": None,
+                    "F1_Macro_Reliable": None,
+                    "CI95_Low": None,
+                    "CI95_High": None,
+                    "ROC_AUC": None,
                     "Status": f"stopped_memory_error: {exc}",
                 }
             )
@@ -1627,6 +1635,8 @@ def run_sample_size_sensitivity(
         "executed": len(completed) > 0,
         "imbalance_strategy": imbalance_strategy,
         "requested_sizes": sizes,
+        "reliable_support_threshold": low_sup,
+        "unreliable_classes_by_size": unreliable_by_size,
         "memory_limited": memory_limited,
         "rows": results,
         "conclusions_change": conclusions_change,

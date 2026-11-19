@@ -277,6 +277,8 @@ def evaluate_supervised_model(
         seed=seed,
     )
 
+    reliable_set = set(reliable_indices)
+    unreliable_class_names = [class_names[i] for i in range(n_classes) if i not in reliable_set]
     return {
         "model": model_name,
         "framing": f"{n_classes}-class supervised",
@@ -289,6 +291,7 @@ def evaluate_supervised_model(
         "f1_macro": f1_m,
         "f1_macro_reliable": f1_m_reliable,
         "reliable_class_names": [class_names[i] for i in reliable_indices],
+        "unreliable_class_names": unreliable_class_names,
         "reliable_class_count": len(reliable_indices),
         "reliable_support_threshold": int(low_support_threshold),
         "f1_macro_ci95": f1_macro_ci95,
