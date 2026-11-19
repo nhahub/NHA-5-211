@@ -119,6 +119,41 @@ def normalize_fusion_display_df(
     return out, is_deg, deg_note
 
 
+def _append_mitigation_section(
+    comp_lines: list[str],
+    *,
+    heading: str,
+    tag: str,
+    mit: dict[str, Any],
+) -> None:
+    """Append validation-partition and descriptive test-partition mitigation tables plus agreement note."""
+    if not (mit.get("executed") and mit.get("rows")):
+        return
+
+    comp_lines.append(f"### {heading}\n\n")
+    val_rows = mit.get("validation_rows") or []
+    if val_rows:
+        comp_lines.append(f"#### {tag} Validation Partition Screening\n\n")
+        comp_lines.append(
+            "> Evaluated strictly on the validation partition (options screened without touching test data).\n\n"
+        )
+        comp_lines.append(_df_to_markdown(pd.DataFrame(val_rows)) + "\n\n")
+
+    comp_lines.append(f"#### {tag} Held-Out Test Partition (Descriptive Only)\n\n")
+    comp_lines.append(
+        "> **Evaluated on the held-out test partition for description only; options were NOT selected on test data.**\n\n"
+    )
+    comp_lines.append(_df_to_markdown(pd.DataFrame(mit["rows"])) + "\n\n")
+
+    agreement = mit.get("validation_vs_test_agreement") or {}
+    if agreement.get("summary"):
+        comp_lines.append(f"- **Validation vs. Test Ranking Agreement:** {agreement['summary']}\n")
+    if mit.get("verdict"):
+        comp_lines.append(f"- **Mitigation Assessment (`{tag}`):** {mit['verdict']}\n\n")
+    elif agreement.get("summary"):
+        comp_lines.append("\n")
+
+
 def write_academic_reports(
     summary: dict[str, Any],
     comparison_df: pd.DataFrame,
@@ -318,11 +353,12 @@ def write_academic_reports(
                 comp_lines.append(_df_to_markdown(pd.DataFrame(drift_rows)) + "\n\n")
 
         tb_mit = time_block.get("mitigation_experiments", {})
-        if tb_mit.get("executed") and tb_mit.get("rows"):
-            comp_lines.append("### Time-Block Recall-vs-FPR Mitigation Experiment\n\n")
-            comp_lines.append(_df_to_markdown(pd.DataFrame(tb_mit["rows"])) + "\n\n")
-            if tb_mit.get("verdict"):
-                comp_lines.append(f"- **Mitigation Assessment (`time_block`):** {tb_mit['verdict']}\n\n")
+        _append_mitigation_section(
+            comp_lines,
+            heading="Time-Block Recall-vs-FPR Mitigation Experiment",
+            tag="time_block",
+            mit=tb_mit,
+        )
 
     if by_day.get("executed"):
         sec_num += 1
@@ -373,13 +409,12 @@ def write_academic_reports(
         ]
         comp_lines.append(_df_to_markdown(pd.DataFrame(mc_rows)) + "\n\n")
         bd_mit = by_day.get("mitigation_experiments", {})
-        if bd_mit.get("executed") and bd_mit.get("rows"):
-            comp_lines.append(
-                "### Open-Set Cross-Day Recall-vs-FPR Mitigation Experiment (Thu–Fri Unseen Attacks)\n\n"
-            )
-            comp_lines.append(_df_to_markdown(pd.DataFrame(bd_mit["rows"])) + "\n\n")
-            if bd_mit.get("verdict"):
-                comp_lines.append(f"- **Mitigation Assessment (`by_day`):** {bd_mit['verdict']}\n\n")
+        _append_mitigation_section(
+            comp_lines,
+            heading="Open-Set Cross-Day Recall-vs-FPR Mitigation Experiment (Thu–Fri Unseen Attacks)",
+            tag="by_day",
+            mit=bd_mit,
+        )
 
     if ablation.get("executed"):
         sec_num += 1

@@ -1181,7 +1181,10 @@ def test_time_block_failure_analysis_ks_drift_and_mitigation_tradeoffs(tmp_app_c
     # Mitigation comparison across class_weight, hybrid anomaly override, and P(benign) gates
     y_val = np.array([0] * 40 + [1] * 10 + [2] * 10, dtype=np.int64)
     p_val = np.tile([0.96, 0.02, 0.02], (len(y_val), 1))
+    p_alt_val = p_val.copy()
+    p_alt_val[y_val == 2] = [0.10, 0.10, 0.80]
     ae_val_ben = rng.uniform(0.0, 1.0, size=40)
+    ae_val_all = np.concatenate([ae_val_ben, rng.uniform(0.0, 0.9, size=10), np.full(10, 2.5)])
     ae_test = np.where(y_te == 2, 2.5, rng.uniform(0.0, 1.0, size=len(y_te)))
     p_alt = p_base.copy()
     p_alt[y_te == 2] = [0.10, 0.10, 0.80]  # class_weight recovers Bot in this synthetic case
@@ -1198,12 +1201,16 @@ def test_time_block_failure_analysis_ks_drift_and_mitigation_tradeoffs(tmp_app_c
         focus_class_indices=[2],
         p_sup_alt_test=p_alt,
         percentiles=[90.0, 95.0],
+        ae_val_all_errors=ae_val_all,
+        p_sup_alt_val=p_alt_val,
     )
     options = {r["Option"] for r in mit["rows"]}
     assert "Baseline XGBoost" in options
     assert "XGBoost ('class_weight' balanced)" in options
     assert "Hybrid Override (XGBoost OR AE)" in options
     assert "Lower P(Benign) Gate (1 - P_Benign > tau)" in options
+    assert len(mit["validation_rows"]) == len(mit["rows"])
+    assert "summary" in mit["validation_vs_test_agreement"]
     assert mit["rows"][0]["Focus_Mean_Recall"] == pytest.approx(0.04)
     assert any(
         r["Option"] == "Hybrid Override (XGBoost OR AE)" and r["Focus_Mean_Recall"] == 1.0
@@ -1233,6 +1240,12 @@ def test_time_block_failure_analysis_ks_drift_and_mitigation_tradeoffs(tmp_app_c
     cmp_path, _ = write_academic_reports(summary, cmp_df, reports_dir)
     md = cmp_path.read_text(encoding="utf-8")
     assert "Time-Block Error Analysis" in md
+    assert "Validation Partition Screening" in md
+    assert (
+        "Evaluated on the held-out test partition for description only; options were NOT selected on test data."
+        in md
+    )
+    assert "Validation vs. Test Ranking Agreement" in md
     assert "Confusion-Matrix Breakdown for Failing Classes" in md
     assert "Top Shifted Features Train-vs-Test per Failing Class (KS Statistic)" in md
     assert "Time-Block Recall-vs-FPR Mitigation Experiment" in md

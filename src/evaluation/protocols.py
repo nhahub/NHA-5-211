@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy.stats import ks_2samp
+from scipy.stats import ks_2samp, spearmanr
 from sklearn.metrics import confusion_matrix, f1_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -203,6 +203,7 @@ def _fit_and_eval_in_memory_autoencoder(
     bootstrap_n: int = 0,
     seed: int = 42,
     return_scores: bool = False,
+    return_val_all_scores: bool = False,
 ) -> tuple[Any, ...]:
     """Train in-memory benign-only Autoencoder and evaluate on dataset test flows."""
     num_features = dataset.X_train_scaled.shape[1]
@@ -227,7 +228,8 @@ def _fit_and_eval_in_memory_autoencoder(
         callbacks=ae_cb,
         verbose=0,
     )
-    benign_val_errors = compute_reconstruction_error(ae_model, X_benign_val)
+    val_all_errors = compute_reconstruction_error(ae_model, dataset.X_val_scaled)
+    benign_val_errors = val_all_errors[dataset.y_val == benign_idx]
     ae_threshold, _ = calibrate_threshold(
         benign_val_errors, percentile=model_cfg.autoencoder.threshold_percentile
     )
@@ -243,6 +245,8 @@ def _fit_and_eval_in_memory_autoencoder(
         bootstrap_n=bootstrap_n,
         seed=seed,
     )
+    if return_val_all_scores:
+        return ae_eval, float(ae_threshold), benign_val_errors, val_all_errors, ae_test_errors
     if return_scores:
         return ae_eval, float(ae_threshold), benign_val_errors, ae_test_errors
     return ae_eval, float(ae_threshold)
@@ -381,26 +385,24 @@ def _eval_binary_attack_option(
     return benign_fpr, overall_atk_recall, binary_f1, focus_mean, focus_recalls
 
 
-def evaluate_mitigation_tradeoffs(
-    y_val: np.ndarray,
+def _score_mitigation_partition(
+    *,
+    y_split: np.ndarray,
     benign_idx: int,
-    p_sup_base_val: np.ndarray,
-    ae_val_benign_errors: np.ndarray,
-    y_test: np.ndarray,
-    p_sup_base_test: np.ndarray,
-    ae_test_errors: np.ndarray,
+    p_sup_base: np.ndarray,
+    ae_errors: np.ndarray,
+    p_sup_alt: np.ndarray | None,
+    threshold_schedule: list[tuple[float, float, float]],
     class_names: list[str],
     focus_class_indices: list[int],
-    p_sup_alt_test: np.ndarray | None = None,
-    alt_label: str = "XGBoost ('class_weight' balanced)",
-    base_label: str = "Baseline XGBoost",
-    percentiles: list[float] | None = None,
-) -> dict[str, Any]:
-    """Compare class_weight, hybrid anomaly override, and P(benign) thresholds on Recall vs FPR."""
-    pcts = list(percentiles or [90.0, 95.0, 97.0, 99.0])
-    base_pred = np.argmax(p_sup_base_test, axis=1)
+    base_label: str,
+    alt_label: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Score identical candidate mitigation rules on one partition using pre-calibrated thresholds."""
+    effective_focus = [idx for idx in focus_class_indices if np.any(y_split == idx)]
+    base_pred = np.argmax(p_sup_base, axis=1)
     base_attack_flag = base_pred != benign_idx
-    base_macro_f1 = float(f1_score(y_test, base_pred, average="macro", zero_division=0))
+    base_macro_f1 = float(f1_score(y_split, base_pred, average="macro", zero_division=0))
 
     rows: list[dict[str, Any]] = []
 
@@ -412,11 +414,11 @@ def evaluate_mitigation_tradeoffs(
         mc_f1: float | None = None,
     ) -> dict[str, Any]:
         fpr, ov_rec, bin_f1, focus_rec, focus_map = _eval_binary_attack_option(
-            y_test=y_test,
+            y_test=y_split,
             is_attack_pred=pred_flag,
             benign_idx=benign_idx,
             class_names=class_names,
-            focus_class_indices=focus_class_indices,
+            focus_class_indices=effective_focus,
         )
         focus_summary = ", ".join(f"{k}={v:.3f}" for k, v in focus_map.items())
         entry = {
@@ -434,11 +436,107 @@ def evaluate_mitigation_tradeoffs(
         return entry
 
     base_row = _append_row(base_label, "Argmax", "argmax P(c)", base_attack_flag, base_macro_f1)
-
-    if p_sup_alt_test is not None:
-        alt_pred = np.argmax(p_sup_alt_test, axis=1)
-        alt_macro_f1 = float(f1_score(y_test, alt_pred, average="macro", zero_division=0))
+    if p_sup_alt is not None:
+        alt_pred = np.argmax(p_sup_alt, axis=1)
+        alt_macro_f1 = float(f1_score(y_split, alt_pred, average="macro", zero_division=0))
         _append_row(alt_label, "Argmax", "argmax P(c)", alt_pred != benign_idx, alt_macro_f1)
+
+    atk_prob = 1.0 - p_sup_base[:, benign_idx]
+    ae_arr = np.asarray(ae_errors, dtype=np.float64)
+    for pct, ae_thresh, p_thresh in threshold_schedule:
+        pct_tag = f"P{int(round(pct))}"
+        _append_row(
+            "Hybrid Override (XGBoost OR AE)",
+            pct_tag,
+            f"AE>{ae_thresh:.4f}",
+            base_attack_flag | (ae_arr > ae_thresh),
+        )
+        _append_row(
+            "Lower P(Benign) Gate (1 - P_Benign > tau)",
+            pct_tag,
+            f"1-P(B)>{p_thresh:.4f}",
+            atk_prob > p_thresh,
+        )
+
+    return rows, base_row
+
+
+def _compare_mitigation_rankings(
+    val_rows: list[dict[str, Any]],
+    test_rows: list[dict[str, Any]],
+    val_base_row: dict[str, Any],
+    test_base_row: dict[str, Any],
+) -> dict[str, Any]:
+    """Compare validation vs. test ranking agreement across identical mitigation options."""
+    val_map = {(r["Option"], r["Benign_Val_Pct"]): r for r in val_rows}
+    test_map = {(r["Option"], r["Benign_Val_Pct"]): r for r in test_rows}
+    common_keys = [k for k in val_map if k in test_map]
+    val_scores = [float(val_map[k]["Focus_Mean_Recall"]) for k in common_keys]
+    test_scores = [float(test_map[k]["Focus_Mean_Recall"]) for k in common_keys]
+
+    rho = 0.0
+    if len(common_keys) >= 3 and len(set(val_scores)) > 1 and len(set(test_scores)) > 1:
+        stat = spearmanr(val_scores, test_scores)
+        rho_raw = float(getattr(stat, "statistic", stat[0]))
+        rho = 0.0 if np.isnan(rho_raw) else round(rho_raw, 4)
+
+    def _pick_top(rows_list: list[dict[str, Any]], base_r: dict[str, Any]) -> tuple[str, str]:
+        cands = [r for r in rows_list[1:] if float(r["Benign_FPR"]) <= float(base_r["Benign_FPR"]) + 0.02]
+        pool = cands or rows_list
+        top = max(pool, key=lambda r: (float(r["Focus_Mean_Recall"]), -float(r["Benign_FPR"])))
+        return f"{top['Option']} ({top['Benign_Val_Pct']})", str(top["Option"])
+
+    val_top, val_top_opt = _pick_top(val_rows, val_base_row)
+    test_top, test_top_opt = _pick_top(test_rows, test_base_row)
+    top_exact_match = val_top == test_top
+    top_family_match = val_top_opt == test_top_opt
+
+    if top_exact_match and rho >= 0.70:
+        agrees_str = "agrees"
+        desc = f"Validation ranking agrees with test (Spearman rho={rho:.4f}; top bounded-FPR option is '{val_top}' on both splits)."
+    elif top_family_match or rho >= 0.50:
+        agrees_str = "partially agrees"
+        desc = (
+            f"Validation ranking partially agrees with test (Spearman rho={rho:.4f}; validation top bounded-FPR option "
+            f"is '{val_top}' vs descriptive test top '{test_top}')."
+        )
+    else:
+        agrees_str = "does not agree"
+        desc = (
+            f"Validation ranking does not agree with test (Spearman rho={rho:.4f}; validation top bounded-FPR option "
+            f"is '{val_top}' whereas descriptive test top is '{test_top}')."
+        )
+
+    return {
+        "spearman_rho_focus_recall": rho,
+        "validation_top_bounded_fpr_option": val_top,
+        "test_top_bounded_fpr_option": test_top,
+        "top_exact_match": top_exact_match,
+        "top_option_family_match": top_family_match,
+        "agreement_status": agrees_str,
+        "summary": desc,
+    }
+
+
+def evaluate_mitigation_tradeoffs(
+    y_val: np.ndarray,
+    benign_idx: int,
+    p_sup_base_val: np.ndarray,
+    ae_val_benign_errors: np.ndarray,
+    y_test: np.ndarray,
+    p_sup_base_test: np.ndarray,
+    ae_test_errors: np.ndarray,
+    class_names: list[str],
+    focus_class_indices: list[int],
+    p_sup_alt_test: np.ndarray | None = None,
+    alt_label: str = "XGBoost ('class_weight' balanced)",
+    base_label: str = "Baseline XGBoost",
+    percentiles: list[float] | None = None,
+    ae_val_all_errors: np.ndarray | None = None,
+    p_sup_alt_val: np.ndarray | None = None,
+) -> dict[str, Any]:
+    """Compare class_weight, hybrid anomaly override, and P(benign) thresholds on validation and test."""
+    pcts = list(percentiles or [90.0, 95.0, 97.0, 99.0])
 
     # Calibrate anomaly score & attack-probability thresholds strictly on benign validation flows
     val_ben_mask = y_val == benign_idx
@@ -447,50 +545,64 @@ def evaluate_mitigation_tradeoffs(
         if np.any(val_ben_mask)
         else np.array([0.0], dtype=np.float64)
     )
-    test_atk_prob = 1.0 - p_sup_base_test[:, benign_idx]
     ae_val_arr = (
         np.asarray(ae_val_benign_errors, dtype=np.float64)
         if len(ae_val_benign_errors) > 0
         else np.array([0.0], dtype=np.float64)
     )
+    threshold_schedule = [
+        (float(pct), float(np.percentile(ae_val_arr, pct)), float(np.percentile(val_ben_atk_prob, pct)))
+        for pct in pcts
+    ]
 
-    for pct in pcts:
-        ae_thresh = float(np.percentile(ae_val_arr, pct))
-        hybrid_flag = base_attack_flag | (ae_test_errors > ae_thresh)
-        _append_row(
-            "Hybrid Override (XGBoost OR AE)",
-            f"P{int(round(pct))}",
-            f"AE>{ae_thresh:.4f}",
-            hybrid_flag,
+    test_rows, base_row = _score_mitigation_partition(
+        y_split=y_test,
+        benign_idx=benign_idx,
+        p_sup_base=p_sup_base_test,
+        ae_errors=ae_test_errors,
+        p_sup_alt=p_sup_alt_test,
+        threshold_schedule=threshold_schedule,
+        class_names=class_names,
+        focus_class_indices=focus_class_indices,
+        base_label=base_label,
+        alt_label=alt_label,
+    )
+
+    validation_rows: list[dict[str, Any]] = []
+    agreement: dict[str, Any] = {}
+    if ae_val_all_errors is not None and len(ae_val_all_errors) == len(y_val):
+        validation_rows, val_base_row = _score_mitigation_partition(
+            y_split=y_val,
+            benign_idx=benign_idx,
+            p_sup_base=p_sup_base_val,
+            ae_errors=ae_val_all_errors,
+            p_sup_alt=p_sup_alt_val,
+            threshold_schedule=threshold_schedule,
+            class_names=class_names,
+            focus_class_indices=focus_class_indices,
+            base_label=base_label,
+            alt_label=alt_label,
         )
+        agreement = _compare_mitigation_rankings(validation_rows, test_rows, val_base_row, base_row)
 
-        p_thresh = float(np.percentile(val_ben_atk_prob, pct))
-        # Clamp strictly below 0.5 only where benign percentile itself is < 0.5; otherwise still report exact P_pct cutoff
-        gate_flag = test_atk_prob > p_thresh
-        _append_row(
-            "Lower P(Benign) Gate (1 - P_Benign > tau)",
-            f"P{int(round(pct))}",
-            f"1-P(B)>{p_thresh:.4f}",
-            gate_flag,
-        )
-
-    best_focus_row = max(rows, key=lambda r: (float(r["Focus_Mean_Recall"]), -float(r["Benign_FPR"])))
+    best_focus_row = max(test_rows, key=lambda r: (float(r["Focus_Mean_Recall"]), -float(r["Benign_FPR"])))
     low_fpr_gain = [
         r
-        for r in rows[1:]
+        for r in test_rows[1:]
         if float(r["Benign_FPR"]) <= base_row["Benign_FPR"] + 0.02
         and float(r["Focus_Mean_Recall"]) > base_row["Focus_Mean_Recall"] + 0.05
     ]
     if low_fpr_gain:
         best_low_fpr = max(low_fpr_gain, key=lambda r: float(r["Focus_Mean_Recall"]))
         verdict = (
-            f"{best_low_fpr['Option']} ({best_low_fpr['Benign_Val_Pct']}) raises focus attack recall from "
-            f"{base_row['Focus_Mean_Recall']:.4f} to {best_low_fpr['Focus_Mean_Recall']:.4f} with bounded "
-            f"Benign FPR={best_low_fpr['Benign_FPR']:.4f} vs baseline {base_row['Benign_FPR']:.4f}."
+            f"Descriptively on the held-out test partition (not used for selection), {best_low_fpr['Option']} "
+            f"({best_low_fpr['Benign_Val_Pct']}) shows focus attack recall {best_low_fpr['Focus_Mean_Recall']:.4f} "
+            f"at Benign FPR={best_low_fpr['Benign_FPR']:.4f} vs baseline {base_row['Focus_Mean_Recall']:.4f} "
+            f"(Benign FPR={base_row['Benign_FPR']:.4f})."
         )
     else:
         verdict = (
-            f"Raising recall above baseline ({base_row['Focus_Mean_Recall']:.4f} at Benign FPR="
+            f"Descriptively on held-out test, raising recall above baseline ({base_row['Focus_Mean_Recall']:.4f} at Benign FPR="
             f"{base_row['Benign_FPR']:.4f}; peak option '{best_focus_row['Option']}' "
             f"[{best_focus_row['Benign_Val_Pct']}] reaches {best_focus_row['Focus_Mean_Recall']:.4f} at Benign FPR="
             f"{best_focus_row['Benign_FPR']:.4f}) incurs an elevated false-positive rate cost (> +2% FPR); "
@@ -498,7 +610,9 @@ def evaluate_mitigation_tradeoffs(
         )
 
     return {
-        "rows": rows,
+        "rows": test_rows,
+        "validation_rows": validation_rows,
+        "validation_vs_test_agreement": agreement,
         "baseline_benign_fpr": base_row["Benign_FPR"],
         "baseline_focus_recall": base_row["Focus_Mean_Recall"],
         "verdict": verdict,
@@ -512,7 +626,8 @@ def _fit_and_predict_alt_xgb(
     imbalance_strategy: str,
     xgb_device: str,
     seed: int,
-) -> tuple[str, np.ndarray]:
+    return_val: bool = False,
+) -> tuple[Any, ...]:
     """Fit alternative XGBoost weighting ('class_weight' vs 'none') for Recall-vs-FPR mitigation."""
     alt_strat = "class_weight" if imbalance_strategy != "class_weight" else "none"
     num_classes = len(dataset.class_names)
@@ -529,8 +644,11 @@ def _fit_and_predict_alt_xgb(
         seed=seed,
         sample_weight=sw_alt,
     )
-    p_alt = expand_xgboost_probas(alt_clf.predict_proba(dataset.X_test_scaled), alt_cls, num_classes)
-    return alt_strat, p_alt
+    p_alt_test = expand_xgboost_probas(alt_clf.predict_proba(dataset.X_test_scaled), alt_cls, num_classes)
+    if return_val:
+        p_alt_val = expand_xgboost_probas(alt_clf.predict_proba(dataset.X_val_scaled), alt_cls, num_classes)
+        return alt_strat, p_alt_test, p_alt_val
+    return alt_strat, p_alt_test
 
 
 def evaluate_by_day_protocol(
@@ -662,14 +780,14 @@ def evaluate_by_day_protocol(
     )
 
     # 4. Autoencoder (BENIGN Mon-Wed train, threshold strictly calibrated on Thursday BENIGN val)
-    ae_eval, ae_threshold, ae_val_ben_err, ae_test_err = _fit_and_eval_in_memory_autoencoder(
+    ae_eval, ae_threshold, ae_val_ben_err, ae_val_all_err, ae_test_err = _fit_and_eval_in_memory_autoencoder(
         dataset=dataset,
         app_cfg=app_cfg,
         model_cfg=model_cfg,
         epochs=ep,
         bootstrap_n=0,
         seed=seed,
-        return_scores=True,
+        return_val_all_scores=True,
     )
     binary_table["Autoencoder"] = {
         k: float(ae_eval[k])
@@ -686,13 +804,14 @@ def evaluate_by_day_protocol(
         p_xgb_val = expand_xgboost_probas(
             xgb_clf.predict_proba(dataset.X_val_scaled), present_cls, num_classes
         )
-        alt_strat, p_xgb_alt = _fit_and_predict_alt_xgb(
+        alt_strat, p_xgb_alt_test, p_xgb_alt_val = _fit_and_predict_alt_xgb(
             dataset=dataset,
             model_cfg=model_cfg,
             xgb_params=xgb_params,
             imbalance_strategy=imbalance_strategy,
             xgb_device=hardware.xgb_device,
             seed=seed,
+            return_val=True,
         )
         unseen_indices = [dataset.class_names.index(c) for c in unseen_test_cls if c in dataset.class_names]
         mitigation_res = {
@@ -707,10 +826,12 @@ def evaluate_by_day_protocol(
                 ae_test_errors=ae_test_err,
                 class_names=dataset.class_names,
                 focus_class_indices=unseen_indices,
-                p_sup_alt_test=p_xgb_alt,
+                p_sup_alt_test=p_xgb_alt_test,
                 alt_label=f"XGBoost ('{alt_strat}')",
                 base_label=f"Baseline XGBoost ('{imbalance_strategy}')",
                 percentiles=app_cfg.evaluation.mitigation_benign_percentiles,
+                ae_val_all_errors=ae_val_all_err,
+                p_sup_alt_val=p_xgb_alt_val,
             ),
         }
 
@@ -835,14 +956,14 @@ def evaluate_time_block_protocol(
         }
         per_class_by_model[display_name] = list(ev.get("per_class_metrics", []))
 
-    ae_eval, ae_threshold, ae_val_ben_err, ae_test_err = _fit_and_eval_in_memory_autoencoder(
+    ae_eval, ae_threshold, ae_val_ben_err, ae_val_all_err, ae_test_err = _fit_and_eval_in_memory_autoencoder(
         dataset=dataset,
         app_cfg=app_cfg,
         model_cfg=model_cfg,
         epochs=ep,
         bootstrap_n=boot_n,
         seed=seed,
-        return_scores=True,
+        return_val_all_scores=True,
     )
 
     failure_analysis = analyze_time_block_failures(
@@ -864,13 +985,14 @@ def evaluate_time_block_protocol(
         p_xgb_val = expand_xgboost_probas(
             xgb_clf.predict_proba(dataset.X_val_scaled), present_cls, num_classes
         )
-        alt_strat, p_xgb_alt = _fit_and_predict_alt_xgb(
+        alt_strat, p_xgb_alt_test, p_xgb_alt_val = _fit_and_predict_alt_xgb(
             dataset=dataset,
             model_cfg=model_cfg,
             xgb_params=xgb_params,
             imbalance_strategy=imbalance_strategy,
             xgb_device=hardware.xgb_device,
             seed=seed,
+            return_val=True,
         )
         failing_indices = [
             dataset.class_names.index(c)
@@ -889,10 +1011,12 @@ def evaluate_time_block_protocol(
                 ae_test_errors=ae_test_err,
                 class_names=dataset.class_names,
                 focus_class_indices=failing_indices,
-                p_sup_alt_test=p_xgb_alt,
+                p_sup_alt_test=p_xgb_alt_test,
                 alt_label=f"XGBoost ('{alt_strat}')",
                 base_label=f"Baseline XGBoost ('{imbalance_strategy}')",
                 percentiles=app_cfg.evaluation.mitigation_benign_percentiles,
+                ae_val_all_errors=ae_val_all_err,
+                p_sup_alt_val=p_xgb_alt_val,
             ),
         }
 
