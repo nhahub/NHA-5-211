@@ -11,15 +11,22 @@ import pytest
 from src.config import AppConfig
 from src.data.cleaner import clean_cicids_dataframe, normalize_label_text
 from src.data.feature_engineering import SchemaValidationError, align_feature_schema
-from src.data.loader import CICIDS2017_FEATURES, discover_csv_files, generate_synthetic_cicids2017
+from src.data.loader import (
+    CICIDS2017_FEATURES,
+    align_real_timestamps,
+    discover_csv_files,
+    generate_synthetic_cicids2017,
+)
 from src.data.preprocessing import (
     DataLeakageError,
+    _parse_timestamp_series,
     _split_indices_time_block,
     apply_smote_safely,
     compute_hybrid_smote_class_weights,
     run_preprocessing_pipeline,
     verify_no_leakage,
 )
+from src.evaluation.report_writer import write_academic_reports
 
 
 def test_discover_csv_files_and_whitespace_stripping(
@@ -356,3 +363,96 @@ def test_time_block_split_timestamp_ordering_no_leakage_and_fallbacks(tmp_app_co
     meta_cap = pd.DataFrame({"Capture_Order": np.arange(len(y_tiny))[::-1]})
     _, _, _, cap_details = _split_indices_time_block(meta_cap, y_tiny, cls_names)
     assert cap_details["ordering_source"].startswith("Capture_Order")
+    assert cap_details["ordering_warning"] == "time_block ordering = CSV row order (no real Timestamp)"
+
+
+def test_real_timestamp_alignment_and_missing_dir_warning(
+    tmp_app_config: AppConfig, small_synthetic_df: pd.DataFrame, tmp_path: Path
+) -> None:
+    """Real Timestamp alignment sorts time_block strictly by timestamp, passes leakage, and warns when absent."""
+    base_df = small_synthetic_df.head(240).copy().reset_index(drop=True)
+    # Build MachineLearningCVE-style raw CSV (no Timestamp/Flow ID/Source IP/Destination IP)
+    # in DELIBERATELY REVERSED chronological row order so CSV row order disagrees with true timestamps.
+    ml_cols = [*CICIDS2017_FEATURES, "Label"]
+    ml_df = base_df[ml_cols].copy()
+    raw_dir = tmp_app_config.paths.resolve("raw_data_dir")
+    ml_df.iloc[::-1].reset_index(drop=True).to_csv(raw_dir / "Monday-WorkingHours.pcap_ISCX.csv", index=False)
+
+    ts_dir = tmp_path / "data/TrafficLabelling"
+    ts_dir.mkdir(parents=True, exist_ok=True)
+    ts_df = base_df[ml_cols].copy()
+    ts_df["Flow ID"] = [f"10.0.0.1-192.168.1.1-50000-80-6-{i}" for i in range(len(ts_df))]
+    ts_df["Source IP"] = "10.0.0.1"
+    ts_df["Destination IP"] = "192.168.1.1"
+    ts_df["Source Port"] = 50000
+    # True timestamps strictly increase with original forward index i (0..239),
+    # whereas the raw MachineLearningCVE CSV rows are stored newest-first (239..0).
+    ts_start = pd.Timestamp("2017-07-03 09:00:00")
+    ts_df["Timestamp"] = [
+        (ts_start + pd.Timedelta(seconds=i * 10)).strftime("%d/%m/%Y %H:%M:%S") for i in range(len(ts_df))
+    ]
+    ts_df.to_csv(ts_dir / "Monday-WorkingHours.pcap_ISCX.csv", index=False)
+
+    # 1. Pipeline with timestamp_source_dir sorts strictly by true Timestamp and passes leakage check
+    tmp_app_config.data.split_strategy = "time_block"
+    tmp_app_config.data.timestamp_source_dir = str(ts_dir)
+    dataset = run_preprocessing_pipeline(tmp_app_config, force_synthetic=False, save_outputs=False)
+    audit = dataset.audit_report
+    assert audit["timestamp_alignment"]["real_timestamps_available"] is True
+    assert audit["timestamp_alignment"]["matched_rows"] == len(ml_df)
+    assert audit["timestamp_alignment"]["unmatched_rows"] == 0
+    assert audit["time_block_details"]["ordering_source"] == "Timestamp"
+    assert audit["time_block_details"]["ordering_warning"] == ""
+    assert "Timestamp" in audit["id_columns_removed"]
+    assert "Timestamp" not in dataset.feature_names
+    assert audit["leakage_checks"]["passed"] is True
+
+    val_ts = _parse_timestamp_series(dataset.val_metadata["Timestamp"])
+    test_ts = _parse_timestamp_series(dataset.test_metadata["Timestamp"])
+    for cls_name in dataset.class_names:
+        v_mask = dataset.val_metadata["True_Label"].to_numpy() == cls_name
+        t_mask = dataset.test_metadata["True_Label"].to_numpy() == cls_name
+        if np.any(v_mask) and np.any(t_mask):
+            assert val_ts[v_mask].max() <= test_ts[t_mask].min()
+
+    # 2. 5-tuple + Flow ID join path + explicit unmatched-row count verification
+    df_with_ids = ts_df.drop(columns=["Timestamp"]).copy()
+    # Replace one Flow ID so exactly 1 row is unmatched
+    df_with_ids.loc[0, "Flow ID"] = "UNMATCHED-FLOW-ID"
+    aligned_ids, align_report = align_real_timestamps(df_with_ids, ts_dir)
+    assert align_report["join_strategy"] == "5tuple_flow_id"
+    assert align_report["matched_rows"] == len(df_with_ids) - 1
+    assert align_report["unmatched_rows"] == 1
+    assert "Timestamp" in aligned_ids.columns
+
+    # 3. Absent timestamp_source_dir falls back cleanly without failing and warns clearly in report
+    missing_dir = tmp_path / "data/does_not_exist"
+    tmp_app_config.data.timestamp_source_dir = str(missing_dir)
+    ds_fallback = run_preprocessing_pipeline(tmp_app_config, force_synthetic=False, save_outputs=False)
+    fb_audit = ds_fallback.audit_report
+    assert fb_audit["timestamp_alignment"]["status"] == "directory_not_found"
+    assert fb_audit["time_block_details"]["ordering_source"].startswith("Capture_Order")
+    assert (
+        fb_audit["time_block_details"]["ordering_warning"]
+        == "time_block ordering = CSV row order (no real Timestamp)"
+    )
+
+    reports_dir = tmp_app_config.paths.resolve("reports_dir")
+    cmp_df = pd.DataFrame([{"Model": "XGBoost", "Accuracy": 0.99, "F1_Weighted": 0.99, "F1_Macro": 0.85}])
+    summary = {
+        "dataset_source": fb_audit["source"],
+        "split_strategy": "time_block",
+        "preprocessing_audit": fb_audit,
+        "training_diagnostics": {},
+        "time_block_protocol": {
+            "executed": True,
+            "ordering_source": fb_audit["time_block_details"]["ordering_source"],
+            "ordering_warning": fb_audit["time_block_details"]["ordering_warning"],
+            "split_sizes": fb_audit["split_sizes"],
+            "leakage_checks": fb_audit["leakage_checks"],
+            "models": {"XGBoost": {"f1_macro": 0.85}},
+        },
+    }
+    cmp_path, exp_path = write_academic_reports(summary, cmp_df, reports_dir)
+    assert "time_block ordering = CSV row order (no real Timestamp)" in cmp_path.read_text(encoding="utf-8")
+    assert "time_block ordering = CSV row order (no real Timestamp)" in exp_path.read_text(encoding="utf-8")

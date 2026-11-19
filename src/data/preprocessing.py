@@ -638,6 +638,12 @@ def _split_indices_time_block(
 
     split_details = {
         "ordering_source": ordering_source,
+        "has_real_timestamps": bool(ordering_source == "Timestamp"),
+        "ordering_warning": (
+            ""
+            if ordering_source == "Timestamp"
+            else "time_block ordering = CSV row order (no real Timestamp)"
+        ),
         "train_fraction_target": float(train_fraction),
         "val_fraction_target": float(val_fraction),
         "test_fraction_target": round(float(1.0 - train_fraction - val_fraction), 4),
@@ -873,6 +879,7 @@ def run_preprocessing_pipeline(
 
     audit_report: dict[str, Any] = {
         "source": source_info.to_dict(),
+        "timestamp_alignment": source_info.timestamp_alignment,
         "original_shape": [clean_report.initial_rows, clean_report.initial_cols],
         "rows_after_deduplication": clean_report.rows_after_dedup,
         "duplicates_removed": clean_report.duplicates_removed,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -10,8 +10,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.config import DataConfig
-from src.data.cleaner import CHRON_ORDER_COLUMN, SOURCE_FILE_COLUMN
+from src.config import PROJECT_ROOT, DataConfig
+from src.data.cleaner import CHRON_ORDER_COLUMN, SOURCE_FILE_COLUMN, normalize_label_text
 from src.utils.logging import get_logger
 
 logger = get_logger("smart_ids.data.loader")
@@ -109,6 +109,7 @@ class DatasetSourceInfo:
     raw_row_count: int
     sampled_row_count: int
     warning_message: str | None = None
+    timestamp_alignment: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -426,6 +427,295 @@ def generate_synthetic_cicids2017(
     return df
 
 
+_TS_RELEVANT_COLUMNS_LOWER: frozenset[str] = frozenset(
+    {
+        "timestamp",
+        "flow id",
+        "source ip",
+        "destination ip",
+        "source port",
+        "destination port",
+        "flow duration",
+        "total fwd packets",
+        "total backward packets",
+        "total length of fwd packets",
+        "total length of bwd packets",
+        "flow iat mean",
+        "label",
+    }
+)
+
+
+def _resolve_timestamp_dir(raw_spec: str | None) -> Path | None:
+    if raw_spec is None:
+        return None
+    text = str(raw_spec).strip()
+    if not text:
+        return None
+    candidate = Path(text)
+    return candidate if candidate.is_absolute() else (PROJECT_ROOT / candidate).resolve()
+
+
+def _day_session_key(filename: str) -> str:
+    stem = Path(str(filename)).name.lower().split(".pcap")[0]
+    for prefix in ("workinghours-", "workinghours"):
+        stem = stem.replace(prefix, "")
+    return stem.strip("_- ") or Path(str(filename)).stem.lower()
+
+
+def _normalize_key_column(series: pd.Series, is_numeric: bool) -> pd.Series:
+    if is_numeric:
+        vals = pd.to_numeric(series, errors="coerce").fillna(-1.0)
+        return vals.round(4).astype(np.float64)
+    return series.astype(str).str.strip()
+
+
+def align_real_timestamps(
+    df_main: pd.DataFrame,
+    timestamp_source_dir: Path | str | None,
+    label_col: str = "Label",
+    source_file_col: str = SOURCE_FILE_COLUMN,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Align real CICIDS2017 TrafficLabelling/GeneratedLabelledFlows timestamps to main flows.
+
+    Join strategy priority:
+    1. Native ``Timestamp`` column already present with non-null values.
+    2. Direct identifier keys shared by both datasets (``Flow ID``, ``Source IP``,
+       ``Destination IP``, ``Source Port``, ``Destination Port`` + per-key occurrence index).
+    3. MachineLearningCVE telemetry signature fallback when IPs/Flow ID are absent:
+       day/session stem + ``Destination Port``, ``Flow Duration``, ``Total Fwd Packets``,
+       ``Total Backward Packets``, ``Total Length of Fwd Packets``, ``Total Length of Bwd Packets``,
+       ``Flow IAT Mean``, normalized ``Label``, and per-signature occurrence index.
+
+    Returns the aligned DataFrame (with ``Timestamp`` kept strictly for non-feature metadata)
+    plus an explicit alignment audit dictionary reporting join keys, matched rows, and
+    unmatched rows. Never raises when ``timestamp_source_dir`` is absent or empty.
+    """
+    n_total = len(df_main)
+    ts_dir = (
+        timestamp_source_dir
+        if isinstance(timestamp_source_dir, Path)
+        else _resolve_timestamp_dir(timestamp_source_dir)
+    )
+
+    existing_ts_col = next(
+        (c for c in df_main.columns if str(c).strip().lower() == "timestamp"),
+        None,
+    )
+    if existing_ts_col is not None and n_total > 0 and df_main[existing_ts_col].notna().any():
+        matched = int(df_main[existing_ts_col].notna().sum())
+        return df_main, {
+            "status": "native_column",
+            "source_dir": str(ts_dir) if ts_dir else None,
+            "directory_exists": bool(ts_dir and ts_dir.exists()),
+            "csv_files_found": 0,
+            "real_timestamps_available": True,
+            "join_strategy": "native Timestamp column already present in raw CSVs",
+            "join_keys_used": [existing_ts_col],
+            "total_rows": n_total,
+            "matched_rows": matched,
+            "unmatched_rows": int(n_total - matched),
+            "match_rate": round(matched / max(n_total, 1), 6),
+        }
+
+    if ts_dir is None or not ts_dir.exists():
+        logger.warning(
+            "Timestamp source directory '%s' not found; time_block ordering will fall back to "
+            "CSV row order (no real Timestamp).",
+            ts_dir,
+        )
+        return df_main, {
+            "status": "directory_not_found",
+            "source_dir": str(ts_dir) if ts_dir else None,
+            "directory_exists": False,
+            "csv_files_found": 0,
+            "real_timestamps_available": False,
+            "join_strategy": "none (CSV row order fallback)",
+            "join_keys_used": [],
+            "total_rows": n_total,
+            "matched_rows": 0,
+            "unmatched_rows": n_total,
+            "match_rate": 0.0,
+        }
+
+    ts_csvs = discover_csv_files(ts_dir)
+    if not ts_csvs:
+        logger.warning(
+            "No CSV files found in timestamp_source_dir=%s; time_block ordering = CSV row order (no real Timestamp).",
+            ts_dir,
+        )
+        return df_main, {
+            "status": "no_csv_files",
+            "source_dir": str(ts_dir),
+            "directory_exists": True,
+            "csv_files_found": 0,
+            "real_timestamps_available": False,
+            "join_strategy": "none (CSV row order fallback)",
+            "join_keys_used": [],
+            "total_rows": n_total,
+            "matched_rows": 0,
+            "unmatched_rows": n_total,
+            "match_rate": 0.0,
+        }
+
+    ts_frames: list[pd.DataFrame] = []
+    for p in ts_csvs:
+        part = None
+        for encoding in ("utf-8", "latin-1", "cp1252"):
+            try:
+                part = pd.read_csv(
+                    p,
+                    encoding=encoding,
+                    low_memory=False,
+                    usecols=lambda c: str(c).strip().lower() in _TS_RELEVANT_COLUMNS_LOWER,
+                )
+                part.columns = part.columns.astype(str).str.strip()
+                break
+            except UnicodeDecodeError:
+                continue
+        if part is not None and "Timestamp" in part.columns and len(part) > 0:
+            part["__ts_day_key__"] = _day_session_key(p.name)
+            ts_frames.append(part)
+
+    if not ts_frames:
+        logger.warning(
+            "CSV files in %s did not contain a valid 'Timestamp' column; using CSV row order fallback.",
+            ts_dir,
+        )
+        return df_main, {
+            "status": "no_timestamp_column",
+            "source_dir": str(ts_dir),
+            "directory_exists": True,
+            "csv_files_found": len(ts_csvs),
+            "real_timestamps_available": False,
+            "join_strategy": "none (CSV row order fallback)",
+            "join_keys_used": [],
+            "total_rows": n_total,
+            "matched_rows": 0,
+            "unmatched_rows": n_total,
+            "match_rate": 0.0,
+        }
+
+    ts_df = pd.concat(ts_frames, ignore_index=True)
+
+    id_priority = ("Flow ID", "Source IP", "Destination IP", "Source Port", "Destination Port")
+    shared_id_keys = [col for col in id_priority if col in df_main.columns and col in ts_df.columns]
+
+    sig_priority = (
+        "Destination Port",
+        "Flow Duration",
+        "Total Fwd Packets",
+        "Total Backward Packets",
+        "Total Length of Fwd Packets",
+        "Total Length of Bwd Packets",
+        "Flow IAT Mean",
+    )
+    shared_sig_keys = [col for col in sig_priority if col in df_main.columns and col in ts_df.columns]
+
+    numeric_keys = {
+        "Source Port",
+        "Destination Port",
+        "Flow Duration",
+        "Total Fwd Packets",
+        "Total Backward Packets",
+        "Total Length of Fwd Packets",
+        "Total Length of Bwd Packets",
+        "Flow IAT Mean",
+    }
+
+    if "Flow ID" in shared_id_keys or ("Source IP" in shared_id_keys and "Destination IP" in shared_id_keys):
+        join_keys = list(shared_id_keys)
+        join_strategy = "5tuple_flow_id"
+    else:
+        join_keys = list(shared_sig_keys)
+        join_strategy = "flow_telemetry_signature"
+
+    if not join_keys:
+        logger.warning("No shared join keys found between raw CSVs and %s; skipping timestamp merge.", ts_dir)
+        return df_main, {
+            "status": "no_shared_keys",
+            "source_dir": str(ts_dir),
+            "directory_exists": True,
+            "csv_files_found": len(ts_csvs),
+            "real_timestamps_available": False,
+            "join_strategy": "none (no overlapping keys)",
+            "join_keys_used": [],
+            "total_rows": n_total,
+            "matched_rows": 0,
+            "unmatched_rows": n_total,
+            "match_rate": 0.0,
+        }
+
+    left_keys = pd.DataFrame(index=df_main.index)
+    right_keys = pd.DataFrame(index=ts_df.index)
+    used_key_names: list[str] = []
+
+    if join_strategy == "flow_telemetry_signature" and source_file_col in df_main.columns:
+        left_keys["__k_day"] = df_main[source_file_col].map(_day_session_key)
+        right_keys["__k_day"] = ts_df["__ts_day_key__"]
+        used_key_names.append("Source_Session_Day")
+
+    for col in join_keys:
+        is_num = col in numeric_keys
+        k_col = f"__k_{col}"
+        left_keys[k_col] = _normalize_key_column(df_main[col], is_num)
+        right_keys[k_col] = _normalize_key_column(ts_df[col], is_num)
+        used_key_names.append(col)
+
+    if label_col in df_main.columns and "Label" in ts_df.columns:
+        left_keys["__k_label"] = df_main[label_col].map(normalize_label_text)
+        right_keys["__k_label"] = ts_df["Label"].map(normalize_label_text)
+        used_key_names.append("Label")
+
+    merge_cols = list(left_keys.columns)
+    left_keys["__occ__"] = left_keys.groupby(merge_cols, sort=False).cumcount()
+    right_keys["__occ__"] = right_keys.groupby(merge_cols, sort=False).cumcount()
+    right_keys["Timestamp"] = ts_df["Timestamp"].astype(str).str.strip().values
+    used_key_names.append("Occurrence_Index")
+
+    merge_on = [*merge_cols, "__occ__"]
+    right_dedup = right_keys.drop_duplicates(subset=merge_on, keep="first")
+    left_keys["__row_pos__"] = np.arange(len(df_main), dtype=np.int64)
+    merged_pos = left_keys.merge(right_dedup, on=merge_on, how="left").sort_values("__row_pos__")
+
+    out_df = df_main.copy()
+    aligned_ts = merged_pos["Timestamp"].to_numpy()
+    out_df["Timestamp"] = pd.Series(aligned_ts, index=out_df.index)
+    valid_mask = (
+        out_df["Timestamp"].notna()
+        & out_df["Timestamp"].astype(str).str.strip().ne("")
+        & ~out_df["Timestamp"].astype(str).str.strip().str.lower().isin({"nan", "nat", "none"})
+    )
+    matched_rows = int(valid_mask.sum())
+    unmatched_rows = int(n_total - matched_rows)
+    match_rate = round(matched_rows / max(n_total, 1), 6)
+    final_df = out_df if matched_rows > 0 else df_main
+
+    logger.info(
+        "Aligned real timestamps from %s via %s keys (%s): matched=%d / %d (unmatched=%d, rate=%.2f%%)",
+        ts_dir,
+        join_strategy,
+        ", ".join(used_key_names),
+        matched_rows,
+        n_total,
+        unmatched_rows,
+        match_rate * 100.0,
+    )
+    return final_df, {
+        "status": "aligned" if matched_rows > 0 else "zero_matches",
+        "source_dir": str(ts_dir),
+        "directory_exists": True,
+        "csv_files_found": len(ts_csvs),
+        "real_timestamps_available": matched_rows > 0,
+        "join_strategy": join_strategy,
+        "join_keys_used": used_key_names,
+        "total_rows": n_total,
+        "matched_rows": matched_rows,
+        "unmatched_rows": unmatched_rows,
+        "match_rate": match_rate,
+    }
+
+
 def _session_chronological_rank(filename: str) -> int:
     """Return CICIDS2017 capture session order (Monday -> Friday afternoon)."""
     name = Path(str(filename)).name.lower()
@@ -470,15 +760,13 @@ def load_cicids2017_corpus(
             frames.append(part)
 
         df = pd.concat(frames, ignore_index=True)
-        has_ts_col = any(str(col).strip().lower() == "timestamp" for col in df.columns)
-        if not has_ts_col:
-            logger.info(
-                "Raw CSVs omit a 'Timestamp' column (MachineLearningCVE export); preserving session+row "
-                "chronological order in '%s' for time_block splitting.",
-                CHRON_ORDER_COLUMN,
-            )
-        raw_count = len(df)
         label_col = data_cfg.label_column
+        df, ts_alignment = align_real_timestamps(
+            df_main=df,
+            timestamp_source_dir=data_cfg.timestamp_source_dir,
+            label_col=label_col,
+        )
+        raw_count = len(df)
 
         if data_cfg.max_rows_sample and len(df) > data_cfg.max_rows_sample and label_col in df.columns:
             df = stratified_downsample(df, label_col=label_col, max_rows=data_cfg.max_rows_sample, seed=seed)
@@ -491,6 +779,7 @@ def load_cicids2017_corpus(
             raw_row_count=raw_count,
             sampled_row_count=len(df),
             warning_message=None,
+            timestamp_alignment=ts_alignment,
         )
         return df, info
 

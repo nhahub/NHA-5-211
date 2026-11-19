@@ -68,6 +68,7 @@ data:
   drop_features: []
   strict_leakage_check: true
   split_strategy: "random" # random | by_day (open-set cross-day: Mon-Wed train, part of Thu val, Thu-Fri unseen attacks) | time_block (chronological per-class ~60%/~20%/~20%)
+  timestamp_source_dir: "data/TrafficLabelling" # Optional CICIDS2017 GeneratedLabelledFlows/TrafficLabelling CSV dir for real Timestamp alignment
   split:
     # Matches report for random: 15% held-out test, then 15% of remainder validation (12.75% val, 72.25% train)
     test_size: 0.15

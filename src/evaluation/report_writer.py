@@ -147,15 +147,29 @@ def write_academic_reports(
     if time_block.get("executed"):
         sec_num += 1
         tb_sizes = time_block.get("split_sizes", {})
+        tb_ord = str(time_block.get("ordering_source", "Timestamp"))
+        tb_warn = str(
+            time_block.get("ordering_warning")
+            or ("" if tb_ord == "Timestamp" else "time_block ordering = CSV row order (no real Timestamp)")
+        )
+        tb_align = time_block.get("timestamp_alignment") or {}
         comp_lines.append(
             f"## {sec_num}. Chronological Drift Evaluation (`time_block`: Per-Class Earliest ~60% Train / Next ~20% Val / Last ~20% Test)\n"
         )
         comp_lines.append(
             f"- **Partitions (`split_strategy='time_block'`):** Train pre-SMOTE=`{tb_sizes.get('train_raw', 0):,}`, "
             f"Validation=`{tb_sizes.get('validation', 0):,}`, Test=`{tb_sizes.get('test', 0):,}` "
-            f"(Ordering=`{time_block.get('ordering_source', 'Timestamp')}`, "
+            f"(Ordering=`{tb_ord}`, "
             f"`leakage_checks.passed={time_block.get('leakage_checks', {}).get('passed')}`).\n"
         )
+        if tb_warn:
+            comp_lines.append(f"- **Warning:** `{tb_warn}`\n")
+        if tb_align and tb_align.get("total_rows", 0) > 0:
+            comp_lines.append(
+                f"- **Timestamp Alignment:** status=`{tb_align.get('status')}`, strategy=`{tb_align.get('join_strategy')}`, "
+                f"keys=`{tb_align.get('join_keys_used', [])}`, matched=`{tb_align.get('matched_rows', 0):,}` / "
+                f"`{tb_align.get('total_rows', 0):,}` (unmatched=`{tb_align.get('unmatched_rows', 0):,}`).\n"
+            )
         fallbacks = time_block.get("tiny_class_fallbacks", {})
         if fallbacks:
             fb_summary = "; ".join(f"`{k}`: {v}" for k, v in fallbacks.items())
@@ -527,6 +541,26 @@ def write_academic_reports(
         f"- **Final Feature Count:** `{audit.get('final_feature_count', 0)}`\n",
         f"- **Leakage Verification Passed:** `{audit.get('leakage_checks', {}).get('passed')}`\n\n",
     ]
+
+    tb_audit_details = audit.get("time_block_details", {})
+    ts_audit_align = audit.get("timestamp_alignment", {})
+    if eff_split == "time_block" and tb_audit_details:
+        tb_ord_warn = str(
+            tb_audit_details.get("ordering_warning")
+            or (
+                ""
+                if tb_audit_details.get("ordering_source") == "Timestamp"
+                else "time_block ordering = CSV row order (no real Timestamp)"
+            )
+        )
+        if tb_ord_warn:
+            exp_lines.append(f"- **Warning:** `{tb_ord_warn}`\n")
+    if ts_audit_align and ts_audit_align.get("total_rows", 0) > 0:
+        exp_lines.append(
+            f"- **Timestamp Alignment Audit:** status=`{ts_audit_align.get('status')}`, "
+            f"strategy=`{ts_audit_align.get('join_strategy')}`, keys=`{ts_audit_align.get('join_keys_used', [])}`, "
+            f"matched=`{ts_audit_align.get('matched_rows', 0):,}`, unmatched=`{ts_audit_align.get('unmatched_rows', 0):,}`.\n"
+        )
 
     split_sizes = audit.get("split_sizes", {})
     exp_lines.append(

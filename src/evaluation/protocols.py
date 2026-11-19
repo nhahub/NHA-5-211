@@ -507,12 +507,20 @@ def evaluate_time_block_protocol(
     )
 
     tb_details = dataset.audit_report.get("time_block_details", {})
+    ordering_src = str(tb_details.get("ordering_source", ""))
+    ordering_warn = str(
+        tb_details.get("ordering_warning")
+        or ("" if ordering_src == "Timestamp" else "time_block ordering = CSV row order (no real Timestamp)")
+    )
     return {
         "executed": True,
         "split_strategy": "time_block",
         "imbalance_strategy": imbalance_strategy,
         "keras_epochs": ep,
-        "ordering_source": tb_details.get("ordering_source", ""),
+        "ordering_source": ordering_src,
+        "has_real_timestamps": bool(tb_details.get("has_real_timestamps", ordering_src == "Timestamp")),
+        "ordering_warning": ordering_warn,
+        "timestamp_alignment": dataset.audit_report.get("timestamp_alignment", {}),
         "tiny_class_fallbacks": tb_details.get("tiny_class_fallbacks", {}),
         "per_class_allocations": tb_details.get("per_class_allocations", {}),
         "split_sizes": dataset.audit_report["split_sizes"],

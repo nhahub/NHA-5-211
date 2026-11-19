@@ -116,6 +116,7 @@ class DataConfig(BaseModel):
     drop_features: list[str] = Field(default_factory=list)
     strict_leakage_check: bool = True
     split_strategy: Literal["random", "by_day", "time_block"] = "random"
+    timestamp_source_dir: str | None = None
     split: SplitConfig = Field(default_factory=SplitConfig)
     imbalance: ImbalanceConfig = Field(default_factory=ImbalanceConfig)
 
