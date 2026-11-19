@@ -340,16 +340,30 @@ def test_latency_warmup_config_and_test_report_generator_parser() -> None:
     assert dur == pytest.approx(1.50)
     assert "2 passed" in summary_txt
 
+    stub_pytest = "\n".join(
+        [
+            "tests/test_a.py::test_one PASSED                                        [ 50%]",
+            "tests/test_b.py::test_two SKIPPED (LFS pointer stubs)                   [100%]",
+            "====================== 1 passed, 1 skipped in 0.95s ======================",
+        ]
+    )
     md = render_test_report(
         ruff_version="ruff 0.17.5",
         pytest_version="pytest 9.2.0",
         ruff_check=CommandRun(["ruff"], "ruff check", 0, "All checks passed!", "", 0.2),
         ruff_format=CommandRun(["ruff"], "ruff format --check", 0, "63 files already formatted", "", 0.1),
         pytest_run=CommandRun(["pytest"], "pytest tests/ -v", 0, sample_pytest, "", 1.5),
+        stub_pytest_run=CommandRun(
+            ["pytest"], "pytest tests/ -v (stub-mode simulation)", 0, stub_pytest, "", 1.0
+        ),
+        stub_files_count=14,
         generated_utc="2026-11-18 21:00 UTC",
     )
     assert "tests/test_a.py" in md and "1.25" in md and "1.35" in md
     assert "2 passed, 1 warning" in md
+    assert "LFS Pointer Stubs (`lfs: false` mirror, 14 stubs)" in md
+    assert "1 passed / 0 failed / 0 error / 1 skipped" in md
+    assert "`tests/test_b.py::test_two`" in md
 
 
 def test_manifest_sha256_match_mismatch_missing_and_lfs_skip(tmp_path: Path, monkeypatch) -> None:
@@ -494,3 +508,58 @@ def test_real_lfs_artifact_smoke() -> None:
     sample = np.zeros((1, len(loaded.feature_names)), dtype=np.float32)
     probs = loaded.models["XGBoost"].predict_proba(sample)
     assert probs.shape == (1, len(loaded.label_encoder.classes_))
+
+
+def test_model_registry_stub_mode_graceful_degradation(tmp_path: Path) -> None:
+    """ModelRegistry degrades gracefully with clear LFS pointer tracking when all binaries are stubs."""
+    stub_dir = tmp_path / "stub_models"
+    stub_dir.mkdir(parents=True, exist_ok=True)
+    lfs_files = [
+        "anomaly_baselines.pkl",
+        "anomaly_fusion.pkl",
+        "best_autoencoder.keras",
+        "best_autoencoder_deep.keras",
+        "best_cnn.keras",
+        "best_mlp.keras",
+        "best_vae.keras",
+        "calibrators.pkl",
+        "imputer.pkl",
+        "label_encoder.pkl",
+        "outlier_clipper.pkl",
+        "scaler.pkl",
+        "stacking_meta.pkl",
+        "xgb_model.json",
+    ]
+    for fname in lfs_files:
+        stub_path = stub_dir / fname
+        stub_path.write_text(
+            f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 12345\n",
+            encoding="utf-8",
+        )
+        assert is_git_lfs_pointer(stub_path) is True
+
+    (stub_dir / "feature_names.json").write_text('["f1", "f2"]', encoding="utf-8")
+    (stub_dir / "anomaly_threshold.json").write_text('{"threshold": 0.025}', encoding="utf-8")
+    (stub_dir / "model_metadata.json").write_text(
+        '{"models": {"XGBoost": {"imbalance_strategy": "none"}}}', encoding="utf-8"
+    )
+    (stub_dir / "MANIFEST.json").write_text('{"algorithm": "sha256", "artifacts": {}}', encoding="utf-8")
+
+    reg = ModelRegistry(
+        models_dir=stub_dir, artifacts_dir=tmp_path, verify_model_hashes=True, require_manifest=True
+    )
+    loaded = reg.load_all(load_keras=True)
+
+    assert loaded.models == {}
+    assert loaded.scaler is None
+    assert loaded.imputer is None
+    assert loaded.outlier_clipper is None
+    assert loaded.label_encoder is None
+    assert loaded.calibrators is None
+    assert loaded.stacker is None
+    assert loaded.anomaly_baselines is None
+    assert loaded.anomaly_fusion is None
+    assert set(loaded.lfs_pointers) == set(lfs_files)
+    assert loaded.feature_names == ["f1", "f2"]
+    assert loaded.anomaly_threshold == pytest.approx(0.025)
+    assert loaded.model_imbalance_strategies == {"XGBoost": "none"}
