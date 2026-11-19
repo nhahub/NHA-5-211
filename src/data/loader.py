@@ -110,6 +110,9 @@ class DatasetSourceInfo:
     sampled_row_count: int
     warning_message: str | None = None
     timestamp_alignment: dict[str, Any] = field(default_factory=dict)
+    label_correction: dict[str, Any] = field(default_factory=dict)
+    use_full_dataset: bool = False
+    effective_sample_size: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -446,9 +449,11 @@ _TS_RELEVANT_COLUMNS_LOWER: frozenset[str] = frozenset(
 )
 
 
-def _resolve_timestamp_dir(raw_spec: str | None) -> Path | None:
+def _resolve_project_path(raw_spec: str | Path | None) -> Path | None:
     if raw_spec is None:
         return None
+    if isinstance(raw_spec, Path):
+        return raw_spec
     text = str(raw_spec).strip()
     if not text:
         return None
@@ -468,6 +473,100 @@ def _normalize_key_column(series: pd.Series, is_numeric: bool) -> pd.Series:
         vals = pd.to_numeric(series, errors="coerce").fillna(-1.0)
         return vals.round(4).astype(np.float64)
     return series.astype(str).str.strip()
+
+
+def _merge_auxiliary_column(
+    df_main: pd.DataFrame,
+    aux_df: pd.DataFrame,
+    aux_value_col: str,
+    *,
+    label_col: str = "Label",
+    source_file_col: str = SOURCE_FILE_COLUMN,
+    include_label_in_key: bool = True,
+    left_day_series: pd.Series | None = None,
+    aux_day_series: pd.Series | None = None,
+) -> tuple[pd.Series | None, str, list[str]]:
+    """Left-align one auxiliary column onto ``df_main`` via 5-tuple Flow ID or telemetry signature."""
+    id_priority = ("Flow ID", "Source IP", "Destination IP", "Source Port", "Destination Port")
+    shared_id_keys = [col for col in id_priority if col in df_main.columns and col in aux_df.columns]
+
+    sig_priority = (
+        "Destination Port",
+        "Flow Duration",
+        "Total Fwd Packets",
+        "Total Backward Packets",
+        "Total Length of Fwd Packets",
+        "Total Length of Bwd Packets",
+        "Flow IAT Mean",
+    )
+    shared_sig_keys = [col for col in sig_priority if col in df_main.columns and col in aux_df.columns]
+
+    numeric_keys = {
+        "Source Port",
+        "Destination Port",
+        "Flow Duration",
+        "Total Fwd Packets",
+        "Total Backward Packets",
+        "Total Length of Fwd Packets",
+        "Total Length of Bwd Packets",
+        "Flow IAT Mean",
+    }
+
+    if "Flow ID" in shared_id_keys or ("Source IP" in shared_id_keys and "Destination IP" in shared_id_keys):
+        join_keys = list(shared_id_keys)
+        join_strategy = "5tuple_flow_id"
+    else:
+        join_keys = list(shared_sig_keys)
+        join_strategy = "flow_telemetry_signature"
+
+    if not join_keys:
+        return None, "none (no overlapping keys)", []
+
+    left_keys = pd.DataFrame(index=df_main.index)
+    right_keys = pd.DataFrame(index=aux_df.index)
+    used_key_names: list[str] = []
+
+    if (
+        join_strategy == "flow_telemetry_signature"
+        and left_day_series is not None
+        and aux_day_series is not None
+    ):
+        left_keys["__k_day"] = left_day_series.values
+        right_keys["__k_day"] = aux_day_series.values
+        used_key_names.append("Source_Session_Day")
+    elif (
+        join_strategy == "flow_telemetry_signature"
+        and source_file_col in df_main.columns
+        and aux_day_series is not None
+    ):
+        left_keys["__k_day"] = df_main[source_file_col].map(_day_session_key)
+        right_keys["__k_day"] = aux_day_series.values
+        used_key_names.append("Source_Session_Day")
+
+    for col in join_keys:
+        is_num = col in numeric_keys
+        k_col = f"__k_{col}"
+        left_keys[k_col] = _normalize_key_column(df_main[col], is_num)
+        right_keys[k_col] = _normalize_key_column(aux_df[col], is_num)
+        used_key_names.append(col)
+
+    if include_label_in_key and label_col in df_main.columns and "Label" in aux_df.columns:
+        left_keys["__k_label"] = df_main[label_col].map(normalize_label_text)
+        right_keys["__k_label"] = aux_df["Label"].map(normalize_label_text)
+        used_key_names.append("Label")
+
+    merge_cols = list(left_keys.columns)
+    left_keys["__occ__"] = left_keys.groupby(merge_cols, sort=False).cumcount()
+    right_keys["__occ__"] = right_keys.groupby(merge_cols, sort=False).cumcount()
+    right_keys["__aux_val__"] = aux_df[aux_value_col].astype(str).str.strip().values
+    used_key_names.append("Occurrence_Index")
+
+    merge_on = [*merge_cols, "__occ__"]
+    right_dedup = right_keys.drop_duplicates(subset=merge_on, keep="first")
+    left_keys["__row_pos__"] = np.arange(len(df_main), dtype=np.int64)
+    merged_pos = left_keys.merge(right_dedup, on=merge_on, how="left").sort_values("__row_pos__")
+    aligned = pd.Series(merged_pos["__aux_val__"].to_numpy(), index=df_main.index)
+    return aligned, join_strategy, used_key_names
 
 
 def align_real_timestamps(
@@ -492,11 +591,7 @@ def align_real_timestamps(
     unmatched rows. Never raises when ``timestamp_source_dir`` is absent or empty.
     """
     n_total = len(df_main)
-    ts_dir = (
-        timestamp_source_dir
-        if isinstance(timestamp_source_dir, Path)
-        else _resolve_timestamp_dir(timestamp_source_dir)
-    )
+    ts_dir = _resolve_project_path(timestamp_source_dir)
 
     existing_ts_col = next(
         (c for c in df_main.columns if str(c).strip().lower() == "timestamp"),
@@ -597,40 +692,16 @@ def align_real_timestamps(
         }
 
     ts_df = pd.concat(ts_frames, ignore_index=True)
-
-    id_priority = ("Flow ID", "Source IP", "Destination IP", "Source Port", "Destination Port")
-    shared_id_keys = [col for col in id_priority if col in df_main.columns and col in ts_df.columns]
-
-    sig_priority = (
-        "Destination Port",
-        "Flow Duration",
-        "Total Fwd Packets",
-        "Total Backward Packets",
-        "Total Length of Fwd Packets",
-        "Total Length of Bwd Packets",
-        "Flow IAT Mean",
+    aligned_ts, join_strategy, used_key_names = _merge_auxiliary_column(
+        df_main=df_main,
+        aux_df=ts_df,
+        aux_value_col="Timestamp",
+        label_col=label_col,
+        source_file_col=source_file_col,
+        include_label_in_key=True,
+        aux_day_series=ts_df["__ts_day_key__"],
     )
-    shared_sig_keys = [col for col in sig_priority if col in df_main.columns and col in ts_df.columns]
-
-    numeric_keys = {
-        "Source Port",
-        "Destination Port",
-        "Flow Duration",
-        "Total Fwd Packets",
-        "Total Backward Packets",
-        "Total Length of Fwd Packets",
-        "Total Length of Bwd Packets",
-        "Flow IAT Mean",
-    }
-
-    if "Flow ID" in shared_id_keys or ("Source IP" in shared_id_keys and "Destination IP" in shared_id_keys):
-        join_keys = list(shared_id_keys)
-        join_strategy = "5tuple_flow_id"
-    else:
-        join_keys = list(shared_sig_keys)
-        join_strategy = "flow_telemetry_signature"
-
-    if not join_keys:
+    if aligned_ts is None:
         logger.warning("No shared join keys found between raw CSVs and %s; skipping timestamp merge.", ts_dir)
         return df_main, {
             "status": "no_shared_keys",
@@ -638,49 +709,16 @@ def align_real_timestamps(
             "directory_exists": True,
             "csv_files_found": len(ts_csvs),
             "real_timestamps_available": False,
-            "join_strategy": "none (no overlapping keys)",
-            "join_keys_used": [],
+            "join_strategy": join_strategy,
+            "join_keys_used": used_key_names,
             "total_rows": n_total,
             "matched_rows": 0,
             "unmatched_rows": n_total,
             "match_rate": 0.0,
         }
 
-    left_keys = pd.DataFrame(index=df_main.index)
-    right_keys = pd.DataFrame(index=ts_df.index)
-    used_key_names: list[str] = []
-
-    if join_strategy == "flow_telemetry_signature" and source_file_col in df_main.columns:
-        left_keys["__k_day"] = df_main[source_file_col].map(_day_session_key)
-        right_keys["__k_day"] = ts_df["__ts_day_key__"]
-        used_key_names.append("Source_Session_Day")
-
-    for col in join_keys:
-        is_num = col in numeric_keys
-        k_col = f"__k_{col}"
-        left_keys[k_col] = _normalize_key_column(df_main[col], is_num)
-        right_keys[k_col] = _normalize_key_column(ts_df[col], is_num)
-        used_key_names.append(col)
-
-    if label_col in df_main.columns and "Label" in ts_df.columns:
-        left_keys["__k_label"] = df_main[label_col].map(normalize_label_text)
-        right_keys["__k_label"] = ts_df["Label"].map(normalize_label_text)
-        used_key_names.append("Label")
-
-    merge_cols = list(left_keys.columns)
-    left_keys["__occ__"] = left_keys.groupby(merge_cols, sort=False).cumcount()
-    right_keys["__occ__"] = right_keys.groupby(merge_cols, sort=False).cumcount()
-    right_keys["Timestamp"] = ts_df["Timestamp"].astype(str).str.strip().values
-    used_key_names.append("Occurrence_Index")
-
-    merge_on = [*merge_cols, "__occ__"]
-    right_dedup = right_keys.drop_duplicates(subset=merge_on, keep="first")
-    left_keys["__row_pos__"] = np.arange(len(df_main), dtype=np.int64)
-    merged_pos = left_keys.merge(right_dedup, on=merge_on, how="left").sort_values("__row_pos__")
-
     out_df = df_main.copy()
-    aligned_ts = merged_pos["Timestamp"].to_numpy()
-    out_df["Timestamp"] = pd.Series(aligned_ts, index=out_df.index)
+    out_df["Timestamp"] = aligned_ts
     valid_mask = (
         out_df["Timestamp"].notna()
         & out_df["Timestamp"].astype(str).str.strip().ne("")
@@ -713,6 +751,149 @@ def align_real_timestamps(
         "matched_rows": matched_rows,
         "unmatched_rows": unmatched_rows,
         "match_rate": match_rate,
+    }
+
+
+def apply_label_corrections(
+    df_main: pd.DataFrame,
+    correction_file: Path | str | None,
+    label_col: str = "Label",
+    source_file_col: str = SOURCE_FILE_COLUMN,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Optionally apply Engelen et al. (2021) corrected CICIDS2017 labels when configured."""
+    corr_path = _resolve_project_path(correction_file)
+    n_total = len(df_main)
+    if corr_path is None or not corr_path.exists() or not corr_path.is_file():
+        logger.warning(
+            "Engelen et al. (2021) label correction file '%s' not found; proceeding with original CICIDS2017 labels.",
+            corr_path,
+        )
+        return df_main, {
+            "status": "file_not_found" if corr_path is not None else "disabled",
+            "applied": False,
+            "file_path": str(corr_path) if corr_path else None,
+            "join_strategy": "none",
+            "join_keys_used": [],
+            "total_rows": n_total,
+            "matched_rows": 0,
+            "rows_relabeled": 0,
+            "rows_dropped": 0,
+            "relabel_transitions": {},
+        }
+
+    if corr_path.suffix.lower() == ".parquet":
+        corr_df = pd.read_parquet(corr_path)
+        corr_df.columns = corr_df.columns.astype(str).str.strip()
+    else:
+        corr_df = _read_single_csv(corr_path)
+
+    target_col = next(
+        (
+            col
+            for cand in ("Corrected Label", "Corrected_Label", "New Label", "Attempted Category", "Label")
+            for col in corr_df.columns
+            if col.strip().lower() == cand.lower()
+        ),
+        None,
+    )
+    if target_col is None or label_col not in df_main.columns:
+        logger.warning(
+            "Label correction file %s lacks a recognized corrected-label column; skipping.", corr_path
+        )
+        return df_main, {
+            "status": "invalid_schema",
+            "applied": False,
+            "file_path": str(corr_path),
+            "join_strategy": "none",
+            "join_keys_used": [],
+            "total_rows": n_total,
+            "matched_rows": 0,
+            "rows_relabeled": 0,
+            "rows_dropped": 0,
+            "relabel_transitions": {},
+        }
+
+    aligned_labels, join_strategy, used_keys = _merge_auxiliary_column(
+        df_main=df_main,
+        aux_df=corr_df,
+        aux_value_col=target_col,
+        label_col=label_col,
+        source_file_col=source_file_col,
+        include_label_in_key=False,
+    )
+    if aligned_labels is None:
+        logger.warning("No overlapping keys for label correction file %s; skipping.", corr_path)
+        return df_main, {
+            "status": "no_shared_keys",
+            "applied": False,
+            "file_path": str(corr_path),
+            "join_strategy": join_strategy,
+            "join_keys_used": [],
+            "total_rows": n_total,
+            "matched_rows": 0,
+            "rows_relabeled": 0,
+            "rows_dropped": 0,
+            "relabel_transitions": {},
+        }
+
+    valid_mask = (
+        aligned_labels.notna()
+        & aligned_labels.astype(str).str.strip().ne("")
+        & ~aligned_labels.astype(str).str.strip().str.lower().isin({"nan", "nat", "none"})
+    )
+    matched_rows = int(valid_mask.sum())
+    if matched_rows == 0:
+        return df_main, {
+            "status": "zero_matches",
+            "applied": False,
+            "file_path": str(corr_path),
+            "join_strategy": join_strategy,
+            "join_keys_used": used_keys,
+            "total_rows": n_total,
+            "matched_rows": 0,
+            "rows_relabeled": 0,
+            "rows_dropped": 0,
+            "relabel_transitions": {},
+        }
+
+    out_df = df_main.copy()
+    old_norm = out_df[label_col].map(normalize_label_text)
+    new_norm = aligned_labels.where(valid_mask, other="").map(normalize_label_text)
+
+    drop_tokens = {"drop", "remove", "exclude", "invalid"}
+    drop_mask = valid_mask & new_norm.str.lower().isin(drop_tokens)
+    change_mask = valid_mask & ~drop_mask & (new_norm != old_norm)
+
+    transitions: dict[str, int] = {}
+    for old_val, new_val in zip(old_norm[change_mask], new_norm[change_mask], strict=False):
+        key = f"{old_val} -> {new_val}"
+        transitions[key] = transitions.get(key, 0) + 1
+
+    out_df.loc[change_mask, label_col] = new_norm.loc[change_mask]
+    rows_relabeled = int(change_mask.sum())
+    rows_dropped = int(drop_mask.sum())
+    if rows_dropped > 0:
+        out_df = out_df.loc[~drop_mask].reset_index(drop=True)
+
+    logger.info(
+        "Applied Engelen et al. (2021) label corrections from %s via %s: matched=%d, relabeled=%d, dropped=%d",
+        corr_path,
+        join_strategy,
+        matched_rows,
+        rows_relabeled,
+        rows_dropped,
+    )
+    return out_df, {
+        "status": "applied",
+        "applied": True,
+        "file_path": str(corr_path),
+        "join_strategy": join_strategy,
+        "join_keys_used": used_keys,
+        "total_rows": n_total,
+        "matched_rows": matched_rows,
+        "rows_relabeled": rows_relabeled,
+        "rows_dropped": rows_dropped,
+        "relabel_transitions": transitions,
     }
 
 
@@ -766,10 +947,16 @@ def load_cicids2017_corpus(
             timestamp_source_dir=data_cfg.timestamp_source_dir,
             label_col=label_col,
         )
+        df, label_corr = apply_label_corrections(
+            df_main=df,
+            correction_file=data_cfg.label_correction_file,
+            label_col=label_col,
+        )
         raw_count = len(df)
+        eff_sample = data_cfg.effective_sample_size
 
-        if data_cfg.max_rows_sample and len(df) > data_cfg.max_rows_sample and label_col in df.columns:
-            df = stratified_downsample(df, label_col=label_col, max_rows=data_cfg.max_rows_sample, seed=seed)
+        if eff_sample and len(df) > eff_sample and label_col in df.columns:
+            df = stratified_downsample(df, label_col=label_col, max_rows=eff_sample, seed=seed)
             logger.info("Stratified downsample from %d to %d rows", raw_count, len(df))
 
         info = DatasetSourceInfo(
@@ -780,6 +967,9 @@ def load_cicids2017_corpus(
             sampled_row_count=len(df),
             warning_message=None,
             timestamp_alignment=ts_alignment,
+            label_correction=label_corr,
+            use_full_dataset=bool(data_cfg.use_full_dataset),
+            effective_sample_size=eff_sample,
         )
         return df, info
 

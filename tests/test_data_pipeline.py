@@ -8,12 +8,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.config import AppConfig
+from src.config import AppConfig, DataConfig, ModelConfig
 from src.data.cleaner import clean_cicids_dataframe, normalize_label_text
 from src.data.feature_engineering import SchemaValidationError, align_feature_schema
 from src.data.loader import (
     CICIDS2017_FEATURES,
     align_real_timestamps,
+    apply_label_corrections,
     discover_csv_files,
     generate_synthetic_cicids2017,
 )
@@ -26,6 +27,7 @@ from src.data.preprocessing import (
     run_preprocessing_pipeline,
     verify_no_leakage,
 )
+from src.evaluation.protocols import run_sample_size_sensitivity
 from src.evaluation.report_writer import write_academic_reports
 
 
@@ -456,3 +458,80 @@ def test_real_timestamp_alignment_and_missing_dir_warning(
     cmp_path, exp_path = write_academic_reports(summary, cmp_df, reports_dir)
     assert "time_block ordering = CSV row order (no real Timestamp)" in cmp_path.read_text(encoding="utf-8")
     assert "time_block ordering = CSV row order (no real Timestamp)" in exp_path.read_text(encoding="utf-8")
+
+
+def test_sample_size_config_label_correction_and_sensitivity_protocol(
+    tmp_app_config: AppConfig, small_synthetic_df: pd.DataFrame, tmp_path: Path
+) -> None:
+    """data.sample_size, use_full_dataset, Engelen label corrections, and sensitivity reports work end-to-end."""
+    # 1. Sample size / use_full_dataset config sync
+    cfg_sub = DataConfig(sample_size=500000, use_full_dataset=False)
+    assert cfg_sub.effective_sample_size == 500000
+    assert cfg_sub.max_rows_sample == 500000
+    cfg_full = DataConfig(sample_size=500000, use_full_dataset=True)
+    assert cfg_full.effective_sample_size is None
+
+    # 2. Missing label correction file skips cleanly without failing
+    df_fixture = small_synthetic_df.head(150).copy().reset_index(drop=True)
+    df_fixture["Flow ID"] = [f"F-{i}" for i in range(len(df_fixture))]
+    df_untouched, miss_info = apply_label_corrections(df_fixture, tmp_path / "does_not_exist_engelen.csv")
+    assert miss_info["status"] == "file_not_found"
+    assert miss_info["applied"] is False
+    assert len(df_untouched) == len(df_fixture)
+
+    # 3. Valid Engelen-style label correction CSV relabels and drops marked invalid rows
+    corr_path = tmp_path / "engelen2021_sample.csv"
+    corr_df = pd.DataFrame(
+        [
+            {
+                "Flow ID": "F-0",
+                "Source IP": df_fixture.loc[0, "Source IP"],
+                "Corrected Label": "Attempted-Fix",
+            },
+            {"Flow ID": "F-1", "Source IP": df_fixture.loc[1, "Source IP"], "Corrected Label": "DROP"},
+        ]
+    )
+    corr_df.to_csv(corr_path, index=False)
+    raw_dir = tmp_app_config.paths.resolve("raw_data_dir")
+    df_fixture.to_csv(raw_dir / "Monday-WorkingHours.pcap_ISCX.csv", index=False)
+    tmp_app_config.data.label_correction_file = str(corr_path)
+    tmp_app_config.data.sample_size = 120
+    tmp_app_config.data.use_full_dataset = False
+    ds = run_preprocessing_pipeline(tmp_app_config, force_synthetic=False, save_outputs=False)
+    lc_audit = ds.audit_report["source"]["label_correction"]
+    assert lc_audit["applied"] is True
+    assert lc_audit["matched_rows"] == 2
+    assert lc_audit["rows_dropped"] == 1
+    assert lc_audit["rows_relabeled"] >= 1 or df_fixture.loc[0, "Label"] == "Attempted-Fix"
+
+    # 4. Sample-size sensitivity experiment across two sizes on XGBoost + report rendering
+    tmp_app_config.evaluation.bootstrap_n_resamples = 100
+    tmp_app_config.evaluation.low_support_threshold = 20
+    m_cfg = ModelConfig()
+    m_cfg.xgboost.baseline["n_estimators"] = 10
+    sens = run_sample_size_sensitivity(
+        app_cfg=tmp_app_config,
+        model_cfg=m_cfg,
+        imbalance_strategy="none",
+        sample_sizes=[350, 700],
+        force_synthetic=True,
+    )
+    assert sens["executed"] is True
+    assert len(sens["rows"]) == 2
+    assert sens["rows"][0]["Requested_Sample_Size"] == 350
+    assert sens["rows"][1]["Requested_Sample_Size"] == 700
+    assert sens["rows"][1]["Train_Rows"] > sens["rows"][0]["Train_Rows"]
+    assert "CI95_Low" in sens["rows"][0] and "CI95_High" in sens["rows"][0]
+
+    reports_dir = tmp_app_config.paths.resolve("reports_dir")
+    cmp_df = pd.DataFrame([{"Model": "XGBoost", "Accuracy": 0.99, "F1_Weighted": 0.99, "F1_Macro": 0.92}])
+    summary = {
+        "dataset_source": ds.source_info.to_dict(),
+        "split_strategy": "random",
+        "preprocessing_audit": ds.audit_report,
+        "training_diagnostics": {},
+        "sample_size_sensitivity": sens,
+    }
+    cmp_path, exp_path = write_academic_reports(summary, cmp_df, reports_dir)
+    assert "XGBoost Sample-Size Sensitivity Experiment" in cmp_path.read_text(encoding="utf-8")
+    assert "Engelen et al. (2021) Label Correction Audit" in exp_path.read_text(encoding="utf-8")

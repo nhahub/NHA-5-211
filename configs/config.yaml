@@ -26,7 +26,10 @@ data:
     - "Friday-WorkingHours-Morning.pcap_ISCX.csv"
     - "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv"
     - "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv"
+  sample_size: 200000
+  use_full_dataset: false # Set true to bypass stratified downsampling across all ~2.83M raw rows
   max_rows_sample: 200000
+  label_correction_file: "data/engelen2021_label_corrections.csv" # Optional Engelen et al. (2021) relabeling CSV/Parquet
   synthetic_fallback:
     enabled: true
     n_samples: 60000
@@ -113,6 +116,8 @@ evaluation:
   failing_class_recall_threshold: 0.85
   drift_top_k_features: 5
   mitigation_benign_percentiles: [90, 95, 97, 99]
+  run_sample_size_sensitivity: true # Compare XGBoost at configured sample_size vs larger sensitivity sample
+  sensitivity_sample_sizes: [200000, 500000]
   run_xgboost_cv: true
   cv_n_splits: 5
 

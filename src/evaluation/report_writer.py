@@ -91,6 +91,7 @@ def write_academic_reports(
     time_block = summary.get("time_block_protocol", {})
     ablation = summary.get("feature_ablation", {})
     xgb_cv = summary.get("xgboost_cross_validation", {})
+    sens_exp = summary.get("sample_size_sensitivity", {})
     sup_evals = summary.get("supervised_evaluations", {})
     ens_analysis = summary.get("ensemble_analysis", {})
     anom_evals = summary.get("anomaly_evaluations", {})
@@ -562,6 +563,18 @@ def write_academic_reports(
             comp_lines.append("### Percentile Threshold Trade-Off Sweep Across Detectors\n\n")
             comp_lines.append(_df_to_markdown(pd.DataFrame(sweep_rows)) + "\n\n")
 
+    if sens_exp.get("executed") and sens_exp.get("rows"):
+        sec_num += 1
+        comp_lines.append(f"## {sec_num}. XGBoost Sample-Size Sensitivity Experiment (`data.sample_size`)\n")
+        comp_lines.append(
+            f"- **Imbalance Strategy:** `{sens_exp.get('imbalance_strategy')}` "
+            f"| **Sizes Tested:** `{sens_exp.get('requested_sizes', [])}` "
+            f"| **Memory-Limited:** `{sens_exp.get('memory_limited', False)}`\n\n"
+        )
+        comp_lines.append(_df_to_markdown(pd.DataFrame(sens_exp["rows"])) + "\n\n")
+        if sens_exp.get("conclusion_note"):
+            comp_lines.append(f"- **Sensitivity Verdict:** {sens_exp['conclusion_note']}\n\n")
+
     sec_num += 1
     comp_lines.append(f"## {sec_num}. XGBoost Baseline vs. Optuna Hyperparameter Optimization\n")
     xgb_opt = diag.get("xgboost_optimization", {})
@@ -658,6 +671,13 @@ def write_academic_reports(
             f"- **Timestamp Alignment Audit:** status=`{ts_audit_align.get('status')}`, "
             f"strategy=`{ts_audit_align.get('join_strategy')}`, keys=`{ts_audit_align.get('join_keys_used', [])}`, "
             f"matched=`{ts_audit_align.get('matched_rows', 0):,}`, unmatched=`{ts_audit_align.get('unmatched_rows', 0):,}`.\n"
+        )
+    lbl_corr = src.get("label_correction", {})
+    if lbl_corr:
+        exp_lines.append(
+            f"- **Engelen et al. (2021) Label Correction Audit:** status=`{lbl_corr.get('status')}`, "
+            f"applied=`{lbl_corr.get('applied', False)}`, matched=`{lbl_corr.get('matched_rows', 0):,}`, "
+            f"relabeled=`{lbl_corr.get('rows_relabeled', 0):,}`, dropped=`{lbl_corr.get('rows_dropped', 0):,}`.\n"
         )
 
     split_sizes = audit.get("split_sizes", {})

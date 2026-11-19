@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import hashlib
 from typing import Any
 
@@ -1367,4 +1368,143 @@ def run_xgboost_stratified_cv(
         "mean_roc_auc": float(np.mean(rocs)),
         "std_roc_auc": float(np.std(rocs, ddof=ddof)),
         "folds": fold_results,
+    }
+
+
+def run_sample_size_sensitivity(
+    app_cfg: AppConfig,
+    model_cfg: ModelConfig,
+    xgb_params: dict[str, Any] | None = None,
+    imbalance_strategy: str = "none",
+    sample_sizes: list[int] | None = None,
+    force_synthetic: bool = False,
+) -> dict[str, Any]:
+    """Compare XGBoost performance and CIs across multiple stratified sample sizes."""
+    sizes = sorted(
+        {int(s) for s in (sample_sizes or app_cfg.evaluation.sensitivity_sample_sizes) if int(s) > 0}
+    )
+    if not sizes:
+        return {"executed": False, "reason": "No positive sample_sizes configured."}
+
+    seed = app_cfg.project.random_seed
+    set_global_seed(seed)
+    hardware = configure_hardware(
+        use_gpu=model_cfg.hardware.use_gpu,
+        memory_growth=model_cfg.hardware.memory_growth,
+        mixed_precision=model_cfg.hardware.mixed_precision,
+    )
+    boot_n = int(app_cfg.evaluation.bootstrap_n_resamples)
+    low_sup = int(app_cfg.evaluation.effective_reliable_support_threshold)
+
+    results: list[dict[str, Any]] = []
+    memory_limited = False
+    for target_size in sizes:
+        sub_cfg = app_cfg.model_copy(deep=True)
+        sub_cfg.data.split_strategy = "random"
+        sub_cfg.data.use_full_dataset = False
+        sub_cfg.data.sample_size = int(target_size)
+        sub_cfg.data.max_rows_sample = int(target_size)
+        if force_synthetic:
+            sub_cfg.data.synthetic_fallback.n_samples = int(target_size)
+
+        try:
+            dataset = run_preprocessing_pipeline(sub_cfg, force_synthetic=force_synthetic, save_outputs=False)
+            num_classes = len(dataset.class_names)
+            X_fit, y_fit, sw_fit, _ = _select_supervised_train_arrays(dataset, imbalance_strategy)
+            clf, present_cls = fit_xgboost_safe_multiclass(
+                X_train=X_fit,
+                y_train=y_fit,
+                X_val=dataset.X_val_scaled,
+                y_val=dataset.y_val,
+                total_classes=num_classes,
+                cfg=model_cfg.xgboost,
+                params_override=xgb_params,
+                device=hardware.xgb_device,
+                seed=seed,
+                sample_weight=sw_fit,
+            )
+            p_test = expand_xgboost_probas(clf.predict_proba(dataset.X_test_scaled), present_cls, num_classes)
+            ev = evaluate_supervised_model(
+                dataset.y_test,
+                p_test,
+                dataset.class_names,
+                f"XGBoost (N={target_size:,})",
+                bootstrap_n=boot_n,
+                low_support_threshold=low_sup,
+                seed=seed,
+            )
+            ci = ev.get("f1_macro_ci95", {})
+            results.append(
+                {
+                    "Requested_Sample_Size": int(target_size),
+                    "Rows_After_Dedup": int(dataset.audit_report.get("rows_after_deduplication", 0)),
+                    "Train_Rows": int(len(X_fit)),
+                    "Test_Rows": int(len(dataset.X_test_scaled)),
+                    "Accuracy": round(float(ev["accuracy"]), 4),
+                    "F1_Weighted": round(float(ev["f1_weighted"]), 4),
+                    "F1_Macro": round(float(ev["f1_macro"]), 4),
+                    "F1_Macro_Reliable": round(float(ev["f1_macro_reliable"]), 4),
+                    "CI95_Low": round(float(ci.get("ci95_low", ev["f1_macro"])), 4),
+                    "CI95_High": round(float(ci.get("ci95_high", ev["f1_macro"])), 4),
+                    "ROC_AUC": round(float(ev["roc_auc_macro_ovr"]), 4),
+                    "Status": "completed",
+                }
+            )
+            del dataset, X_fit, y_fit, clf, p_test
+            gc.collect()
+        except MemoryError as exc:
+            memory_limited = True
+            logger.warning("MemoryError during sample-size sensitivity at %d rows: %s", target_size, exc)
+            results.append(
+                {
+                    "Requested_Sample_Size": int(target_size),
+                    "Rows_After_Dedup": 0,
+                    "Train_Rows": 0,
+                    "Test_Rows": 0,
+                    "Accuracy": 0.0,
+                    "F1_Weighted": 0.0,
+                    "F1_Macro": 0.0,
+                    "F1_Macro_Reliable": 0.0,
+                    "CI95_Low": 0.0,
+                    "CI95_High": 0.0,
+                    "ROC_AUC": 0.0,
+                    "Status": f"stopped_memory_error: {exc}",
+                }
+            )
+            gc.collect()
+            break
+
+    completed = [r for r in results if r["Status"] == "completed"]
+    conclusions_change = False
+    note = ""
+    if len(completed) >= 2:
+        first_r, last_r = completed[0], completed[-1]
+        delta_macro = float(last_r["F1_Macro"] - first_r["F1_Macro"])
+        delta_rel = float(last_r["F1_Macro_Reliable"] - first_r["F1_Macro_Reliable"])
+        cis_overlap = not (
+            last_r["CI95_Low"] > first_r["CI95_High"] or last_r["CI95_High"] < first_r["CI95_Low"]
+        )
+        conclusions_change = bool((not cis_overlap) or abs(delta_macro) > 0.03)
+        note = (
+            f"Scaling stratified sample from {first_r['Requested_Sample_Size']:,} to "
+            f"{last_r['Requested_Sample_Size']:,} rows changed XGBoost F1_Macro by {delta_macro:+.4f} "
+            f"({first_r['F1_Macro']:.4f} [{first_r['CI95_Low']:.4f}, {first_r['CI95_High']:.4f}] -> "
+            f"{last_r['F1_Macro']:.4f} [{last_r['CI95_Low']:.4f}, {last_r['CI95_High']:.4f}]) and "
+            f"F1_Macro_Reliable by {delta_rel:+.4f} (95% CIs overlap={cis_overlap}); "
+            f"conclusions_change={conclusions_change}."
+        )
+    elif completed:
+        note = (
+            f"Completed up to {completed[-1]['Requested_Sample_Size']:,} rows "
+            f"(F1_Macro={completed[-1]['F1_Macro']:.4f}); larger size halted cleanly on memory constraint."
+        )
+
+    return {
+        "executed": len(completed) > 0,
+        "imbalance_strategy": imbalance_strategy,
+        "requested_sizes": sizes,
+        "memory_limited": memory_limited,
+        "rows": results,
+        "conclusions_change": conclusions_change,
+        "conclusion_note": note,
     }

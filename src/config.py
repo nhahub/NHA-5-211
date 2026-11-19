@@ -101,7 +101,10 @@ class DataConfig(BaseModel):
 
     dataset_name: str = "CICIDS2017"
     expected_raw_files: list[str] = Field(default_factory=list)
+    sample_size: int | None = None
+    use_full_dataset: bool = False
     max_rows_sample: int | None = 200000
+    label_correction_file: str | None = None
     synthetic_fallback: SyntheticFallbackConfig = Field(default_factory=SyntheticFallbackConfig)
     label_column: str = "Label"
     canonical_classes: list[str] = Field(default_factory=list)
@@ -119,6 +122,30 @@ class DataConfig(BaseModel):
     timestamp_source_dir: str | None = None
     split: SplitConfig = Field(default_factory=SplitConfig)
     imbalance: ImbalanceConfig = Field(default_factory=ImbalanceConfig)
+
+    @model_validator(mode="after")
+    def _sync_sample_limits(self) -> DataConfig:
+        if self.use_full_dataset:
+            self.sample_size = None
+            self.max_rows_sample = None
+        elif self.sample_size is not None:
+            if self.max_rows_sample == 200000 or self.max_rows_sample is None:
+                self.max_rows_sample = self.sample_size
+            elif self.sample_size == 200000 and self.max_rows_sample != 200000:
+                self.sample_size = self.max_rows_sample
+        else:
+            self.sample_size = self.max_rows_sample
+        return self
+
+    @property
+    def effective_sample_size(self) -> int | None:
+        if self.use_full_dataset:
+            return None
+        if self.sample_size is not None and (self.max_rows_sample is None or self.sample_size != 200000):
+            return int(self.sample_size)
+        if self.max_rows_sample is not None:
+            return int(self.max_rows_sample)
+        return int(self.sample_size) if self.sample_size is not None else None
 
 
 class EvaluationConfig(BaseModel):
@@ -155,6 +182,8 @@ class EvaluationConfig(BaseModel):
     failing_class_recall_threshold: float = Field(default=0.85, gt=0.0, le=1.0)
     drift_top_k_features: int = Field(default=5, ge=1)
     mitigation_benign_percentiles: list[float] = Field(default_factory=lambda: [90.0, 95.0, 97.0, 99.0])
+    run_sample_size_sensitivity: bool = True
+    sensitivity_sample_sizes: list[int] = Field(default_factory=lambda: [200000, 500000])
     run_xgboost_cv: bool = True
     cv_n_splits: int = Field(default=5, ge=2)
 

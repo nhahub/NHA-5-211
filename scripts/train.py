@@ -55,6 +55,7 @@ def main() -> None:
     if args.split_strategy is not None:
         app_cfg.data.split_strategy = args.split_strategy
     if args.max_rows is not None:
+        app_cfg.data.sample_size = args.max_rows
         app_cfg.data.max_rows_sample = args.max_rows
         app_cfg.data.synthetic_fallback.n_samples = args.max_rows
 

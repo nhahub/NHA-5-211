@@ -32,6 +32,7 @@ from src.evaluation.protocols import (
     evaluate_by_day_protocol,
     evaluate_feature_ablation,
     evaluate_time_block_protocol,
+    run_sample_size_sensitivity,
     run_xgboost_stratified_cv,
 )
 from src.evaluation.report_writer import format_ensemble_empirical_conclusion, write_academic_reports
@@ -768,6 +769,7 @@ def run_evaluation_suite(
     time_block_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
     ablation_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
     xgb_cv_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
+    sensitivity_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
     if not skip_protocols:
         if app_c.evaluation.run_by_day_comparison:
             by_day_res = evaluate_by_day_protocol(
@@ -812,6 +814,21 @@ def run_evaluation_suite(
                     n_splits=app_c.evaluation.cv_n_splits,
                     force_synthetic=is_synth,
                 )
+        if app_c.evaluation.run_sample_size_sensitivity:
+            if is_synth:
+                sensitivity_res = {
+                    "executed": False,
+                    "reason": "Skipped sample-size sensitivity under synthetic mode (requires raw CICIDS2017 CSVs).",
+                }
+            else:
+                sensitivity_res = run_sample_size_sensitivity(
+                    app_cfg=app_c,
+                    model_cfg=model_c,
+                    xgb_params=selected_xgb_params,
+                    imbalance_strategy=imb_strategy,
+                    sample_sizes=app_c.evaluation.sensitivity_sample_sizes,
+                    force_synthetic=False,
+                )
 
     full_summary = {
         "dataset_source": prep_audit.get("source", {}),
@@ -829,6 +846,7 @@ def run_evaluation_suite(
         "time_block_protocol": time_block_res,
         "feature_ablation": ablation_res,
         "xgboost_cross_validation": xgb_cv_res,
+        "sample_size_sensitivity": sensitivity_res,
         "preprocessing_latency": prep_latency,
         "inference_latency": latency_table,
         "shap_summary": shap_summary,
