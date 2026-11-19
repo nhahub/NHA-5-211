@@ -111,7 +111,7 @@ def run_evaluation_suite(
     latency_table: dict[str, dict[str, float]] = {}
 
     boot_n = app_c.evaluation.bootstrap_n_resamples
-    low_sup = app_c.evaluation.low_support_threshold
+    low_sup = app_c.evaluation.effective_reliable_support_threshold
     eval_seed = app_c.project.random_seed
 
     # 1. Evaluate & benchmark each supervised classifier
@@ -250,6 +250,7 @@ def run_evaluation_suite(
         ensemble_comparison[strat] = {
             "accuracy": ens_eval["accuracy"],
             "f1_macro": ens_eval["f1_macro"],
+            "f1_macro_reliable": ens_eval["f1_macro_reliable"],
             "f1_weighted": ens_eval["f1_weighted"],
             "roc_auc_macro_ovr": ens_eval["roc_auc_macro_ovr"],
             "ece": ens_eval["ece"],
@@ -508,6 +509,7 @@ def run_evaluation_suite(
                 "Recall_Weighted": round(ev["recall_weighted"], 4),
                 "F1_Weighted": round(ev["f1_weighted"], 4),
                 "F1_Macro": round(ev["f1_macro"], 4),
+                "F1_Macro_Reliable": round(ev["f1_macro_reliable"], 4),
                 "F1_Macro_CI95_Low": round(ci.get("ci95_low", ev["f1_macro"]), 4),
                 "F1_Macro_CI95_High": round(ci.get("ci95_high", ev["f1_macro"]), 4),
                 "ROC_AUC": round(ev["roc_auc_macro_ovr"], 4),
@@ -538,6 +540,7 @@ def run_evaluation_suite(
                 "Recall_Weighted": round(det_ev["recall"], 4),
                 "F1_Weighted": round(det_ev["f1"], 4),
                 "F1_Macro": round(det_ev["f1"], 4),
+                "F1_Macro_Reliable": None,
                 "F1_Macro_CI95_Low": round(det_ci.get("ci95_low", det_ev["f1"]), 4),
                 "F1_Macro_CI95_High": round(det_ci.get("ci95_high", det_ev["f1"]), 4),
                 "ROC_AUC": round(det_ev["roc_auc"], 4),

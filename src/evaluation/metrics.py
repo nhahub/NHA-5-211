@@ -31,6 +31,23 @@ from src.models.ensemble import compute_ece, compute_multiclass_brier
 from src.training.callbacks import build_keras_callbacks
 
 
+def wilson_score_interval(
+    successes: int,
+    total: int,
+    z: float = 1.959963984540054,
+) -> tuple[float, float]:
+    """Compute bounded Wilson score confidence interval (default 95%) for binomial proportions."""
+    if total <= 0:
+        return 0.0, 0.0
+    n = float(total)
+    p = min(1.0, max(0.0, float(successes) / n))
+    z2 = float(z * z)
+    denom = 1.0 + z2 / n
+    center = (p + z2 / (2.0 * n)) / denom
+    half_width = (z * float(np.sqrt((p * (1.0 - p) / n) + (z2 / (4.0 * n * n))))) / denom
+    return max(0.0, center - half_width), min(1.0, center + half_width)
+
+
 def _macro_f1_from_codes(codes: np.ndarray, idx: np.ndarray, num_classes: int) -> float:
     """Compute Macro-F1 across present classes from pre-encoded (y_true * K + y_pred) values."""
     cm = np.bincount(codes[idx], minlength=num_classes * num_classes).reshape(num_classes, num_classes)
@@ -223,18 +240,35 @@ def evaluate_supervised_model(
         macro_roc_auc = 0.0
         macro_pr_auc = 0.0
 
-    per_class_metrics = [
-        {
-            "class_name": cname,
-            "precision": float(cls_report[cname]["precision"]),
-            "recall": float(cls_report[cname]["recall"]),
-            "f1_score": float(cls_report[cname]["f1-score"]),
-            "support": int(cls_report[cname]["support"]),
-            "statistically_unreliable": bool(int(cls_report[cname]["support"]) < low_support_threshold),
-        }
-        for cname in class_names
-        if cname in cls_report
-    ]
+    per_class_metrics = []
+    reliable_indices: list[int] = []
+    for idx, cname in enumerate(class_names):
+        if cname not in cls_report:
+            continue
+        support = int(cls_report[cname]["support"])
+        tp = int(cm_raw[idx, idx]) if idx < cm_raw.shape[0] else 0
+        rec_ci_lo, rec_ci_hi = wilson_score_interval(tp, support)
+        is_reliable = support >= int(low_support_threshold)
+        if is_reliable:
+            reliable_indices.append(idx)
+        per_class_metrics.append(
+            {
+                "class_name": cname,
+                "precision": float(cls_report[cname]["precision"]),
+                "recall": float(cls_report[cname]["recall"]),
+                "recall_ci95_low": round(rec_ci_lo, 4),
+                "recall_ci95_high": round(rec_ci_hi, 4),
+                "f1_score": float(cls_report[cname]["f1-score"]),
+                "support": support,
+                "statistically_unreliable": bool(not is_reliable),
+            }
+        )
+
+    f1_m_reliable = (
+        float(f1_score(y_true, y_pred, labels=reliable_indices, average="macro", zero_division=0))
+        if reliable_indices
+        else 0.0
+    )
     f1_macro_ci95 = bootstrap_macro_f1_ci(
         y_true=y_true,
         y_pred=y_pred,
@@ -253,6 +287,10 @@ def evaluate_supervised_model(
         "precision_macro": prec_m,
         "recall_macro": rec_m,
         "f1_macro": f1_m,
+        "f1_macro_reliable": f1_m_reliable,
+        "reliable_class_names": [class_names[i] for i in reliable_indices],
+        "reliable_class_count": len(reliable_indices),
+        "reliable_support_threshold": int(low_support_threshold),
         "f1_macro_ci95": f1_macro_ci95,
         "roc_auc_macro_ovr": macro_roc_auc,
         "pr_auc_macro_ovr": macro_pr_auc,

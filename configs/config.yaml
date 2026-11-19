@@ -108,6 +108,7 @@ evaluation:
     - "Destination Port"
   bootstrap_n_resamples: 1000
   low_support_threshold: 30
+  reliable_support_threshold: 30 # Minimum test support for Reliable-Class Macro-F1 (shown alongside all-class Macro-F1)
   run_xgboost_cv: true
   cv_n_splits: 5
 

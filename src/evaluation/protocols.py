@@ -117,7 +117,7 @@ def _summarize_multiclass_by_day(
     y_true: np.ndarray,
     proba: np.ndarray,
 ) -> dict[str, Any]:
-    """Extract compact closed-set multi-class metrics including present-class Macro-F1."""
+    """Extract compact closed-set multi-class metrics including present-class and reliable Macro-F1."""
     y_pred = np.argmax(proba, axis=1)
     present_idx = [int(c) for c in np.unique(y_true)]
     f1_macro_present = float(f1_score(y_true, y_pred, labels=present_idx, average="macro", zero_division=0))
@@ -127,6 +127,9 @@ def _summarize_multiclass_by_day(
         "recall_weighted": float(eval_dict["recall_weighted"]),
         "f1_weighted": float(eval_dict["f1_weighted"]),
         "f1_macro": float(eval_dict["f1_macro"]),
+        "f1_macro_reliable": float(eval_dict.get("f1_macro_reliable", 0.0)),
+        "reliable_class_count": int(eval_dict.get("reliable_class_count", 0)),
+        "reliable_support_threshold": int(eval_dict.get("reliable_support_threshold", 30)),
         "f1_macro_present_test_classes": f1_macro_present,
         "roc_auc_macro_ovr": float(eval_dict["roc_auc_macro_ovr"]),
     }
@@ -300,8 +303,11 @@ def evaluate_by_day_protocol(
         seed=seed,
         sample_weight=sample_w,
     )
+    low_sup = int(app_cfg.evaluation.effective_reliable_support_threshold)
     p_xgb = expand_xgboost_probas(xgb_clf.predict_proba(dataset.X_test_scaled), present_cls, num_classes)
-    xgb_mc_eval = evaluate_supervised_model(dataset.y_test, p_xgb, dataset.class_names, "XGBoost")
+    xgb_mc_eval = evaluate_supervised_model(
+        dataset.y_test, p_xgb, dataset.class_names, "XGBoost", bootstrap_n=0, low_support_threshold=low_sup
+    )
     multiclass_table["XGBoost"] = _summarize_multiclass_by_day(xgb_mc_eval, dataset.y_test, p_xgb)
     binary_table["XGBoost (1 - P_Benign)"] = _binary_metrics(
         y_test_bin, 1.0 - p_xgb[:, benign_idx], threshold=0.5
@@ -349,13 +355,17 @@ def evaluate_by_day_protocol(
         epochs=ep,
         keras_cw=keras_cw,
     )
-    mlp_mc_eval = evaluate_supervised_model(dataset.y_test, p_mlp, dataset.class_names, "MLP")
+    mlp_mc_eval = evaluate_supervised_model(
+        dataset.y_test, p_mlp, dataset.class_names, "MLP", bootstrap_n=0, low_support_threshold=low_sup
+    )
     multiclass_table["MLP"] = _summarize_multiclass_by_day(mlp_mc_eval, dataset.y_test, p_mlp)
     binary_table["MLP (1 - P_Benign)"] = _binary_metrics(
         y_test_bin, 1.0 - p_mlp[:, benign_idx], threshold=0.5
     )
 
-    cnn_mc_eval = evaluate_supervised_model(dataset.y_test, p_cnn, dataset.class_names, "1D-CNN")
+    cnn_mc_eval = evaluate_supervised_model(
+        dataset.y_test, p_cnn, dataset.class_names, "1D-CNN", bootstrap_n=0, low_support_threshold=low_sup
+    )
     multiclass_table["1D-CNN"] = _summarize_multiclass_by_day(cnn_mc_eval, dataset.y_test, p_cnn)
     binary_table["1D-CNN (1 - P_Benign)"] = _binary_metrics(
         y_test_bin, 1.0 - p_cnn[:, benign_idx], threshold=0.5
@@ -436,7 +446,7 @@ def evaluate_time_block_protocol(
     num_features = dataset.X_train_scaled.shape[1]
     num_classes = len(dataset.class_names)
     boot_n = int(app_cfg.evaluation.bootstrap_n_resamples)
-    low_sup = int(app_cfg.evaluation.low_support_threshold)
+    low_sup = int(app_cfg.evaluation.effective_reliable_support_threshold)
 
     X_sup_train, y_sup_train, sample_w, keras_cw = _select_supervised_train_arrays(
         dataset, imbalance_strategy
@@ -491,6 +501,9 @@ def evaluate_time_block_protocol(
             "recall_weighted": float(ev["recall_weighted"]),
             "f1_weighted": float(ev["f1_weighted"]),
             "f1_macro": float(ev["f1_macro"]),
+            "f1_macro_reliable": float(ev["f1_macro_reliable"]),
+            "reliable_class_count": int(ev["reliable_class_count"]),
+            "reliable_support_threshold": int(ev["reliable_support_threshold"]),
             "f1_macro_ci95": ci,
             "roc_auc_macro_ovr": float(ev["roc_auc_macro_ovr"]),
             "pr_auc_macro_ovr": float(ev["pr_auc_macro_ovr"]),
@@ -841,6 +854,9 @@ def run_xgboost_stratified_cv(
 
     skf = StratifiedKFold(n_splits=effective_splits, shuffle=True, random_state=seed)
     fold_results: list[dict[str, Any]] = []
+    oof_y_true_parts: list[np.ndarray] = []
+    oof_y_proba_parts: list[np.ndarray] = []
+    low_sup = int(app_cfg.evaluation.effective_reliable_support_threshold)
 
     for fold_idx, (tr_i, va_i) in enumerate(skf.split(X_dev, y_dev), start=1):
         X_tr_raw = X_dev.iloc[tr_i].reset_index(drop=True)
@@ -889,12 +905,15 @@ def run_xgboost_stratified_cv(
             sample_weight=sw_fit,
         )
         p_va = expand_xgboost_probas(clf.predict_proba(X_va_sc), present_cls, num_classes)
+        oof_y_true_parts.append(y_va_clean)
+        oof_y_proba_parts.append(p_va)
         ev = evaluate_supervised_model(
             y_va_clean,
             p_va,
             class_names,
             f"XGBoost (Fold {fold_idx})",
             bootstrap_n=0,
+            low_support_threshold=low_sup,
             seed=seed,
         )
         fold_results.append(
@@ -907,9 +926,28 @@ def run_xgboost_stratified_cv(
                 "recall_weighted": float(ev["recall_weighted"]),
                 "f1_weighted": float(ev["f1_weighted"]),
                 "f1_macro": float(ev["f1_macro"]),
+                "f1_macro_reliable": float(ev["f1_macro_reliable"]),
                 "roc_auc_macro_ovr": float(ev["roc_auc_macro_ovr"]),
             }
         )
+
+    oof_y_true = np.concatenate(oof_y_true_parts) if oof_y_true_parts else np.empty(0, dtype=np.int64)
+    oof_y_proba = (
+        np.vstack(oof_y_proba_parts) if oof_y_proba_parts else np.empty((0, num_classes), dtype=np.float64)
+    )
+    oof_eval = (
+        evaluate_supervised_model(
+            oof_y_true,
+            oof_y_proba,
+            class_names,
+            "XGBoost (Pooled OOF)",
+            bootstrap_n=0,
+            low_support_threshold=low_sup,
+            seed=seed,
+        )
+        if len(oof_y_true) > 0
+        else {}
+    )
 
     ddof = 1 if len(fold_results) > 1 else 0
     macro_f1s = [r["f1_macro"] for r in fold_results]
@@ -920,11 +958,13 @@ def run_xgboost_stratified_cv(
     mean_macro_f1 = float(np.mean(macro_f1s))
     std_macro_f1 = float(np.std(macro_f1s, ddof=ddof))
     logger.info(
-        "XGBoost %d-fold Stratified CV (%s): Macro-F1 = %.4f +/- %.4f",
+        "XGBoost %d-fold Stratified CV (%s): Macro-F1 = %.4f +/- %.4f | Pooled OOF Macro-F1 = %.4f (Reliable = %.4f)",
         effective_splits,
         imbalance_strategy,
         mean_macro_f1,
         std_macro_f1,
+        float(oof_eval.get("f1_macro", 0.0)),
+        float(oof_eval.get("f1_macro_reliable", 0.0)),
     )
     return {
         "executed": True,
@@ -933,6 +973,13 @@ def run_xgboost_stratified_cv(
         "requested_n_splits": int(n_splits),
         "imbalance_strategy": imbalance_strategy,
         "dev_pool_rows": int(len(idx_dev)),
+        "oof_total_rows": int(len(oof_y_true)),
+        "oof_f1_macro": float(oof_eval.get("f1_macro", 0.0)),
+        "oof_f1_macro_reliable": float(oof_eval.get("f1_macro_reliable", 0.0)),
+        "oof_f1_weighted": float(oof_eval.get("f1_weighted", 0.0)),
+        "oof_accuracy": float(oof_eval.get("accuracy", 0.0)),
+        "oof_per_class": list(oof_eval.get("per_class_metrics", [])),
+        "reliable_support_threshold": low_sup,
         "mean_macro_f1": mean_macro_f1,
         "std_macro_f1": std_macro_f1,
         "mean_weighted_f1": float(np.mean(weighted_f1s)),

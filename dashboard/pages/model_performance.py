@@ -242,6 +242,7 @@ def render_model_performance_page() -> None:
                         "Accuracy": m_vals.get("accuracy", 0.0),
                         "F1_Weighted": m_vals.get("f1_weighted", 0.0),
                         "F1_Macro": m_vals.get("f1_macro", 0.0),
+                        "F1_Macro_Reliable": m_vals.get("f1_macro_reliable", 0.0),
                         "CI95_Low": ci.get("ci95_low", 0.0),
                         "CI95_High": ci.get("ci95_high", 0.0),
                         "ROC_AUC_OVR": m_vals.get("roc_auc_macro_ovr", 0.0),

@@ -190,6 +190,7 @@ def write_academic_reports(
                     "Recall_Weighted": m_vals.get("recall_weighted", 0.0),
                     "F1_Weighted": m_vals.get("f1_weighted", 0.0),
                     "F1_Macro": m_vals.get("f1_macro", 0.0),
+                    "F1_Macro_Reliable": m_vals.get("f1_macro_reliable", 0.0),
                     "F1_Macro_CI95_Low": ci.get("ci95_low", m_vals.get("f1_macro", 0.0)),
                     "F1_Macro_CI95_High": ci.get("ci95_high", m_vals.get("f1_macro", 0.0)),
                     "ROC_AUC_OVR": m_vals.get("roc_auc_macro_ovr", 0.0),
@@ -280,6 +281,7 @@ def write_academic_reports(
                 "Recall_Weighted": vals.get("recall_weighted", 0.0),
                 "F1_Weighted": vals.get("f1_weighted", 0.0),
                 "F1_Macro_All": vals.get("f1_macro", 0.0),
+                "F1_Macro_Reliable": vals.get("f1_macro_reliable", 0.0),
                 "F1_Macro_Present_Test": vals.get("f1_macro_present_test_classes", 0.0),
                 "ROC_AUC_OVR": vals.get("roc_auc_macro_ovr", 0.0),
             }
@@ -359,6 +361,8 @@ def write_academic_reports(
                     "Class": row["class_name"],
                     "Precision": float(row["precision"]),
                     "Recall": float(row["recall"]),
+                    "Recall_CI95_Low": float(row.get("recall_ci95_low", 0.0)),
+                    "Recall_CI95_High": float(row.get("recall_ci95_high", 0.0)),
                     "F1_Score": float(row["f1_score"]),
                     "Support": int(row["support"]),
                     "Reliability": "Statistically Unreliable"
@@ -371,6 +375,7 @@ def write_academic_reports(
 
     if xgb_cv.get("executed"):
         sec_num += 1
+        rel_thresh = int(xgb_cv.get("reliable_support_threshold", 30))
         comp_lines.append(
             f"## {sec_num}. XGBoost {xgb_cv.get('n_splits', 5)}-Fold Stratified Cross-Validation\n"
         )
@@ -378,7 +383,10 @@ def write_academic_reports(
             f"- **Variant Evaluated:** `{xgb_cv.get('variant', 'baseline')}` "
             f"| **Development Pool Rows (Held-Out Test Excluded):** `{xgb_cv.get('dev_pool_rows', 0):,}` "
             f"| **Imbalance Strategy:** `{xgb_cv.get('imbalance_strategy')}`\n"
-            f"- **Macro-F1 (Mean +/- Std):** `{xgb_cv.get('mean_macro_f1', 0.0):.4f} ± {xgb_cv.get('std_macro_f1', 0.0):.4f}`\n"
+            f"- **Fold Mean Macro-F1 (Mean +/- Std):** `{xgb_cv.get('mean_macro_f1', 0.0):.4f} ± {xgb_cv.get('std_macro_f1', 0.0):.4f}`\n"
+            f"- **Pooled OOF Macro-F1 (All Classes vs. Reliable `support >= {rel_thresh}`):** "
+            f"`{xgb_cv.get('oof_f1_macro', 0.0):.4f}` vs. `{xgb_cv.get('oof_f1_macro_reliable', 0.0):.4f}` "
+            f"(total OOF evaluated=`{xgb_cv.get('oof_total_rows', 0):,}`)\n"
             f"- **Weighted-F1 (Mean +/- Std):** `{xgb_cv.get('mean_weighted_f1', 0.0):.4f} ± {xgb_cv.get('std_weighted_f1', 0.0):.4f}` "
             f"| **Accuracy:** `{xgb_cv.get('mean_accuracy', 0.0):.4f} ± {xgb_cv.get('std_accuracy', 0.0):.4f}`\n\n"
         )
@@ -390,12 +398,38 @@ def write_academic_reports(
                 "Accuracy": float(f["accuracy"]),
                 "F1_Weighted": float(f["f1_weighted"]),
                 "F1_Macro": float(f["f1_macro"]),
+                "F1_Macro_Reliable": float(f.get("f1_macro_reliable", 0.0)),
                 "ROC_AUC_OVR": float(f["roc_auc_macro_ovr"]),
             }
             for f in xgb_cv.get("folds", [])
         ]
         if fold_rows:
             comp_lines.append(_df_to_markdown(pd.DataFrame(fold_rows)) + "\n\n")
+        oof_per_cls = xgb_cv.get("oof_per_class", [])
+        if oof_per_cls:
+            comp_lines.append(
+                f"### Pooled Out-of-Fold (OOF) Per-Class Evaluation ({xgb_cv.get('n_splits', 5)}-Fold CV Dev Pool, Wilson 95% Recall CI)\n\n"
+            )
+            comp_lines.append(
+                "> Each non-collision development-pool sample is scored out-of-fold exactly once, "
+                "multiplying rare-class effective evaluation counts ~5x relative to the single 15% test split.\n\n"
+            )
+            oof_rows = [
+                {
+                    "Class": row["class_name"],
+                    "Precision": float(row["precision"]),
+                    "Recall": float(row["recall"]),
+                    "Recall_CI95_Low": float(row.get("recall_ci95_low", 0.0)),
+                    "Recall_CI95_High": float(row.get("recall_ci95_high", 0.0)),
+                    "F1_Score": float(row["f1_score"]),
+                    "Support": int(row["support"]),
+                    "Reliability": "Statistically Unreliable"
+                    if row.get("statistically_unreliable")
+                    else "Adequate",
+                }
+                for row in oof_per_cls
+            ]
+            comp_lines.append(_df_to_markdown(pd.DataFrame(oof_rows)) + "\n\n")
 
     sec_num += 1
     comp_lines.append(f"## {sec_num}. Ensemble Strategy Comparison (Test Partition)\n")

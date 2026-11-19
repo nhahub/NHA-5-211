@@ -27,6 +27,7 @@ from src.evaluation.metrics import (
     evaluate_anomaly_detector,
     evaluate_supervised_model,
     paired_bootstrap_macro_f1_test,
+    wilson_score_interval,
 )
 from src.evaluation.protocols import (
     assert_ablation_row_parity,
@@ -1011,3 +1012,119 @@ def test_per_model_imbalance_selection_caps_epochs_and_reports(
     assert "1D-CNN (`smote`)" in exp_text
     assert "XGBoost (`none`)" in exp_text
     assert "Val_Macro_F1" in exp_text
+
+
+def test_small_class_reliability_oof_wilson_and_reliable_macro_f1(tmp_app_config: AppConfig) -> None:
+    """Reliable-class Macro-F1, Wilson 95% recall CIs, and pooled OOF CV evaluation work end-to-end."""
+    # 1. Wilson interval bounds and shrinking width with sample size
+    lo_0, hi_0 = wilson_score_interval(0, 0)
+    assert lo_0 == 0.0 and hi_0 == 0.0
+    lo_small, hi_small = wilson_score_interval(1, 2)
+    lo_large, hi_large = wilson_score_interval(50, 100)
+    assert 0.0 <= lo_small < 0.5 < hi_small <= 1.0
+    assert (hi_large - lo_large) < (hi_small - lo_small)
+
+    # 2. Reliable Macro-F1 alongside all-class Macro-F1
+    # 2 adequate classes (>= 30 samples, perfect F1=1.0) + 1 rare class (support=4, F1=0.0)
+    y_true = np.array([0] * 40 + [1] * 35 + [2] * 4, dtype=np.int64)
+    proba = np.vstack(
+        [
+            np.tile([0.92, 0.04, 0.04], (40, 1)),
+            np.tile([0.04, 0.92, 0.04], (35, 1)),
+            np.tile([0.90, 0.05, 0.05], (4, 1)),  # rare class misclassified as class 0
+        ]
+    )
+    ev = evaluate_supervised_model(
+        y_true,
+        proba,
+        ["BENIGN", "DDoS", "Heartbleed"],
+        "XGBoost",
+        bootstrap_n=0,
+        low_support_threshold=30,
+        seed=42,
+    )
+    assert ev["f1_macro"] < 0.75
+    assert ev["f1_macro_reliable"] > 0.92
+    assert ev["reliable_class_names"] == ["BENIGN", "DDoS"]
+    assert ev["reliable_support_threshold"] == 30
+    by_cls = {r["class_name"]: r for r in ev["per_class_metrics"]}
+    assert by_cls["Heartbleed"]["statistically_unreliable"] is True
+    assert by_cls["Heartbleed"]["recall"] == 0.0
+    assert by_cls["Heartbleed"]["recall_ci95_low"] == 0.0
+    assert 0.40 <= by_cls["Heartbleed"]["recall_ci95_high"] <= 0.65
+    assert by_cls["DDoS"]["recall_ci95_low"] <= by_cls["DDoS"]["recall"] <= by_cls["DDoS"]["recall_ci95_high"]
+
+    # 3. Pooled 5-fold OOF evaluation in run_xgboost_stratified_cv + report rendering
+    tmp_app_config.data.synthetic_fallback.n_samples = 900
+    tmp_app_config.evaluation.reliable_support_threshold = 25
+    m_cfg = ModelConfig()
+    m_cfg.xgboost.baseline["n_estimators"] = 12
+    cv_res = run_xgboost_stratified_cv(
+        app_cfg=tmp_app_config,
+        model_cfg=m_cfg,
+        imbalance_strategy="none",
+        n_splits=3,
+        force_synthetic=True,
+    )
+    assert cv_res["executed"] is True
+    assert cv_res["oof_total_rows"] > 0
+    assert cv_res["oof_total_rows"] <= cv_res["dev_pool_rows"]
+    assert len(cv_res["oof_per_class"]) >= 2
+    first_oof = cv_res["oof_per_class"][0]
+    assert "recall_ci95_low" in first_oof and "recall_ci95_high" in first_oof
+
+    reports_dir = tmp_app_config.paths.resolve("reports_dir")
+    cmp_df = pd.DataFrame(
+        [
+            {
+                "Model": "XGBoost",
+                "Imbalance_Strategy": "none",
+                "Accuracy": 0.99,
+                "F1_Weighted": 0.99,
+                "F1_Macro": ev["f1_macro"],
+                "F1_Macro_Reliable": ev["f1_macro_reliable"],
+            }
+        ]
+    )
+    summary = {
+        "dataset_source": {"is_synthetic": False},
+        "split_strategy": "random",
+        "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+        "training_diagnostics": {},
+        "supervised_evaluations": {"XGBoost": ev},
+        "xgboost_cross_validation": cv_res,
+        "time_block_protocol": {
+            "executed": True,
+            "ordering_source": "Capture_Order",
+            "ordering_warning": "time_block ordering = CSV row order (no real Timestamp)",
+            "split_sizes": {"train_raw": 100, "validation": 30, "test": 30},
+            "leakage_checks": {"passed": True},
+            "models": {
+                "XGBoost": {"accuracy": 0.9, "f1_weighted": 0.9, "f1_macro": 0.7, "f1_macro_reliable": 0.92}
+            },
+        },
+        "by_day_protocol": {
+            "executed": True,
+            "split_sizes": {"train_raw": 100, "validation": 30, "test": 30},
+            "leakage_checks": {"passed": True},
+            "unseen_test_classes": ["DDoS"],
+            "binary_cross_day_models": {"XGBoost (1 - P_Benign)": {"f1": 0.45}},
+            "multiclass_models": {
+                "XGBoost": {
+                    "accuracy": 0.7,
+                    "precision_weighted": 0.7,
+                    "recall_weighted": 0.7,
+                    "f1_weighted": 0.7,
+                    "f1_macro": 0.25,
+                    "f1_macro_reliable": 0.80,
+                    "f1_macro_present_test_classes": 0.30,
+                    "roc_auc_macro_ovr": 0.75,
+                }
+            },
+        },
+    }
+    cmp_path, _ = write_academic_reports(summary, cmp_df, reports_dir)
+    md_text = cmp_path.read_text(encoding="utf-8")
+    assert "F1_Macro_Reliable" in md_text
+    assert "Pooled Out-of-Fold (OOF) Per-Class Evaluation" in md_text
+    assert "Recall_CI95_Low" in md_text

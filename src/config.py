@@ -150,8 +150,17 @@ class EvaluationConfig(BaseModel):
     ablation_drop_features: list[str] = Field(default_factory=lambda: ["Destination Port"])
     bootstrap_n_resamples: int = Field(default=1000, ge=100)
     low_support_threshold: int = Field(default=30, ge=1)
+    reliable_support_threshold: int | None = Field(default=None, ge=1)
     run_xgboost_cv: bool = True
     cv_n_splits: int = Field(default=5, ge=2)
+
+    @property
+    def effective_reliable_support_threshold(self) -> int:
+        return int(
+            self.reliable_support_threshold
+            if self.reliable_support_threshold is not None
+            else self.low_support_threshold
+        )
 
 
 class ResponseConfig(BaseModel):
