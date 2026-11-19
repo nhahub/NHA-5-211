@@ -87,11 +87,19 @@ xgboost:
     n_jobs: -1
   optuna:
     enabled: true
-    n_trials: 12
-    timeout_seconds: 180
+    n_trials: 40
+    timeout_minutes: 6.0
     sample_cap_for_tuning: 100000
   model_name: "xgb_model.json"
   baseline_model_name: "xgb_baseline.json"
+
+neural:
+  try_loss_variants: true
+  max_training_minutes: 3.0 # Cap total extra training time for bounded MLP/CNN loss & LR trials
+  label_smoothing: 0.05
+  focal_gamma: 2.0
+  improvement_tolerance: 0.002 # Keep variant only if Val Macro-F1 beats baseline by > tolerance
+  epochs_cap: 15
 
 ensemble:
   strategy: "hybrid_anomaly_override" # best_single, soft_voting, confidence_weighted, val_weighted_voting, stacking, hybrid_anomaly_override

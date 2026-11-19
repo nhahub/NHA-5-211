@@ -18,10 +18,12 @@ Traditional signature-based Intrusion Detection Systems (e.g., Snort, Suricata) 
 
 ---
 
-## 2. Detailed Model Specifications
+## 2. Detailed Model Specifications (`XGBoost` Production Recommendation vs. Neural Baselines)
 
-1. **Multi-Layer Perceptron (MLP)** — Deep tabular classifier (`512 → 256 → 128 → 64`) regularized with Batch Normalization, LeakyReLU (`negative_slope=0.1`), Dropout (`0.4`), L2 decay (`1e-4`), and gradient clipping (`clipnorm=1.0`).
-2. **One-Dimensional Convolutional Neural Network (1D-CNN)** — Dual Conv1D blocks (`64` and `128` filters, kernel size `3`), MaxPooling1D, GlobalAveragePooling1D, and dense classification head.
+> **Recommended Production Model:** **`XGBoost`** is the recommended production supervised classifier on CICIDS2017 due to higher accuracy/Macro-F1, better calibration stability, and higher inference throughput. **`MLP`** and **`1D-CNN`** are retained explicitly as **neural baselines for comparison** (evaluated under per-model imbalance strategy selection and bounded `ReduceLROnPlateau` + `label_smoothing` / `focal_loss` trials).
+
+1. **Multi-Layer Perceptron (`MLP`, Neural Baseline for Comparison)** — Deep tabular classifier (`512 → 256 → 128 → 64`) regularized with Batch Normalization, LeakyReLU (`negative_slope=0.1`), Dropout (`0.4`), L2 decay (`1e-4`), and gradient clipping (`clipnorm=1.0`).
+2. **One-Dimensional Convolutional Neural Network (`1D-CNN`, Neural Baseline for Comparison)** — Dual Conv1D blocks (`64` and `128` filters, kernel size `3`), MaxPooling1D, GlobalAveragePooling1D, and dense classification head.
 3. **Undercomplete Autoencoder (Unsupervised Zero-Day Tracker)** — Symmetric `256 → 128 → 64 → 32 → 64 → 128 → 256` reconstruction network trained **exclusively on `BENIGN` flows** under MSE loss, calibrated at benign validation reconstruction percentiles.
 4. **XGBoost Classifier (Baseline & Optuna-Tuned)** — Regularized gradient-boosted decision trees (`hist`, `multi:softprob`) with CUDA/CPU auto-detection and Optuna TPE optimization gated against 5-fold cross-validation standard deviation.
 

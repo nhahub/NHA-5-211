@@ -145,6 +145,7 @@ class ModelRegistry:
                 import tensorflow as tf
 
                 import src.models.autoencoder  # noqa: F401 - register custom VAESampling layer
+                import src.models.losses  # noqa: F401 - register custom sparse losses
 
                 for name, path in {**keras_targets, **optional_keras_targets}.items():
                     is_optional = name in optional_keras_targets

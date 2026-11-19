@@ -6,12 +6,16 @@ import keras
 from keras import layers, regularizers
 
 from src.config import CNNConfig
+from src.models.losses import resolve_sparse_classification_loss
 
 
 def build_cnn1d(
     input_dim: int,
     num_classes: int,
     cfg: CNNConfig | None = None,
+    loss_type: str = "cross_entropy",
+    label_smoothing: float = 0.05,
+    focal_gamma: float = 2.0,
 ) -> keras.Model:
     """Build the two-block Functional API 1D-CNN described in Chapter 4.2.
 
@@ -83,7 +87,12 @@ def build_cnn1d(
     optimizer = keras.optimizers.Adam(learning_rate=conf.learning_rate, clipnorm=conf.clipnorm)
     model.compile(
         optimizer=optimizer,
-        loss="sparse_categorical_crossentropy",
+        loss=resolve_sparse_classification_loss(
+            loss_type=loss_type,
+            num_classes=num_classes,
+            label_smoothing=label_smoothing,
+            focal_gamma=focal_gamma,
+        ),
         metrics=["accuracy"],
     )
     return model

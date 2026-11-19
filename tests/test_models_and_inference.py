@@ -1386,3 +1386,160 @@ def test_deep_ae_vae_and_leave_attack_out_score_fusion(tmp_app_config: AppConfig
     md = cmp_path.read_text(encoding="utf-8")
     assert "supplementary zero-day signals" in md
     assert "Anomaly Validation Selection Summary (Non-Test Leave-Attack-Out)" in md
+
+
+def test_optuna_budget_and_bounded_neural_loss_keep_revert(
+    tmp_app_config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Optuna defaults to 40 trials with timeout_minutes; bounded neural trials keep only if > tolerance."""
+    import time as time_mod
+
+    from src.training.callbacks import safe_save_keras_model
+    from src.training.trainer import _run_bounded_neural_loss_experiment
+
+    default_mcfg = ModelConfig()
+    assert default_mcfg.optuna.n_trials == 40
+    assert default_mcfg.optuna.timeout_minutes == pytest.approx(6.0)
+    assert default_mcfg.optuna.timeout_seconds == 360
+
+    coerced_mcfg = ModelConfig(optuna={"n_trials": 25, "timeout_minutes": 2.5})
+    assert coerced_mcfg.xgboost.optuna.n_trials == 25
+    assert coerced_mcfg.xgboost.optuna.timeout_seconds == 150
+
+    rng = np.random.default_rng(19)
+    X_tr = rng.normal(size=(120, 6)).astype(np.float32)
+    y_tr = np.array([0] * 60 + [1] * 30 + [2] * 30, dtype=np.int64)
+    X_tr[y_tr == 1] += 2.0
+    X_tr[y_tr == 2] -= 2.0
+    X_va = rng.normal(size=(60, 6)).astype(np.float32)
+    y_va = np.array([0] * 30 + [1] * 15 + [2] * 15, dtype=np.int64)
+    X_va[y_va == 1] += 2.0
+    X_va[y_va == 2] -= 2.0
+
+    m_cfg = ModelConfig()
+    m_cfg.mlp.hidden_units = [16, 8]
+    m_cfg.mlp.epochs = 2
+    m_cfg.mlp.batch_size = 32
+    m_cfg.neural.epochs_cap = 2
+    m_cfg.neural.improvement_tolerance = 0.01
+
+    models_dir = tmp_app_config.paths.resolve("models_dir")
+    mlp_ckpt = models_dir / "best_mlp.keras"
+
+    # Build + save custom focal-loss MLP directly and verify reload succeeds
+    focal_mlp = build_mlp(6, 3, cfg=m_cfg.mlp, loss_type="focal_loss", focal_gamma=2.0)
+    focal_mlp.fit(X_tr, y_tr, epochs=1, batch_size=32, verbose=0)
+    safe_save_keras_model(focal_mlp, mlp_ckpt)
+    reloaded = ModelRegistry(models_dir=models_dir).load_all(load_keras=True)
+    assert "MLP" in reloaded.models
+
+    # Verify KEEP path vs REVERT path via deterministic _eval_val_scores scoring
+    base_mlp = build_mlp(6, 3, cfg=m_cfg.mlp, loss_type="cross_entropy")
+    base_mlp.fit(X_tr, y_tr, epochs=1, batch_size=32, verbose=0)
+    safe_save_keras_model(base_mlp, mlp_ckpt)
+
+    import src.training.trainer as trainer_mod
+
+    scores_seq = [
+        {"val_macro_f1": 0.70, "val_weighted_f1": 0.96, "val_macro_recall": 0.70, "val_mlogloss": 0.25},
+        {
+            "val_macro_f1": 0.705,
+            "val_weighted_f1": 0.96,
+            "val_macro_recall": 0.70,
+            "val_mlogloss": 0.24,
+        },  # < +0.01 tol
+        {"val_macro_f1": 0.69, "val_weighted_f1": 0.95, "val_macro_recall": 0.69, "val_mlogloss": 0.28},
+    ]
+    it_rev = iter(scores_seq)
+    monkeypatch.setattr(trainer_mod, "_eval_val_scores", lambda *a, **kw: next(it_rev))
+    kept_model_rev, _, loss_rev, rep_rev = _run_bounded_neural_loss_experiment(
+        model_name="MLP",
+        base_model=base_mlp,
+        base_history={"loss": [0.5], "val_loss": [0.4]},
+        ckpt_path=mlp_ckpt,
+        X_fit=X_tr,
+        y_fit=y_tr,
+        X_val=X_va,
+        y_val=y_va,
+        num_features=6,
+        num_classes=3,
+        class_weight=None,
+        base_epochs=2,
+        model_cfg=m_cfg,
+        deadline_perf=time_mod.perf_counter() + 60.0,
+        seed=42,
+    )
+    assert loss_rev == "cross_entropy"
+    assert kept_model_rev is base_mlp
+    assert "Reverted" in rep_rev["decision"]
+
+    scores_keep = [
+        {"val_macro_f1": 0.70, "val_weighted_f1": 0.96, "val_macro_recall": 0.70, "val_mlogloss": 0.25},
+        {
+            "val_macro_f1": 0.75,
+            "val_weighted_f1": 0.97,
+            "val_macro_recall": 0.76,
+            "val_mlogloss": 0.18,
+        },  # beats +0.01
+        {"val_macro_f1": 0.72, "val_weighted_f1": 0.96, "val_macro_recall": 0.72, "val_mlogloss": 0.22},
+    ]
+    it_keep = iter(scores_keep)
+    monkeypatch.setattr(trainer_mod, "_eval_val_scores", lambda *a, **kw: next(it_keep))
+    kept_model_win, _, loss_win, rep_win = _run_bounded_neural_loss_experiment(
+        model_name="MLP",
+        base_model=base_mlp,
+        base_history={"loss": [0.5], "val_loss": [0.4]},
+        ckpt_path=mlp_ckpt,
+        X_fit=X_tr,
+        y_fit=y_tr,
+        X_val=X_va,
+        y_val=y_va,
+        num_features=6,
+        num_classes=3,
+        class_weight=None,
+        base_epochs=2,
+        model_cfg=m_cfg,
+        deadline_perf=time_mod.perf_counter() + 60.0,
+        seed=42,
+    )
+    assert loss_win == "label_smoothing"
+    assert kept_model_win is not base_mlp
+    assert "Kept" in rep_win["decision"]
+
+    # Expired budget skips candidate runs cleanly without crashing
+    monkeypatch.undo()
+    _, _, loss_skip, rep_skip = _run_bounded_neural_loss_experiment(
+        model_name="MLP",
+        base_model=base_mlp,
+        base_history={"loss": [0.5], "val_loss": [0.4]},
+        ckpt_path=mlp_ckpt,
+        X_fit=X_tr,
+        y_fit=y_tr,
+        X_val=X_va,
+        y_val=y_va,
+        num_features=6,
+        num_classes=3,
+        class_weight=None,
+        base_epochs=2,
+        model_cfg=m_cfg,
+        deadline_perf=time_mod.perf_counter() - 1.0,
+        seed=42,
+    )
+    assert loss_skip == "cross_entropy"
+    assert all(c["status"] == "skipped_time_budget" for c in rep_skip["candidates"][1:])
+
+    reports_dir = tmp_app_config.paths.resolve("reports_dir")
+    cmp_df = pd.DataFrame([{"Model": "XGBoost", "Accuracy": 0.99, "F1_Weighted": 0.99, "F1_Macro": 0.95}])
+    cmp_path, _ = write_academic_reports(
+        {
+            "dataset_source": {"is_synthetic": False},
+            "split_strategy": "random",
+            "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+            "training_diagnostics": {"neural_loss_experiments": {"MLP": rep_rev}},
+        },
+        cmp_df,
+        reports_dir,
+    )
+    md_text = cmp_path.read_text(encoding="utf-8")
+    assert "Neural Baselines vs. Recommended Production Model" in md_text
+    assert "Bounded Neural Improvement Trials" in md_text

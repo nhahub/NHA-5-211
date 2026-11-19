@@ -354,13 +354,33 @@ class AnomalyBaselinesConfig(BaseModel):
     baselines_file: str = "anomaly_baselines.pkl"
 
 
+class NeuralExperimentConfig(BaseModel):
+    """Bounded neural-baseline improvement experiments (loss variants & extra time cap)."""
+
+    try_loss_variants: bool = True
+    max_training_minutes: float = Field(default=3.0, gt=0.0)
+    label_smoothing: float = Field(default=0.05, ge=0.0, lt=0.5)
+    focal_gamma: float = Field(default=2.0, gt=0.0)
+    improvement_tolerance: float = Field(default=0.002, ge=0.0)
+    epochs_cap: int = Field(default=15, ge=1)
+
+
 class XGBoostOptunaConfig(BaseModel):
     """Optuna tuning configuration for XGBoost."""
 
     enabled: bool = True
-    n_trials: int = 12
-    timeout_seconds: int = 180
+    n_trials: int = Field(default=40, ge=0)
+    timeout_minutes: float | None = Field(default=6.0, gt=0.0)
+    timeout_seconds: int = Field(default=360, ge=1)
     sample_cap_for_tuning: int = 100000
+
+    @model_validator(mode="after")
+    def _sync_optuna_timeout(self) -> XGBoostOptunaConfig:
+        if "timeout_seconds" in self.model_fields_set and "timeout_minutes" not in self.model_fields_set:
+            self.timeout_minutes = round(float(self.timeout_seconds) / 60.0, 4)
+        elif self.timeout_minutes is not None:
+            self.timeout_seconds = max(1, int(round(float(self.timeout_minutes) * 60.0)))
+        return self
 
 
 class XGBoostConfig(BaseModel):
@@ -391,10 +411,28 @@ class ModelConfig(BaseModel):
     hardware: HardwareConfig = Field(default_factory=HardwareConfig)
     mlp: MLPConfig = Field(default_factory=MLPConfig)
     cnn: CNNConfig = Field(default_factory=CNNConfig)
+    neural: NeuralExperimentConfig = Field(default_factory=NeuralExperimentConfig)
     autoencoder: AutoencoderConfig = Field(default_factory=AutoencoderConfig)
     xgboost: XGBoostConfig = Field(default_factory=XGBoostConfig)
     ensemble: EnsembleConfig = Field(default_factory=EnsembleConfig)
     anomaly_baselines: AnomalyBaselinesConfig = Field(default_factory=AnomalyBaselinesConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _merge_top_level_optuna(cls, data: Any) -> Any:
+        if isinstance(data, dict) and isinstance(data.get("optuna"), dict):
+            copied = dict(data)
+            top_opt = dict(copied.pop("optuna"))
+            xgb_raw = dict(copied.get("xgboost") or {})
+            merged_opt = {**dict(xgb_raw.get("optuna") or {}), **top_opt}
+            xgb_raw["optuna"] = merged_opt
+            copied["xgboost"] = xgb_raw
+            return copied
+        return data
+
+    @property
+    def optuna(self) -> XGBoostOptunaConfig:
+        return self.xgboost.optuna
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:

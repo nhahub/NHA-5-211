@@ -40,6 +40,7 @@ from src.training.callbacks import build_keras_callbacks, safe_save_keras_model
 from src.training.optimization import (
     ImbalanceExperimentResult,
     XGBoostOptimizationResult,
+    _eval_val_scores,
     compare_imbalance_per_model,
     compare_smote_vs_class_weight,
     optimize_xgboost_with_optuna,
@@ -71,6 +72,7 @@ class TrainingOutputs:
     best_supervised_model: str = "XGBoost"
     imbalance_strategies_by_model: dict[str, str] = field(default_factory=dict)
     anomaly_fusion: AnomalyFusionDetector | None = None
+    neural_loss_experiments: dict[str, Any] = field(default_factory=dict)
 
 
 def _extract_history_dict(history_obj: Any) -> dict[str, list[float]]:
@@ -136,6 +138,163 @@ def _fit_benign_reconstruction_variant(
         thresh,
     )
     return model, hist, dur, thresh, stats
+
+
+def _run_bounded_neural_loss_experiment(
+    model_name: str,
+    base_model: Any,
+    base_history: dict[str, list[float]],
+    ckpt_path: Path,
+    X_fit: np.ndarray,
+    y_fit: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    num_features: int,
+    num_classes: int,
+    class_weight: dict[int, float] | None,
+    base_epochs: int,
+    model_cfg: ModelConfig,
+    deadline_perf: float,
+    seed: int,
+) -> tuple[Any, dict[str, list[float]], str, dict[str, Any]]:
+    """Test bounded label smoothing & focal loss variants; keep ONLY if val Macro-F1 beats baseline + tol."""
+    import keras
+
+    is_cnn = model_name == "CNN"
+    batch_size = model_cfg.cnn.batch_size if is_cnn else model_cfg.mlp.batch_size
+    sub_cfg = model_cfg.cnn if is_cnn else model_cfg.mlp
+    tol = float(model_cfg.neural.improvement_tolerance)
+
+    base_probs = base_model.predict(X_val, batch_size=max(256, int(batch_size)), verbose=0)
+    base_metrics = _eval_val_scores(y_val, base_probs, num_classes)
+    base_f1 = float(base_metrics["val_macro_f1"])
+
+    candidates: list[dict[str, Any]] = [
+        {
+            "loss_variant": "cross_entropy (baseline)",
+            "status": "baseline",
+            **base_metrics,
+            "delta_val_macro_f1": 0.0,
+            "elapsed_sec": 0.0,
+        }
+    ]
+    best_model = base_model
+    best_hist = base_history
+    best_loss_name = "cross_entropy"
+    best_f1 = base_f1
+
+    class _TimeCapCallback(keras.callbacks.Callback):
+        def __init__(self, deadline: float) -> None:
+            super().__init__()
+            self.deadline = deadline
+
+        def on_epoch_end(self, epoch: int, logs: dict[str, Any] | None = None) -> None:
+            if time.perf_counter() >= self.deadline:
+                self.model.stop_training = True
+
+    trial_epochs = max(1, min(int(base_epochs), int(model_cfg.neural.epochs_cap)))
+    for loss_variant in ("label_smoothing", "focal_loss"):
+        if time.perf_counter() >= deadline_perf:
+            candidates.append(
+                {
+                    "loss_variant": loss_variant,
+                    "status": "skipped_time_budget",
+                    "val_macro_f1": None,
+                    "delta_val_macro_f1": None,
+                    "elapsed_sec": 0.0,
+                }
+            )
+            continue
+
+        set_global_seed(seed)
+        cand_model = (
+            build_cnn1d(
+                num_features,
+                num_classes,
+                cfg=model_cfg.cnn,
+                loss_type=loss_variant,
+                label_smoothing=model_cfg.neural.label_smoothing,
+                focal_gamma=model_cfg.neural.focal_gamma,
+            )
+            if is_cnn
+            else build_mlp(
+                num_features,
+                num_classes,
+                cfg=model_cfg.mlp,
+                loss_type=loss_variant,
+                label_smoothing=model_cfg.neural.label_smoothing,
+                focal_gamma=model_cfg.neural.focal_gamma,
+            )
+        )
+        cbs = [
+            *build_keras_callbacks(
+                checkpoint_path=None,
+                early_stopping_patience=sub_cfg.early_stopping_patience,
+                reduce_lr_patience=sub_cfg.reduce_lr_patience,
+                reduce_lr_factor=sub_cfg.reduce_lr_factor,
+                min_lr=sub_cfg.min_lr,
+            ),
+            _TimeCapCallback(deadline_perf),
+        ]
+        t0 = time.perf_counter()
+        cand_hist_obj = cand_model.fit(
+            X_fit,
+            y_fit,
+            validation_data=(X_val, y_val),
+            epochs=trial_epochs,
+            batch_size=batch_size,
+            callbacks=cbs,
+            class_weight=class_weight,
+            verbose=0,
+        )
+        elapsed = float(time.perf_counter() - t0)
+        cand_probs = cand_model.predict(X_val, batch_size=max(256, int(batch_size)), verbose=0)
+        cand_metrics = _eval_val_scores(y_val, cand_probs, num_classes)
+        cand_f1 = float(cand_metrics["val_macro_f1"])
+        delta = cand_f1 - base_f1
+        beats_tol = cand_f1 > (base_f1 + tol) and cand_f1 > best_f1
+
+        candidates.append(
+            {
+                "loss_variant": loss_variant,
+                "status": "kept" if beats_tol else "reverted",
+                **cand_metrics,
+                "delta_val_macro_f1": round(delta, 6),
+                "elapsed_sec": round(elapsed, 2),
+            }
+        )
+        if beats_tol:
+            best_model = cand_model
+            best_hist = _extract_history_dict(cand_hist_obj)
+            best_loss_name = loss_variant
+            best_f1 = cand_f1
+
+    if best_loss_name != "cross_entropy":
+        safe_save_keras_model(best_model, ckpt_path)
+        decision = (
+            f"Kept '{best_loss_name}' for {model_name} (val Macro-F1={best_f1:.4f} vs baseline "
+            f"{base_f1:.4f}, delta={best_f1 - base_f1:+.4f} > tolerance={tol:.4f})."
+        )
+    else:
+        decision = (
+            f"Reverted to baseline 'cross_entropy' for {model_name} (baseline val Macro-F1={base_f1:.4f}; "
+            f"no variant exceeded +{tol:.4f} tolerance within bounded neural budget)."
+        )
+    logger.info("Neural loss experiment [%s]: %s", model_name, decision)
+    return (
+        best_model,
+        best_hist,
+        best_loss_name,
+        {
+            "model": model_name,
+            "kept_variant": best_loss_name,
+            "baseline_val_macro_f1": round(base_f1, 6),
+            "kept_val_macro_f1": round(best_f1, 6),
+            "improvement_tolerance": tol,
+            "decision": decision,
+            "candidates": candidates,
+        },
+    )
 
 
 def train_all_models(
@@ -326,6 +485,55 @@ def train_all_models(
     histories["CNN"] = _extract_history_dict(cnn_hist)
     overfit_stats["CNN"] = _compute_overfitting_gap(histories["CNN"])
     logger.info("1D-CNN finished in %.2fs | %s", durations["CNN"], overfit_stats["CNN"])
+
+    neural_loss_experiments: dict[str, Any] = {}
+    neural_losses_selected: dict[str, str] = {"MLP": "cross_entropy", "CNN": "cross_entropy"}
+    if model_cfg.neural.try_loss_variants and len(X_mlp_train) >= 10:
+        neural_deadline = time.perf_counter() + float(model_cfg.neural.max_training_minutes) * 60.0
+        mlp, histories["MLP"], mlp_loss_name, mlp_loss_report = _run_bounded_neural_loss_experiment(
+            model_name="MLP",
+            base_model=mlp,
+            base_history=histories["MLP"],
+            ckpt_path=mlp_ckpt,
+            X_fit=X_mlp_train,
+            y_fit=y_mlp_train,
+            X_val=dataset.X_val_scaled,
+            y_val=dataset.y_val,
+            num_features=num_features,
+            num_classes=num_classes,
+            class_weight=mlp_class_weight,
+            base_epochs=mlp_epochs,
+            model_cfg=model_cfg,
+            deadline_perf=neural_deadline,
+            seed=seed,
+        )
+        trained_models["MLP"] = mlp
+        overfit_stats["MLP"] = _compute_overfitting_gap(histories["MLP"])
+        neural_losses_selected["MLP"] = mlp_loss_name
+        neural_loss_experiments["MLP"] = mlp_loss_report
+
+        cnn, histories["CNN"], cnn_loss_name, cnn_loss_report = _run_bounded_neural_loss_experiment(
+            model_name="CNN",
+            base_model=cnn,
+            base_history=histories["CNN"],
+            ckpt_path=cnn_ckpt,
+            X_fit=X_train_cnn,
+            y_fit=y_cnn_train,
+            X_val=X_val_cnn,
+            y_val=dataset.y_val,
+            num_features=num_features,
+            num_classes=num_classes,
+            class_weight=cnn_class_weight,
+            base_epochs=cnn_epochs,
+            model_cfg=model_cfg,
+            deadline_perf=neural_deadline,
+            seed=seed,
+        )
+        trained_models["CNN"] = cnn
+        overfit_stats["CNN"] = _compute_overfitting_gap(histories["CNN"])
+        neural_losses_selected["CNN"] = cnn_loss_name
+        neural_loss_experiments["CNN"] = cnn_loss_report
+        set_global_seed(seed)
 
     # 4. Train Unsupervised Autoencoder STRICTLY on BENIGN samples
     X_benign_train, benign_idx, benign_label = extract_benign_subset(
@@ -595,10 +803,12 @@ def train_all_models(
     model_metadata: dict[str, dict[str, Any]] = {
         "MLP": {
             "imbalance_strategy": selected_strategies["MLP"],
+            "loss_function": neural_losses_selected["MLP"],
             "train_samples": int(len(X_mlp_train)),
         },
         "CNN": {
             "imbalance_strategy": selected_strategies["CNN"],
+            "loss_function": neural_losses_selected["CNN"],
             "train_samples": int(len(X_cnn_train)),
         },
         "XGBoost": {
@@ -617,6 +827,7 @@ def train_all_models(
                 "overfitting_analysis": overfit_stats,
                 "imbalance_experiment": imb_result.to_dict(),
                 "imbalance_strategies_by_model": selected_strategies,
+                "neural_loss_experiments": neural_loss_experiments,
                 "model_metadata": model_metadata,
                 "xgboost_optimization": xgb_opt.to_summary_dict(),
                 "calibration_report": calibration_report,
@@ -655,4 +866,5 @@ def train_all_models(
         best_supervised_model=best_sup_model,
         imbalance_strategies_by_model=selected_strategies,
         anomaly_fusion=anomaly_fusion,
+        neural_loss_experiments=neural_loss_experiments,
     )

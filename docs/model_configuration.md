@@ -27,27 +27,28 @@ All system parameters are centralized in two Pydantic-validated YAML files:
 
 ## 2. Model Configuration (`configs/model_config.yaml`)
 
-### A. Multi-Layer Perceptron (`mlp`)
+### A. Multi-Layer Perceptron (`mlp` — Neural Baseline for Comparison)
 - `hidden_units: [512, 256, 128, 64]`
 - `l2_reg: 0.0001`, `leaky_relu_slope: 0.1`, `dropout_rate: 0.4`
 - `learning_rate: 0.001`, `clipnorm: 1.0`, `batch_size: 512`, `epochs: 50`
-- Callbacks: `EarlyStopping(patience=8)`, `ReduceLROnPlateau(patience=4, factor=0.5, min_lr=1e-6)`
+- Callbacks & Bounded Trials (`neural:`): `EarlyStopping(patience=8)`, `ReduceLROnPlateau(patience=4, factor=0.5, min_lr=1e-6)`; bounded `label_smoothing` / `focal_loss` trials capped by `neural.max_training_minutes: 3.0` and kept only when validation Macro-F1 beats baseline by `> 0.002`.
 
-### B. One-Dimensional CNN (`cnn`)
+### B. One-Dimensional CNN (`cnn` — Neural Baseline for Comparison)
 - Block 1: `block1_filters: 64`, `kernel_size: 3`, `pool_size: 2`, `dropout_block1: 0.3`
 - Block 2: `block2_filters: 128`, `GlobalAveragePooling1D`, `dropout_block2: 0.4`
 - Classification Head: `dense_units: 128`, `dropout_head: 0.3`
-- Optimizer & Callbacks: identical to MLP (`Adam(lr=1e-3, clipnorm=1.0)`, `patience=8`)
+- Optimizer & Callbacks: identical to MLP (`Adam(lr=1e-3, clipnorm=1.0)`, `patience=8`), plus the same bounded `neural:` keep/revert gate.
 
 ### C. Undercomplete Autoencoder (`autoencoder`)
 - `encoder_units: [256, 128, 64]`, `latent_dim: 32`, `decoder_units: [64, 128, 256]`
 - Linear output reconstruction (`mse` loss), `learning_rate: 0.0005`
 - `threshold_percentile: 95.0` calibrated strictly on `X_benign_val`
 - Callbacks: `EarlyStopping(patience=10)`, `ReduceLROnPlateau(patience=5, factor=0.5, min_lr=1e-6)`
+- Phase 5 benign-only extensions (`try_variants: true`, `fusion_enabled: true`): Deeper L2/Dropout denoising Autoencoder (`best_autoencoder_deep.keras`), VAE (`best_vae.keras`), and leave-attack-out non-test score-level fusion (`AE + OCSVM + IF`).
 
-### D. XGBoost & Optuna HPO (`xgboost`)
+### D. XGBoost & Optuna HPO (`xgboost` — Recommended Production Model)
 - Report Baseline: `n_estimators=300`, `max_depth=6`, `learning_rate=0.1`, `subsample=0.8`, `colsample_bytree=0.8`, `min_child_weight=5`, `gamma=0.1`, `reg_alpha=0.01`, `reg_lambda=1.0`, `tree_method="hist"`, `early_stopping_rounds=20`
-- Optuna Search: `n_trials=12`, `timeout_seconds=180`, TPE sampler minimizing validation `mlogloss`; `tuned` is selected only when validation Macro-F1 beats baseline by more than the 5-fold CV standard deviation (`> cv_macro_f1_std`), otherwise retaining `baseline`.
+- Optuna Search: `n_trials=40`, `timeout_minutes=6.0` (`timeout_seconds=360`), TPE sampler minimizing validation `mlogloss`; `tuned` is selected only when validation Macro-F1 beats baseline by more than the 5-fold CV standard deviation (`> cv_macro_f1_std`), otherwise retaining `baseline`.
 
 ### E. Multi-Model Decision & Anomaly Integration (`ensemble`)
 - `strategy: "hybrid_anomaly_override"` (supports `best_single`, `soft_voting`, `confidence_weighted`, `val_weighted_voting`, `stacking`, `hybrid_anomaly_override`)
