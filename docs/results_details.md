@@ -85,3 +85,24 @@ This document preserves the complete experimental breakdown referenced from [`RE
 - **Leave-One-Attack-Out (`Web Attack` withheld from training, `26` test attack vs `23,112` benign):** Supervised closed-set recall on withheld `Web Attack` was `0.0`, while benign-only `Autoencoder` (`threshold = 0.0744` at P95) achieved `0.0` unseen recall (`ROC-AUC = 0.5626`, `FPR = 0.0498`), illustrating that stealthy web-attack flows mimic benign HTTP statistics.
 - **Sample-Size Sensitivity (`200k` vs. `500k`):** Scaling `XGBoost` (`none`) from `200,000` requested rows (`191,268` deduplicated, `28,324` test) to `500,000` (`470,048` deduplicated, `69,026` test) shifted `F1_Macro` from `0.9603` (`[0.9013, 0.9849]`) to `0.9894` (`[0.9837, 0.9943]`, `+0.0291` delta, overlapping 95% CIs, `conclusions_change = False`).
 - **ONNX Export & Inference Latency Path:** `onnx` and `tf2onnx` are omitted from `requirements.txt` to avoid resolver conflicts on Python `3.13` + TensorFlow `2.21.0` + NumPy `2.x`; single-flow latency uses warmed `tf.function` graphs (Keras) and `booster.inplace_predict(...)` (XGBoost). See [`docs/project_details.md`](project_details.md#4-onnx-export-feasibility-notes).
+
+---
+
+## Using a Larger Sample
+
+The committed production weights in [`models/`](../models/) were trained at the default stratified budget (`data.sample_size: 200000`, `data.use_full_dataset: false`) and have **not** been retrained here. In the evaluation sensitivity protocol (fit in-memory on `XGBoost`), increasing the stratified sample from `200,000` (`191,268` clean flows) to `500,000` (`470,048` clean flows) yielded XGBoost Macro-F1 `0.9894 [0.9837, 0.9943]` vs `0.9603 [0.9013, 0.9849]` at `200k` (`F1_Macro_Reliable` `0.9875` vs `0.9972`), with overlapping 95% bootstrap CIs (`conclusions_change = False`).
+
+### How to Retrain at `500k` or Full Dataset
+
+1. **500k Stratified Sample (CLI override without editing YAML):**
+   Keep `data.use_full_dataset: false` in [`configs/config.yaml`](../configs/config.yaml) and pass `--max-rows 500000`, or set `data.sample_size: 500000` in [`configs/config.yaml`](../configs/config.yaml):
+   ```powershell
+   .venv\Scripts\python.exe scripts/train.py --max-rows 500000 --run-eval
+   ```
+2. **Full `2,830,743`-Row Corpus (No Downsampling):**
+   Set `data.use_full_dataset: true` in [`configs/config.yaml`](../configs/config.yaml) (which overrides `data.sample_size`) and run:
+   ```powershell
+   .venv\Scripts\python.exe scripts/train.py --run-eval
+   ```
+
+> **Expected Training-Time Warning:** At `200,000` requested rows, single baseline training runs measured in [`reports/model_comparison.csv`](../reports/model_comparison.csv) already required **`859.55s` (`14.3 min`)** for `1D-CNN` on CPU TensorFlow, **`320.33s` (`5.3 min`)** for `XGBoost`, `68.80s` for `Autoencoder`, `57.84s` for `MLP`, `53.46s` for `Autoencoder (Deep Reg)`, and `33.46s` for `VAE` — in addition to per-model imbalance screening, bounded loss trials, 40 Optuna trials, 5-fold stratified CV, and secondary protocol runs. Increasing the sample `2.5x` (`500k`) or `~14x` (full `2.83M` rows) scales CPU TensorFlow, CV, and neighbor-based anomaly detectors substantially; budget **1+ hour** at `500k` and **multiple hours / high RAM** for a full `2.83M`-row run on Windows CPU TensorFlow.
