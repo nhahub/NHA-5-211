@@ -348,9 +348,13 @@ def test_latency_warmup_config_and_test_report_generator_parser() -> None:
 
     stub_pytest = "\n".join(
         [
-            "tests/test_a.py::test_one PASSED                                        [ 50%]",
-            "tests/test_b.py::test_two SKIPPED (LFS pointer stubs)                   [100%]",
-            "====================== 1 passed, 1 skipped in 0.95s ======================",
+            "tests/test_a.py::test_one PASSED                                        [ 33%]",
+            "tests/test_b.py::test_two SKIPPED (LFS pointer stubs)                   [ 66%]",
+            "tests/test_c.py::test_three SKIPPEDlfs_pointers=['xgb_model.json']       [100%]",
+            "0.05s call     tests/test_a.py::test_one",
+            "0.01s call     tests/test_b.py::test_two",
+            "0.01s call     tests/test_c.py::test_three",
+            "====================== 1 passed, 2 skipped in 136.56s (0:02:16) ======================",
         ]
     )
     md = render_test_report(
@@ -360,7 +364,7 @@ def test_latency_warmup_config_and_test_report_generator_parser() -> None:
         ruff_format=CommandRun(["ruff"], "ruff format --check", 0, "63 files already formatted", "", 0.1),
         pytest_run=CommandRun(["pytest"], "pytest tests/ -v", 0, sample_pytest, "", 1.5),
         stub_pytest_run=CommandRun(
-            ["pytest"], "pytest tests/ -v (stub-mode simulation)", 0, stub_pytest, "", 1.0
+            ["pytest"], "pytest tests/ -v (stub-mode simulation)", 0, stub_pytest, "", 136.56
         ),
         stub_files_count=14,
         generated_utc="2026-11-18 21:00 UTC",
@@ -368,8 +372,8 @@ def test_latency_warmup_config_and_test_report_generator_parser() -> None:
     assert "tests/test_a.py" in md and "1.25" in md and "1.35" in md
     assert "2 passed, 1 warning" in md
     assert "LFS Pointer Stubs (`lfs: false` mirror, 14 stubs)" in md
-    assert "1 passed / 0 failed / 0 error / 1 skipped" in md
-    assert "`tests/test_b.py::test_two`" in md
+    assert "1 passed / 0 failed / 0 error / 2 skipped" in md
+    assert "`tests/test_b.py::test_two`, `tests/test_c.py::test_three`" in md
 
 
 def test_manifest_sha256_match_mismatch_missing_and_lfs_skip(tmp_path: Path, monkeypatch) -> None:

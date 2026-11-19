@@ -24,7 +24,7 @@ _LFS_POINTER_SUFFIXES = {".keras", ".pkl", ".h5", ".onnx", ".npz", ".parquet"}
 _LFS_POINTER_EXACT = {"models/xgb_model.json"}
 
 _TEST_CASE_RE = re.compile(
-    r"^(tests/[^:\s]+)::([^\s]+)\s+(PASSED|FAILED|ERROR|SKIPPED|XFAILED|XPASSED)\b",
+    r"^(tests/[^:\s]+)::([^\s]+)\s+(PASSED|FAILED|ERROR|SKIPPED|XFAILED|XPASSED)(?=\s|$|\(|[A-Za-z_])",
     re.MULTILINE,
 )
 _DURATION_RE = re.compile(
@@ -32,7 +32,7 @@ _DURATION_RE = re.compile(
     re.MULTILINE,
 )
 _PYTEST_SUMMARY_RE = re.compile(
-    r"=+\s+([0-9]+[^\n=]*?)\s+in\s+([0-9]+\.[0-9]+)s\s*=+\s*$",
+    r"=+\s+([0-9]+[^\n=]*?)\s+in\s+([0-9]+\.[0-9]+)s(?:\s+\([^)]*\))?\s*=+\s*$",
     re.MULTILINE,
 )
 
@@ -73,10 +73,11 @@ def _run_tool(
     env: dict[str, str] | None = None,
 ) -> CommandRun:
     t0 = time.perf_counter()
+    proc_env = {**(env or os.environ), "COLUMNS": "240"}
     proc = subprocess.run(
         cmd,
         cwd=str(cwd),
-        env=env,
+        env=proc_env,
         capture_output=True,
         text=True,
         encoding="utf-8",
