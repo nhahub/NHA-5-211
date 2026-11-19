@@ -4,13 +4,72 @@ from __future__ import annotations
 
 from functools import lru_cache
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+_MACHINE_PATH_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/][^\s\"',;)\]}]+|/(?:home|Users)/[^\s\"',;)\]}]+)"
+)
+_WINDOWS_ABS_RE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def to_repo_relative_path(path: Path | str | None, root: Path = PROJECT_ROOT) -> str | None:
+    """Convert an absolute filesystem path into a repo-relative POSIX path or basename."""
+    if path is None:
+        return None
+    text = str(path).strip()
+    if not text:
+        return None
+
+    root_posix = root.resolve().as_posix().rstrip("/")
+    norm_text = text.replace("\\", "/")
+    if norm_text.lower() == root_posix.lower():
+        return "."
+    if norm_text.lower().startswith(root_posix.lower() + "/"):
+        return norm_text[len(root_posix) + 1 :]
+
+    if _WINDOWS_ABS_RE.match(text):
+        return PureWindowsPath(text).name
+    if norm_text.startswith(("/home/", "/Users/")):
+        return PurePosixPath(norm_text).name
+
+    candidate = Path(text)
+    if candidate.is_absolute():
+        try:
+            return candidate.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            return candidate.name
+    return norm_text[2:] if norm_text.startswith("./") else norm_text
+
+
+def sanitize_machine_paths(obj: Any, root: Path = PROJECT_ROOT) -> Any:
+    """Recursively replace absolute Windows/home paths inside serialized artifacts."""
+    if isinstance(obj, Path):
+        return to_repo_relative_path(obj, root=root)
+    if isinstance(obj, str):
+        if _WINDOWS_ABS_RE.match(obj.strip()) or obj.strip().replace("\\", "/").startswith(
+            ("/home/", "/Users/")
+        ):
+            return to_repo_relative_path(obj, root=root)
+        if _MACHINE_PATH_TOKEN_RE.search(obj):
+            return _MACHINE_PATH_TOKEN_RE.sub(
+                lambda m: to_repo_relative_path(m.group(0), root=root) or m.group(0),
+                obj,
+            )
+        return obj
+    if isinstance(obj, dict):
+        return {k: sanitize_machine_paths(v, root=root) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize_machine_paths(v, root=root) for v in obj]
+    if isinstance(obj, tuple):
+        return [sanitize_machine_paths(v, root=root) for v in obj]
+    return obj
 
 
 class ProjectSettings(BaseModel):

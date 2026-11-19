@@ -15,7 +15,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
 
-from src.config import AppConfig
+from src.config import AppConfig, sanitize_machine_paths
 from src.data.cleaner import clean_cicids_dataframe
 from src.data.feature_engineering import (
     HighMissingColumnDropper,
@@ -941,6 +941,7 @@ def run_preprocessing_pipeline(
         )
         val_metadata.to_csv(proc_dir / "val_metadata.csv", index=False)
         test_metadata.to_csv(proc_dir / "test_metadata.csv", index=False)
+        audit_report = sanitize_machine_paths(audit_report)
         with (proc_dir / "preprocessing_audit.json").open("w", encoding="utf-8") as fh:
             json.dump(audit_report, fh, indent=2)
 

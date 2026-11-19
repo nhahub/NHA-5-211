@@ -17,7 +17,7 @@
     "warning_message": null,
     "timestamp_alignment": {
       "status": "directory_not_found",
-      "source_dir": "D:\\IDS_Final\\data\\TrafficLabelling",
+      "source_dir": "data/TrafficLabelling",
       "directory_exists": false,
       "csv_files_found": 0,
       "real_timestamps_available": false,
@@ -31,7 +31,7 @@
     "label_correction": {
       "status": "file_not_found",
       "applied": false,
-      "file_path": "D:\\IDS_Final\\data\\engelen2021_label_corrections.csv",
+      "file_path": "data/engelen2021_label_corrections.csv",
       "join_strategy": "none",
       "join_keys_used": [],
       "total_rows": 2830743,
@@ -63,7 +63,7 @@
       "warning_message": null,
       "timestamp_alignment": {
         "status": "directory_not_found",
-        "source_dir": "D:\\IDS_Final\\data\\TrafficLabelling",
+        "source_dir": "data/TrafficLabelling",
         "directory_exists": false,
         "csv_files_found": 0,
         "real_timestamps_available": false,
@@ -77,7 +77,7 @@
       "label_correction": {
         "status": "file_not_found",
         "applied": false,
-        "file_path": "D:\\IDS_Final\\data\\engelen2021_label_corrections.csv",
+        "file_path": "data/engelen2021_label_corrections.csv",
         "join_strategy": "none",
         "join_keys_used": [],
         "total_rows": 2830743,
@@ -91,7 +91,7 @@
     },
     "timestamp_alignment": {
       "status": "directory_not_found",
-      "source_dir": "D:\\IDS_Final\\data\\TrafficLabelling",
+      "source_dir": "data/TrafficLabelling",
       "directory_exists": false,
       "csv_files_found": 0,
       "real_timestamps_available": false,
@@ -841,6 +841,12 @@
         "PortScan",
         "SSH-Patator"
       ],
+      "unreliable_class_names": [
+        "Bot",
+        "Heartbleed",
+        "Infiltration",
+        "Web Attack"
+      ],
       "reliable_class_count": 9,
       "reliable_support_threshold": 30,
       "f1_macro_ci95": {
@@ -1526,6 +1532,12 @@
         "PortScan",
         "SSH-Patator"
       ],
+      "unreliable_class_names": [
+        "Bot",
+        "Heartbleed",
+        "Infiltration",
+        "Web Attack"
+      ],
       "reliable_class_count": 9,
       "reliable_support_threshold": 30,
       "f1_macro_ci95": {
@@ -2210,6 +2222,12 @@
         "FTP-Patator",
         "PortScan",
         "SSH-Patator"
+      ],
+      "unreliable_class_names": [
+        "Bot",
+        "Heartbleed",
+        "Infiltration",
+        "Web Attack"
       ],
       "reliable_class_count": 9,
       "reliable_support_threshold": 30,
@@ -2925,6 +2943,13 @@
     "ensemble_beats_best_single": false,
     "stacking_vs_best_single_significant": false,
     "delta_vs_best_single": 0.012284,
+    "reliable_support_threshold": 30,
+    "unreliable_class_names": [
+      "Bot",
+      "Heartbleed",
+      "Infiltration",
+      "Web Attack"
+    ],
     "val_weights": {
       "CNN": 0.3358193536468702,
       "MLP": 0.31008619842950597,
@@ -4351,8 +4376,8 @@
       },
       "fit_duration_sec": 0.4940686000009009
     },
-    "Score-Level Fusion (AE+OCSVM+IF)": {
-      "model": "Score-Level Fusion (AE+OCSVM+IF)",
+    "Score-Level Fusion (degenerate: equals Autoencoder)": {
+      "model": "Score-Level Fusion (degenerate: equals Autoencoder)",
       "framing": "Binary anomaly (Benign vs Anomalous)",
       "threshold": 0.01789733940648615,
       "accuracy": 0.893447253212823,
@@ -4547,7 +4572,9 @@
     "holdout_class": "Web Attack",
     "best_by_f1": "Autoencoder",
     "best_by_roc_auc": "Autoencoder",
-    "validation_winner": "Score-Level Fusion (AE+OCSVM+IF)",
+    "validation_winner": "Score-Level Fusion (degenerate: equals Autoencoder)",
+    "is_degenerate_fusion": true,
+    "degenerate_fusion_note": "Validation selected a single-detector fusion; no gain from fusing detectors on this data.",
     "val_selection": {
       "ae_component_selected": "Autoencoder",
       "fusion_weights": {
@@ -4709,7 +4736,7 @@
         "Val_Selected": ""
       },
       {
-        "Detector": "Score-Level Fusion (AE+OCSVM+IF)",
+        "Detector": "Score-Level Fusion (degenerate: equals Autoencoder)",
         "Accuracy": 0.893447253212823,
         "Precision": 0.7381676074685193,
         "Recall": 0.6523407521105142,
@@ -4724,7 +4751,7 @@
         "Val_Selected": "YES"
       }
     ],
-    "verdict": "Best binary F1 at 95th-pct threshold: Autoencoder (F1=0.6926 [0.6820, 0.7020], Recall=0.6523, FPR=0.0522); best overall ROC-AUC ranking: Autoencoder (ROC-AUC=0.8676); validation-selected option (leave-attack-out non-test): 'Score-Level Fusion (AE+OCSVM+IF)'. Even the best unsupervised option/fusion still trails supervised attribution by a wide margin and remains strictly a supplementary zero-day signal, not a replacement for XGBoost."
+    "verdict": "Best binary F1 at 95th-pct threshold: Autoencoder (F1=0.6926 [0.6820, 0.7020], Recall=0.6523, FPR=0.0522); best overall ROC-AUC ranking: Autoencoder (ROC-AUC=0.8676); validation-selected option (leave-attack-out non-test): 'Score-Level Fusion (degenerate: equals Autoencoder)'. Validation selected a single-detector fusion; no gain from fusing detectors on this data."
   },
   "unseen_attack_protocol": {
     "executed": true,
@@ -4732,19 +4759,19 @@
     "n_unseen_test_samples": 26,
     "n_benign_test_samples": 23112,
     "supervised_closed_set_unseen_class_recall": 0.0,
-    "autoencoder_threshold_95pct": 0.07069769278168661,
+    "autoencoder_threshold_95pct": 0.07438231408596029,
     "autoencoder_unseen_attack_recall": 0.0,
     "autoencoder_benign_vs_unseen_metrics": {
-      "accuracy": 0.9484830149537558,
+      "accuracy": 0.9491312991615525,
       "precision": 0.0,
       "recall": 0.0,
       "f1": 0.0,
-      "roc_auc": 0.5569018425326837,
-      "pr_auc": 0.0012257304259496041,
-      "fpr": 0.05044998269297335,
+      "roc_auc": 0.5626381233857869,
+      "pr_auc": 0.0012645230012316194,
+      "fpr": 0.049800969193492556,
       "fnr": 1.0,
-      "tn": 21946,
-      "fp": 1166,
+      "tn": 21961,
+      "fp": 1151,
       "fn": 26,
       "tp": 0
     },
@@ -4835,6 +4862,16 @@
         "f1_weighted": 0.5908595362245054,
         "f1_macro": 0.08602399849390129,
         "f1_macro_reliable": 0.17204799698780257,
+        "unreliable_class_names": [
+          "DoS GoldenEye",
+          "DoS Hulk",
+          "DoS Slowhttptest",
+          "DoS slowloris",
+          "FTP-Patator",
+          "Heartbleed",
+          "Infiltration",
+          "SSH-Patator"
+        ],
         "reliable_class_count": 5,
         "reliable_support_threshold": 30,
         "f1_macro_present_test_classes": 0.1433733308231688,
@@ -4847,6 +4884,16 @@
         "f1_weighted": 0.5902268354825563,
         "f1_macro": 0.06610144829272716,
         "f1_macro_reliable": 0.1718637655610906,
+        "unreliable_class_names": [
+          "DoS GoldenEye",
+          "DoS Hulk",
+          "DoS Slowhttptest",
+          "DoS slowloris",
+          "FTP-Patator",
+          "Heartbleed",
+          "Infiltration",
+          "SSH-Patator"
+        ],
         "reliable_class_count": 5,
         "reliable_support_threshold": 30,
         "f1_macro_present_test_classes": 0.14321980463424216,
@@ -4859,6 +4906,16 @@
         "f1_weighted": 0.5696951259078532,
         "f1_macro": 0.06911887068545032,
         "f1_macro_reliable": 0.16588528964508076,
+        "unreliable_class_names": [
+          "DoS GoldenEye",
+          "DoS Hulk",
+          "DoS Slowhttptest",
+          "DoS slowloris",
+          "FTP-Patator",
+          "Heartbleed",
+          "Infiltration",
+          "SSH-Patator"
+        ],
         "reliable_class_count": 5,
         "reliable_support_threshold": 30,
         "f1_macro_present_test_classes": 0.13823774137090064,
@@ -5048,9 +5105,130 @@
           "Focus_Class_Recalls": "Bot=0.000, DDoS=0.680, Infiltration=0.000, PortScan=0.026, Web Attack=1.000"
         }
       ],
+      "validation_rows": [
+        {
+          "Option": "Baseline XGBoost ('none')",
+          "Benign_Val_Pct": "Argmax",
+          "Threshold": "argmax P(c)",
+          "Benign_FPR": 0.0005,
+          "Overall_Attack_Recall": 0.0283,
+          "Focus_Mean_Recall": 0.017,
+          "Binary_F1": 0.0517,
+          "Multiclass_Macro_F1": 0.1661,
+          "Focus_Class_Recalls": "Infiltration=0.000, Web Attack=0.034"
+        },
+        {
+          "Option": "XGBoost ('class_weight')",
+          "Benign_Val_Pct": "Argmax",
+          "Threshold": "argmax P(c)",
+          "Benign_FPR": 0.0008,
+          "Overall_Attack_Recall": 0.3396,
+          "Focus_Mean_Recall": 0.2046,
+          "Binary_F1": 0.4675,
+          "Multiclass_Macro_F1": 0.1247,
+          "Focus_Class_Recalls": "Infiltration=0.000, Web Attack=0.409"
+        },
+        {
+          "Option": "Hybrid Override (XGBoost OR AE)",
+          "Benign_Val_Pct": "P90",
+          "Threshold": "AE>0.0616",
+          "Benign_FPR": 0.1003,
+          "Overall_Attack_Recall": 0.2075,
+          "Focus_Mean_Recall": 0.5228,
+          "Binary_F1": 0.0265,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Infiltration=1.000, Web Attack=0.045"
+        },
+        {
+          "Option": "Lower P(Benign) Gate (1 - P_Benign > tau)",
+          "Benign_Val_Pct": "P90",
+          "Threshold": "1-P(B)>0.0001",
+          "Benign_FPR": 0.1,
+          "Overall_Attack_Recall": 0.8585,
+          "Focus_Mean_Recall": 0.5834,
+          "Binary_F1": 0.1054,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Infiltration=0.167, Web Attack=1.000"
+        },
+        {
+          "Option": "Hybrid Override (XGBoost OR AE)",
+          "Benign_Val_Pct": "P95",
+          "Threshold": "AE>0.1169",
+          "Benign_FPR": 0.0503,
+          "Overall_Attack_Recall": 0.1792,
+          "Focus_Mean_Recall": 0.4394,
+          "Binary_F1": 0.0425,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Infiltration=0.833, Web Attack=0.045"
+        },
+        {
+          "Option": "Lower P(Benign) Gate (1 - P_Benign > tau)",
+          "Benign_Val_Pct": "P95",
+          "Threshold": "1-P(B)>0.0002",
+          "Benign_FPR": 0.0501,
+          "Overall_Attack_Recall": 0.8396,
+          "Focus_Mean_Recall": 0.5278,
+          "Binary_F1": 0.1852,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Infiltration=0.056, Web Attack=1.000"
+        },
+        {
+          "Option": "Hybrid Override (XGBoost OR AE)",
+          "Benign_Val_Pct": "P97",
+          "Threshold": "AE>0.1252",
+          "Benign_FPR": 0.0303,
+          "Overall_Attack_Recall": 0.1792,
+          "Focus_Mean_Recall": 0.4394,
+          "Binary_F1": 0.0645,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Infiltration=0.833, Web Attack=0.045"
+        },
+        {
+          "Option": "Lower P(Benign) Gate (1 - P_Benign > tau)",
+          "Benign_Val_Pct": "P97",
+          "Threshold": "1-P(B)>0.0005",
+          "Benign_FPR": 0.0301,
+          "Overall_Attack_Recall": 0.8302,
+          "Focus_Mean_Recall": 0.5,
+          "Binary_F1": 0.2691,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Infiltration=0.000, Web Attack=1.000"
+        },
+        {
+          "Option": "Hybrid Override (XGBoost OR AE)",
+          "Benign_Val_Pct": "P99",
+          "Threshold": "AE>0.1888",
+          "Benign_FPR": 0.0103,
+          "Overall_Attack_Recall": 0.1415,
+          "Focus_Mean_Recall": 0.3283,
+          "Binary_F1": 0.1075,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Infiltration=0.611, Web Attack=0.045"
+        },
+        {
+          "Option": "Lower P(Benign) Gate (1 - P_Benign > tau)",
+          "Benign_Val_Pct": "P99",
+          "Threshold": "1-P(B)>0.0020",
+          "Benign_FPR": 0.0101,
+          "Overall_Attack_Recall": 0.8302,
+          "Focus_Mean_Recall": 0.5,
+          "Binary_F1": 0.5057,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Infiltration=0.000, Web Attack=1.000"
+        }
+      ],
+      "validation_vs_test_agreement": {
+        "spearman_rho_focus_recall": 0.9756,
+        "validation_top_bounded_fpr_option": "Lower P(Benign) Gate (1 - P_Benign > tau) (P99)",
+        "test_top_bounded_fpr_option": "Lower P(Benign) Gate (1 - P_Benign > tau) (P99)",
+        "top_exact_match": true,
+        "top_option_family_match": true,
+        "agreement_status": "agrees",
+        "summary": "Validation ranking agrees with test (Spearman rho=0.9756; top bounded-FPR option is 'Lower P(Benign) Gate (1 - P_Benign > tau) (P99)' on both splits)."
+      },
       "baseline_benign_fpr": 0.0001,
       "baseline_focus_recall": 0.1349,
-      "verdict": "Lower P(Benign) Gate (1 - P_Benign > tau) (P99) raises focus attack recall from 0.1349 to 0.3412 with bounded Benign FPR=0.0103 vs baseline 0.0001."
+      "verdict": "Descriptively on the held-out test partition (not used for selection), Lower P(Benign) Gate (1 - P_Benign > tau) (P99) shows focus attack recall 0.3412 at Benign FPR=0.0103 vs baseline 0.1349 (Benign FPR=0.0001)."
     },
     "caveat_note": "Open-set cross-day protocol (by_day): by construction in CICIDS2017, all Thursday and Friday attack families (Bot, DDoS, Infiltration, PortScan, Web Attack) have zero training instances in Monday-Wednesday data. Closed-set multi-class Macro-F1 is therefore near zero by design rather than ordinary generalization degradation. The real empirical finding is that supervised XGBoost misses ~71% of unseen attack flows (binary recall=0.2876, precision=0.9991), which is why benign-only anomaly detectors are kept as a supplementary zero-day signal."
   },
@@ -5064,7 +5242,7 @@
     "ordering_warning": "time_block ordering = CSV row order (no real Timestamp)",
     "timestamp_alignment": {
       "status": "directory_not_found",
-      "source_dir": "D:\\IDS_Final\\data\\TrafficLabelling",
+      "source_dir": "data/TrafficLabelling",
       "directory_exists": false,
       "csv_files_found": 0,
       "real_timestamps_available": false,
@@ -5197,6 +5375,11 @@
         "f1_weighted": 0.99174985650868,
         "f1_macro": 0.7517909665390111,
         "f1_macro_reliable": 0.9173282565007147,
+        "unreliable_class_names": [
+          "Bot",
+          "Heartbleed",
+          "Infiltration"
+        ],
         "reliable_class_count": 10,
         "reliable_support_threshold": 30,
         "f1_macro_ci95": {
@@ -5216,6 +5399,11 @@
         "f1_weighted": 0.9456035895960979,
         "f1_macro": 0.4376174020515864,
         "f1_macro_reliable": 0.5689026226670624,
+        "unreliable_class_names": [
+          "Bot",
+          "Heartbleed",
+          "Infiltration"
+        ],
         "reliable_class_count": 10,
         "reliable_support_threshold": 30,
         "f1_macro_ci95": {
@@ -5235,6 +5423,11 @@
         "f1_weighted": 0.9400238960098315,
         "f1_macro": 0.2766685093610244,
         "f1_macro_reliable": 0.3596690621693317,
+        "unreliable_class_names": [
+          "Bot",
+          "Heartbleed",
+          "Infiltration"
+        ],
         "reliable_class_count": 10,
         "reliable_support_threshold": 30,
         "f1_macro_ci95": {
@@ -6190,9 +6383,130 @@
           "Focus_Class_Recalls": "Bot=0.000, Heartbleed=0.000, Web Attack=0.486, Infiltration=0.143, DoS slowloris=0.753, DoS GoldenEye=0.829"
         }
       ],
+      "validation_rows": [
+        {
+          "Option": "Baseline XGBoost ('none')",
+          "Benign_Val_Pct": "Argmax",
+          "Threshold": "argmax P(c)",
+          "Benign_FPR": 0.061,
+          "Overall_Attack_Recall": 0.9953,
+          "Focus_Mean_Recall": 0.7083,
+          "Binary_F1": 0.878,
+          "Multiclass_Macro_F1": 0.844,
+          "Focus_Class_Recalls": "Bot=0.593, Heartbleed=0.000, Web Attack=0.943, Infiltration=0.714, DoS slowloris=1.000, DoS GoldenEye=1.000"
+        },
+        {
+          "Option": "XGBoost ('class_weight')",
+          "Benign_Val_Pct": "Argmax",
+          "Threshold": "argmax P(c)",
+          "Benign_FPR": 0.0793,
+          "Overall_Attack_Recall": 0.9974,
+          "Focus_Mean_Recall": 0.9397,
+          "Binary_F1": 0.8485,
+          "Multiclass_Macro_F1": 0.8713,
+          "Focus_Class_Recalls": "Bot=0.667, Heartbleed=1.000, Web Attack=0.971, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000"
+        },
+        {
+          "Option": "Hybrid Override (XGBoost OR AE)",
+          "Benign_Val_Pct": "P90",
+          "Threshold": "AE>0.0475",
+          "Benign_FPR": 0.1301,
+          "Overall_Attack_Recall": 0.9973,
+          "Focus_Mean_Recall": 0.9226,
+          "Binary_F1": 0.7739,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Bot=0.593, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000"
+        },
+        {
+          "Option": "Lower P(Benign) Gate (1 - P_Benign > tau)",
+          "Benign_Val_Pct": "P90",
+          "Threshold": "1-P(B)>0.2449",
+          "Benign_FPR": 0.0995,
+          "Overall_Attack_Recall": 0.9971,
+          "Focus_Mean_Recall": 0.7668,
+          "Binary_F1": 0.8172,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Bot=0.630, Heartbleed=0.000, Web Attack=0.971, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000"
+        },
+        {
+          "Option": "Hybrid Override (XGBoost OR AE)",
+          "Benign_Val_Pct": "P95",
+          "Threshold": "AE>0.1008",
+          "Benign_FPR": 0.0833,
+          "Overall_Attack_Recall": 0.9971,
+          "Focus_Mean_Recall": 0.9226,
+          "Binary_F1": 0.8421,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Bot=0.593, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000"
+        },
+        {
+          "Option": "Lower P(Benign) Gate (1 - P_Benign > tau)",
+          "Benign_Val_Pct": "P95",
+          "Threshold": "1-P(B)>0.5884",
+          "Benign_FPR": 0.049,
+          "Overall_Attack_Recall": 0.994,
+          "Focus_Mean_Recall": 0.625,
+          "Binary_F1": 0.8986,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Bot=0.556, Heartbleed=0.000, Web Attack=0.943, Infiltration=0.286, DoS slowloris=1.000, DoS GoldenEye=0.966"
+        },
+        {
+          "Option": "Hybrid Override (XGBoost OR AE)",
+          "Benign_Val_Pct": "P97",
+          "Threshold": "AE>0.1385",
+          "Benign_FPR": 0.0733,
+          "Overall_Attack_Recall": 0.9971,
+          "Focus_Mean_Recall": 0.9226,
+          "Binary_F1": 0.8581,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Bot=0.593, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000"
+        },
+        {
+          "Option": "Lower P(Benign) Gate (1 - P_Benign > tau)",
+          "Benign_Val_Pct": "P97",
+          "Threshold": "1-P(B)>0.5986",
+          "Benign_FPR": 0.0297,
+          "Overall_Attack_Recall": 0.994,
+          "Focus_Mean_Recall": 0.625,
+          "Binary_F1": 0.9349,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Bot=0.556, Heartbleed=0.000, Web Attack=0.943, Infiltration=0.286, DoS slowloris=1.000, DoS GoldenEye=0.966"
+        },
+        {
+          "Option": "Hybrid Override (XGBoost OR AE)",
+          "Benign_Val_Pct": "P99",
+          "Threshold": "AE>0.1652",
+          "Benign_FPR": 0.0699,
+          "Overall_Attack_Recall": 0.9971,
+          "Focus_Mean_Recall": 0.9226,
+          "Binary_F1": 0.8639,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Bot=0.593, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000"
+        },
+        {
+          "Option": "Lower P(Benign) Gate (1 - P_Benign > tau)",
+          "Benign_Val_Pct": "P99",
+          "Threshold": "1-P(B)>0.6067",
+          "Benign_FPR": 0.009,
+          "Overall_Attack_Recall": 0.9938,
+          "Focus_Mean_Recall": 0.625,
+          "Binary_F1": 0.9772,
+          "Multiclass_Macro_F1": null,
+          "Focus_Class_Recalls": "Bot=0.556, Heartbleed=0.000, Web Attack=0.943, Infiltration=0.286, DoS slowloris=1.000, DoS GoldenEye=0.966"
+        }
+      ],
+      "validation_vs_test_agreement": {
+        "spearman_rho_focus_recall": 0.9655,
+        "validation_top_bounded_fpr_option": "XGBoost ('class_weight') (Argmax)",
+        "test_top_bounded_fpr_option": "XGBoost ('class_weight') (Argmax)",
+        "top_exact_match": true,
+        "top_option_family_match": true,
+        "agreement_status": "agrees",
+        "summary": "Validation ranking agrees with test (Spearman rho=0.9655; top bounded-FPR option is 'XGBoost ('class_weight') (Argmax)' on both splits)."
+      },
       "baseline_benign_fpr": 0.0001,
       "baseline_focus_recall": 0.4276,
-      "verdict": "XGBoost ('class_weight') (Argmax) raises focus attack recall from 0.4276 to 0.7816 with bounded Benign FPR=0.0144 vs baseline 0.0001."
+      "verdict": "Descriptively on the held-out test partition (not used for selection), XGBoost ('class_weight') (Argmax) shows focus attack recall 0.7816 at Benign FPR=0.0144 vs baseline 0.4276 (Benign FPR=0.0001)."
     },
     "autoencoder": {
       "accuracy": 0.8455707569594845,
@@ -6267,43 +6581,43 @@
       "top_shap_features": [
         {
           "feature": "Destination Port",
-          "mean_abs_shap": 0.8609660421310427
+          "mean_abs_shap": 0.8609660426712096
         },
         {
           "feature": "Init_Win_bytes_backward",
-          "mean_abs_shap": 0.37114116753954784
+          "mean_abs_shap": 0.37114116732229924
         },
         {
           "feature": "Init_Win_bytes_forward",
-          "mean_abs_shap": 0.29337946932347353
+          "mean_abs_shap": 0.2933794691896675
         },
         {
           "feature": "min_seg_size_forward",
-          "mean_abs_shap": 0.2820225843123268
+          "mean_abs_shap": 0.2820225840154497
         },
         {
           "feature": "Flow IAT Min",
-          "mean_abs_shap": 0.21271180324394331
+          "mean_abs_shap": 0.21271180313456647
         },
         {
           "feature": "Bwd Packets/s",
-          "mean_abs_shap": 0.21030745462691777
+          "mean_abs_shap": 0.21030745432430956
         },
         {
           "feature": "Bwd Packet Length Mean",
-          "mean_abs_shap": 0.1977062663862912
+          "mean_abs_shap": 0.19770626634101465
         },
         {
           "feature": "Total Length of Fwd Packets",
-          "mean_abs_shap": 0.16721271986889547
+          "mean_abs_shap": 0.16721272000931017
         },
         {
           "feature": "Fwd IAT Min",
-          "mean_abs_shap": 0.15448450438094394
+          "mean_abs_shap": 0.1544845040598526
         },
         {
           "feature": "Flow Duration",
-          "mean_abs_shap": 0.1410954808796344
+          "mean_abs_shap": 0.14109548089375637
         }
       ]
     },
@@ -6355,43 +6669,43 @@
       "top_shap_features": [
         {
           "feature": "Init_Win_bytes_backward",
-          "mean_abs_shap": 0.49616641181822896
+          "mean_abs_shap": 0.4961664115978636
         },
         {
           "feature": "Init_Win_bytes_forward",
-          "mean_abs_shap": 0.4448747374457664
+          "mean_abs_shap": 0.4448747368448486
         },
         {
           "feature": "min_seg_size_forward",
-          "mean_abs_shap": 0.36340335130859863
+          "mean_abs_shap": 0.3634033511724824
         },
         {
           "feature": "Flow IAT Min",
-          "mean_abs_shap": 0.3315472401466506
+          "mean_abs_shap": 0.3315472402703733
         },
         {
           "feature": "Bwd Packets/s",
-          "mean_abs_shap": 0.2948911200631768
+          "mean_abs_shap": 0.294891120080657
         },
         {
           "feature": "Flow Bytes/s",
-          "mean_abs_shap": 0.23644425466210728
+          "mean_abs_shap": 0.23644425459326107
         },
         {
           "feature": "Bwd Packet Length Mean",
-          "mean_abs_shap": 0.23232992638642186
+          "mean_abs_shap": 0.23232992650747591
         },
         {
           "feature": "Flow Duration",
-          "mean_abs_shap": 0.18793949541813137
+          "mean_abs_shap": 0.18793949521567604
         },
         {
           "feature": "Fwd Packet Length Max",
-          "mean_abs_shap": 0.18132300710599297
+          "mean_abs_shap": 0.181323007218898
         },
         {
           "feature": "Fwd IAT Min",
-          "mean_abs_shap": 0.17741323655630606
+          "mean_abs_shap": 0.1774132366770198
         }
       ]
     },
@@ -6411,6 +6725,14 @@
     "oof_total_rows": 161042,
     "oof_f1_macro": 0.9549699474130922,
     "oof_f1_macro_reliable": 0.9561194038151636,
+    "oof_unreliable_classes": [
+      "Heartbleed"
+    ],
+    "fold_unreliable_classes": [
+      "Bot",
+      "Heartbleed",
+      "Infiltration"
+    ],
     "oof_f1_weighted": 0.998777049290713,
     "oof_accuracy": 0.9987953453136449,
     "oof_per_class": [
@@ -6565,6 +6887,11 @@
         "f1_weighted": 0.999030605149068,
         "f1_macro": 0.9514510039988117,
         "f1_macro_reliable": 0.9940291623413122,
+        "unreliable_class_names": [
+          "Bot",
+          "Heartbleed",
+          "Infiltration"
+        ],
         "roc_auc_macro_ovr": 0.9993219851701414
       },
       {
@@ -6577,6 +6904,11 @@
         "f1_weighted": 0.9986749406648376,
         "f1_macro": 0.93510784761371,
         "f1_macro_reliable": 0.9866358728934943,
+        "unreliable_class_names": [
+          "Bot",
+          "Heartbleed",
+          "Infiltration"
+        ],
         "roc_auc_macro_ovr": 0.9990971584328308
       },
       {
@@ -6589,6 +6921,11 @@
         "f1_weighted": 0.9988428196516596,
         "f1_macro": 0.9626720208458553,
         "f1_macro_reliable": 0.9880548236808085,
+        "unreliable_class_names": [
+          "Bot",
+          "Heartbleed",
+          "Infiltration"
+        ],
         "roc_auc_macro_ovr": 0.9994780052708501
       },
       {
@@ -6601,6 +6938,11 @@
         "f1_weighted": 0.9988503962048241,
         "f1_macro": 0.965857611280362,
         "f1_macro_reliable": 0.9947638308346833,
+        "unreliable_class_names": [
+          "Bot",
+          "Heartbleed",
+          "Infiltration"
+        ],
         "roc_auc_macro_ovr": 0.9992904877641364
       },
       {
@@ -6613,6 +6955,11 @@
         "f1_weighted": 0.9984684402629865,
         "f1_macro": 0.9522331345068886,
         "f1_macro_reliable": 0.9829030748589551,
+        "unreliable_class_names": [
+          "Bot",
+          "Heartbleed",
+          "Infiltration"
+        ],
         "roc_auc_macro_ovr": 0.9993390347534152
       }
     ]
@@ -6624,6 +6971,19 @@
       200000,
       500000
     ],
+    "reliable_support_threshold": 30,
+    "unreliable_classes_by_size": {
+      "200000": [
+        "Bot",
+        "Heartbleed",
+        "Infiltration",
+        "Web Attack"
+      ],
+      "500000": [
+        "Heartbleed",
+        "Infiltration"
+      ]
+    },
     "memory_limited": false,
     "rows": [
       {
@@ -6660,91 +7020,91 @@
   },
   "preprocessing_latency": {
     "warmup_calls_discarded": 50,
-    "median_us": 828.350001029321,
-    "p95_us": 1344.5249995129416,
-    "mean_us": 906.7640000284882,
-    "samples_per_sec": 1102.8227851663526
+    "median_us": 813.9999990817159,
+    "p95_us": 1057.9899993899744,
+    "mean_us": 855.7479999581119,
+    "samples_per_sec": 1168.5683168981395
   },
   "inference_latency": {
     "MLP": {
       "warmup_calls_discarded": 50,
-      "single_median_us": 173.850001374376,
-      "single_p95_us": 221.9850015535485,
-      "single_mean_us": 174.96000007668044,
-      "single_samples_per_sec": 5715.5921328402255,
-      "batch_samples_per_sec": 24457.586151091964,
+      "single_median_us": 154.99999790336005,
+      "single_p95_us": 270.4149992496241,
+      "single_mean_us": 173.22699939541053,
+      "single_samples_per_sec": 5772.77216305863,
+      "batch_samples_per_sec": 24487.76568218621,
       "model_size_mb": 2.534
     },
     "1D-CNN": {
       "warmup_calls_discarded": 50,
-      "single_median_us": 622.9999999050051,
-      "single_p95_us": 724.0499997351435,
-      "single_mean_us": 632.8100002428982,
-      "single_samples_per_sec": 1580.2531559491147,
-      "batch_samples_per_sec": 16521.53850375242,
+      "single_median_us": 661.2999968638178,
+      "single_p95_us": 806.4499972533666,
+      "single_mean_us": 689.6439996489789,
+      "single_samples_per_sec": 1450.0234911185898,
+      "batch_samples_per_sec": 17574.571791438277,
       "model_size_mb": 1.31
     },
     "XGBoost": {
       "warmup_calls_discarded": 50,
-      "single_median_us": 405.0499992445111,
-      "single_p95_us": 523.6799996055197,
-      "single_mean_us": 459.0180000377586,
-      "single_samples_per_sec": 2178.5638034189083,
-      "batch_samples_per_sec": 249219.1620376412,
+      "single_median_us": 344.19999792589806,
+      "single_p95_us": 485.6099985772744,
+      "single_mean_us": 387.62999982282054,
+      "single_samples_per_sec": 2579.779687993922,
+      "batch_samples_per_sec": 252775.01205215912,
       "model_size_mb": 2.954
     },
     "Autoencoder": {
       "warmup_calls_discarded": 50,
-      "single_median_us": 198.70000141963828,
-      "single_p95_us": 280.0999973260332,
-      "single_mean_us": 215.2489998115925,
-      "single_samples_per_sec": 4645.782330581327,
-      "batch_samples_per_sec": 17682.498988038053,
+      "single_median_us": 207.69999900949188,
+      "single_p95_us": 357.8949999791803,
+      "single_mean_us": 223.06999991997145,
+      "single_samples_per_sec": 4482.897746710718,
+      "batch_samples_per_sec": 23860.490693738775,
       "model_size_mb": 1.548
     },
     "Autoencoder (Deep Reg)": {
       "warmup_calls_discarded": 50,
-      "single_median_us": 233.50000083155464,
-      "single_p95_us": 308.93499897501897,
-      "single_mean_us": 236.51599993172567,
-      "single_samples_per_sec": 4228.04376992959,
-      "batch_samples_per_sec": 22696.024723476065,
+      "single_median_us": 254.8000011302065,
+      "single_p95_us": 374.6349993889453,
+      "single_mean_us": 272.5660002033692,
+      "single_samples_per_sec": 3668.836169052163,
+      "batch_samples_per_sec": 20310.730372616836,
       "model_size_mb": 5.07
     },
     "VAE": {
       "warmup_calls_discarded": 50,
-      "single_median_us": 208.55000002484303,
-      "single_p95_us": 268.8949984076316,
-      "single_mean_us": 208.9880000858102,
-      "single_samples_per_sec": 4784.963728010227,
-      "batch_samples_per_sec": 24408.57669176021,
+      "single_median_us": 250.74999939533882,
+      "single_p95_us": 373.4649984835414,
+      "single_mean_us": 262.38300029945094,
+      "single_samples_per_sec": 3811.222521499967,
+      "batch_samples_per_sec": 24299.087598045066,
       "model_size_mb": 1.571
     },
     "Isolation Forest": {
       "warmup_calls_discarded": 50,
-      "single_median_us": 6957.999999940512,
-      "single_p95_us": 7768.489998852601,
-      "single_mean_us": 7054.162999993423,
-      "single_samples_per_sec": 141.7602626989102,
-      "batch_samples_per_sec": 79549.01508137687,
+      "single_median_us": 7174.399997893488,
+      "single_p95_us": 8003.974998064222,
+      "single_mean_us": 7260.687999878428,
+      "single_samples_per_sec": 137.72799492510129,
+      "batch_samples_per_sec": 75805.43273168996,
       "model_size_mb": 2.096
     },
     "One-Class SVM": {
       "warmup_calls_discarded": 50,
-      "single_median_us": 136.44999853568152,
-      "single_p95_us": 166.0600008108304,
-      "single_mean_us": 145.0640000985004,
-      "single_samples_per_sec": 6893.509067177153,
-      "batch_samples_per_sec": 23263.968036650982,
+      "single_median_us": 140.8500029356219,
+      "single_p95_us": 167.0400026341667,
+      "single_mean_us": 145.80299946828745,
+      "single_samples_per_sec": 6858.569464598036,
+      "batch_samples_per_sec": 16547.952703326046,
       "model_size_mb": 0.478
     },
     "LOF": {
       "warmup_calls_discarded": 50,
-      "single_median_us": 1368.7999980902532,
-      "single_p95_us": 1965.234999261156,
-      "single_mean_us": 1367.6659998236573,
-      "single_samples_per_sec": 731.172669444833,
-      "batch_samples_per_sec": 41327.31719529418,
+      "single_median_us": 1313.5500012140255,
+      "single_p95_us": 2214.9199987325114,
+      "single_mean_us": 1426.5600001817802,
+      "single_samples_per_sec": 700.9869895921479,
+      "batch_samples_per_sec": 42331.36696055985,
       "model_size_mb": 5.666
     }
   },
@@ -6752,7 +7112,7 @@
     "XGBoost": {
       "explainer_type": "TreeExplainer",
       "n_samples_explained": 500,
-      "elapsed_sec": 0.4377434000016365,
+      "elapsed_sec": 0.4610460000039893,
       "top_features": [
         {
           "feature": "Destination Port",
@@ -6839,87 +7199,87 @@
     "MLP": {
       "explainer_type": "GradientExplainer",
       "n_samples_explained": 20,
-      "elapsed_sec": 2.328102100000251,
+      "elapsed_sec": 2.4330320000008214,
       "top_features": [
         {
           "feature": "Min Packet Length",
-          "mean_abs_shap": 0.007811681919132732
+          "mean_abs_shap": 0.0064667799589749105
         },
         {
           "feature": "ACK Flag Count",
-          "mean_abs_shap": 0.0070935269285271
+          "mean_abs_shap": 0.006079398539715181
         },
         {
           "feature": "PSH Flag Count",
-          "mean_abs_shap": 0.006165388208841669
-        },
-        {
-          "feature": "Packet Length Variance",
-          "mean_abs_shap": 0.004371093512433081
-        },
-        {
-          "feature": "Packet Length Std",
-          "mean_abs_shap": 0.004222427442398941
-        },
-        {
-          "feature": "Down/Up Ratio",
-          "mean_abs_shap": 0.004119692234489301
-        },
-        {
-          "feature": "Init_Win_bytes_forward",
-          "mean_abs_shap": 0.003485763321167213
-        },
-        {
-          "feature": "Average Packet Size",
-          "mean_abs_shap": 0.003431552772255978
-        },
-        {
-          "feature": "Flow IAT Std",
-          "mean_abs_shap": 0.0033190728994101117
-        },
-        {
-          "feature": "Idle Max",
-          "mean_abs_shap": 0.003180985576761725
-        },
-        {
-          "feature": "Bwd Packet Length Max",
-          "mean_abs_shap": 0.002974527971680848
-        },
-        {
-          "feature": "Fwd IAT Std",
-          "mean_abs_shap": 0.002848508961020822
+          "mean_abs_shap": 0.005378490771355068
         },
         {
           "feature": "Destination Port",
-          "mean_abs_shap": 0.0027924345749644666
+          "mean_abs_shap": 0.0037479148841121357
+        },
+        {
+          "feature": "Packet Length Std",
+          "mean_abs_shap": 0.003624773554845953
+        },
+        {
+          "feature": "Packet Length Variance",
+          "mean_abs_shap": 0.003552146310524639
+        },
+        {
+          "feature": "Init_Win_bytes_forward",
+          "mean_abs_shap": 0.003371240448317154
+        },
+        {
+          "feature": "Flow IAT Std",
+          "mean_abs_shap": 0.003331015035523503
+        },
+        {
+          "feature": "Average Packet Size",
+          "mean_abs_shap": 0.003228356836547929
+        },
+        {
+          "feature": "Down/Up Ratio",
+          "mean_abs_shap": 0.0030756731584223856
+        },
+        {
+          "feature": "Bwd Packet Length Max",
+          "mean_abs_shap": 0.00269669979000873
         },
         {
           "feature": "Bwd Packets/s",
-          "mean_abs_shap": 0.0025370853930559373
+          "mean_abs_shap": 0.0026000148914227215
         },
         {
-          "feature": "Bwd Packet Length Std",
-          "mean_abs_shap": 0.0025178237284368657
+          "feature": "Idle Max",
+          "mean_abs_shap": 0.002423140036611598
         },
         {
-          "feature": "Fwd IAT Mean",
-          "mean_abs_shap": 0.0024991064898788828
+          "feature": "Fwd IAT Std",
+          "mean_abs_shap": 0.0023975227412230122
         },
         {
           "feature": "Bwd Packet Length Min",
-          "mean_abs_shap": 0.002439376695875294
+          "mean_abs_shap": 0.0023914614539587093
         },
         {
           "feature": "Fwd IAT Max",
-          "mean_abs_shap": 0.0024260544601275207
+          "mean_abs_shap": 0.0022806803049115905
+        },
+        {
+          "feature": "Fwd IAT Mean",
+          "mean_abs_shap": 0.0022307150378048863
+        },
+        {
+          "feature": "Fwd Packets/s",
+          "mean_abs_shap": 0.002149664528392989
         },
         {
           "feature": "Fwd Packet Length Std",
-          "mean_abs_shap": 0.0022115046049272836
+          "mean_abs_shap": 0.001998377161227315
         },
         {
-          "feature": "Fwd IAT Total",
-          "mean_abs_shap": 0.002203839360469081
+          "feature": "Bwd Packet Length Std",
+          "mean_abs_shap": 0.001981619439092355
         }
       ],
       "explainer_benchmark": {
@@ -6927,16 +7287,16 @@
           "status": "success",
           "n_background": 50,
           "n_explained": 20,
-          "elapsed_sec": 2.3281
+          "elapsed_sec": 2.433
         },
         "kernel_explainer": {
           "status": "success",
           "n_background": 10,
           "n_explained": 10,
-          "elapsed_sec": 6.5627
+          "elapsed_sec": 6.9531
         },
-        "spearman_rank_agreement": 0.6694,
-        "speedup_vs_kernel": 2.82
+        "spearman_rank_agreement": 0.7402,
+        "speedup_vs_kernel": 2.86
       }
     },
     "local_example": {

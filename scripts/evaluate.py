@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import AppConfig, ModelConfig, get_app_config, get_model_config
+from src.config import AppConfig, ModelConfig, get_app_config, get_model_config, sanitize_machine_paths
 from src.detection.anomaly_detection import (
     describe_score_level_fusion,
     fit_classical_anomaly_baselines,
@@ -788,6 +788,7 @@ def run_evaluation_suite(
                 **{k: v for k, v in local_exp.items() if k != "all_shap_values"},
             }
 
+        shap_summary = sanitize_machine_paths(shap_summary)
         with (artifacts_dir / "shap_summary.json").open("w", encoding="utf-8") as fh:
             json.dump(shap_summary, fh, indent=2)
 
@@ -885,6 +886,7 @@ def run_evaluation_suite(
         "inference_latency": latency_table,
         "shap_summary": shap_summary,
     }
+    full_summary = sanitize_machine_paths(full_summary)
     with (reports_dir / "evaluation_summary.json").open("w", encoding="utf-8") as fh:
         json.dump(full_summary, fh, indent=2)
 
@@ -893,6 +895,60 @@ def run_evaluation_suite(
         "Evaluation complete. Saved model_comparison.csv, evaluation_summary.json, and markdown reports to %s",
         reports_dir,
     )
+    return full_summary
+
+
+def run_time_block_refresh(
+    app_cfg: AppConfig | None = None,
+    model_cfg: ModelConfig | None = None,
+) -> dict[str, Any]:
+    """Re-run only the time_block protocol against existing reports (no model retraining)."""
+    app_c = (app_cfg or get_app_config()).model_copy(deep=True)
+    model_c = (model_cfg or get_model_config()).model_copy(deep=True)
+    reports_dir = app_c.paths.resolve("reports_dir")
+    artifacts_dir = app_c.paths.resolve("artifacts_dir")
+
+    summary_path = reports_dir / "evaluation_summary.json"
+    cmp_path = reports_dir / "model_comparison.csv"
+    if not summary_path.exists() or not cmp_path.exists():
+        raise FileNotFoundError(
+            "Existing reports/evaluation_summary.json and reports/model_comparison.csv are required "
+            "for --time-block-only. Run `python scripts/evaluate.py` first."
+        )
+
+    with summary_path.open("r", encoding="utf-8") as fh:
+        full_summary = json.load(fh)
+    df_cmp = pd.read_csv(cmp_path)
+
+    diag_path = artifacts_dir / "training_diagnostics.json"
+    train_diag = {}
+    if diag_path.exists():
+        with diag_path.open("r", encoding="utf-8") as fh:
+            train_diag = json.load(fh)
+    elif isinstance(full_summary.get("training_diagnostics"), dict):
+        train_diag = full_summary["training_diagnostics"]
+
+    xgb_opt_diag = train_diag.get("xgboost_optimization", {})
+    selected_xgb_params = (
+        xgb_opt_diag.get("best_params") if xgb_opt_diag.get("selected_variant") == "tuned" else None
+    )
+    imb_strategy = train_diag.get("imbalance_experiment", {}).get("selected_strategy", "none")
+    is_synth = bool(full_summary.get("dataset_source", {}).get("is_synthetic", False))
+
+    time_block_res = evaluate_time_block_protocol(
+        app_cfg=app_c,
+        model_cfg=model_c,
+        xgb_params=selected_xgb_params,
+        imbalance_strategy=imb_strategy,
+        keras_epochs=app_c.evaluation.time_block_keras_epochs,
+        force_synthetic=is_synth,
+    )
+    full_summary["time_block_protocol"] = time_block_res
+    full_summary = sanitize_machine_paths(full_summary)
+    with summary_path.open("w", encoding="utf-8") as fh:
+        json.dump(full_summary, fh, indent=2)
+    write_academic_reports(full_summary, df_cmp, reports_dir)
+    logger.info("Refreshed time_block evaluation and updated reports in %s", reports_dir)
     return full_summary
 
 
@@ -907,7 +963,15 @@ def main() -> None:
         action="store_true",
         help="Skip secondary open-set cross-day (by_day), time_block, and feature ablation protocols.",
     )
+    parser.add_argument(
+        "--time-block-only",
+        action="store_true",
+        help="Re-run ONLY the time_block evaluation using optional TrafficLabelling / Engelen files.",
+    )
     args = parser.parse_args()
+    if args.time_block_only:
+        run_time_block_refresh()
+        return
     run_evaluation_suite(
         skip_unseen=args.skip_unseen,
         skip_shap=args.skip_shap,

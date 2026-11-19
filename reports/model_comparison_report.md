@@ -11,16 +11,22 @@
 
 | Model | Imbalance_Strategy | Evaluation_Framing | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro | F1_Macro_Reliable | F1_Macro_CI95_Low | F1_Macro_CI95_High | ROC_AUC | PR_AUC | Latency_Median_us | Latency_P95_us | Latency_Mean_us | Samples_Per_Sec | Model_Size_MB | Training_Duration_s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MLP | smote | 13-class supervised | 0.9766 | 0.9790 | 0.9766 | 0.9772 | 0.7934 | 0.9286 | 0.7544 | 0.8176 | 0.9962 | 0.8487 | 173.8500 | 221.9900 | 174.9600 | 24457.6000 | 2.5340 | 57.8400 |
-| 1D-CNN | smote | 13-class supervised | 0.9904 | 0.9925 | 0.9904 | 0.9913 | 0.8447 | 0.9562 | 0.7649 | 0.8819 | 0.9933 | 0.8752 | 623.0000 | 724.0500 | 632.8100 | 16521.5000 | 1.3100 | 859.5500 |
-| XGBoost | none | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9603 | 0.9972 | 0.9013 | 0.9849 | 0.9995 | 0.9773 | 405.0500 | 523.6800 | 459.0200 | 249219.2000 | 2.9540 | 320.3300 |
-| Autoencoder | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8934 | 0.7382 | 0.6523 | 0.6926 | 0.6926 | N/A | 0.6820 | 0.7020 | 0.8676 | 0.7290 | 198.7000 | 280.1000 | 215.2500 | 17682.5000 | 1.5480 | 68.8000 |
-| Autoencoder (Deep Reg) | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8668 | 0.6872 | 0.5063 | 0.5831 | 0.5831 | N/A | 0.5704 | 0.5947 | 0.7908 | 0.6293 | 233.5000 | 308.9300 | 236.5200 | 22696.0000 | 5.0700 | 53.4600 |
-| VAE | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8693 | 0.6964 | 0.5132 | 0.5910 | 0.5910 | N/A | 0.5780 | 0.6025 | 0.7755 | 0.6231 | 208.5500 | 268.8900 | 208.9900 | 24408.6000 | 1.5710 | 33.4600 |
-| Isolation Forest | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | N/A | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 6958.0000 | 7768.4900 | 7054.1600 | 79549.0000 | 2.0960 | 0.4800 |
-| One-Class SVM | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | N/A | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 136.4500 | 166.0600 | 145.0600 | 23264.0000 | 0.4780 | 1.4900 |
-| LOF | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | N/A | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1368.8000 | 1965.2300 | 1367.6700 | 41327.3000 | 5.6660 | 0.4900 |
-| Score-Level Fusion (AE+OCSVM+IF) | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8934 | 0.7382 | 0.6523 | 0.6926 | 0.6926 | N/A | 0.6820 | 0.7020 | 0.8676 | 0.7290 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| MLP | smote | 13-class supervised | 0.9766 | 0.9790 | 0.9766 | 0.9772 | 0.7934 | 0.9286 | 0.7544 | 0.8176 | 0.9962 | 0.8487 | 155.0000 | 270.4100 | 173.2300 | 24487.8000 | 2.5340 | 57.8400 |
+| 1D-CNN | smote | 13-class supervised | 0.9904 | 0.9925 | 0.9904 | 0.9913 | 0.8447 | 0.9562 | 0.7649 | 0.8819 | 0.9933 | 0.8752 | 661.3000 | 806.4500 | 689.6400 | 17574.6000 | 1.3100 | 859.5500 |
+| XGBoost | none | 13-class supervised | 0.9989 | 0.9989 | 0.9989 | 0.9988 | 0.9603 | 0.9972 | 0.9013 | 0.9849 | 0.9995 | 0.9773 | 344.2000 | 485.6100 | 387.6300 | 252775.0000 | 2.9540 | 320.3300 |
+| Autoencoder | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8934 | 0.7382 | 0.6523 | 0.6926 | 0.6926 | N/A | 0.6820 | 0.7020 | 0.8676 | 0.7290 | 207.7000 | 357.8900 | 223.0700 | 23860.5000 | 1.5480 | 68.8000 |
+| Autoencoder (Deep Reg) | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8668 | 0.6872 | 0.5063 | 0.5831 | 0.5831 | N/A | 0.5704 | 0.5947 | 0.7908 | 0.6293 | 254.8000 | 374.6300 | 272.5700 | 20310.7000 | 5.0700 | 53.4600 |
+| VAE | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8693 | 0.6964 | 0.5132 | 0.5910 | 0.5910 | N/A | 0.5780 | 0.6025 | 0.7755 | 0.6231 | 250.7500 | 373.4600 | 262.3800 | 24299.1000 | 1.5710 | 33.4600 |
+| Isolation Forest | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4394 | N/A | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 7174.4000 | 8003.9700 | 7260.6900 | 75805.4000 | 2.0960 | 0.4800 |
+| One-Class SVM | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5898 | N/A | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 140.8500 | 167.0400 | 145.8000 | 16548.0000 | 0.4780 | 1.4900 |
+| LOF | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4647 | N/A | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 1313.5500 | 2214.9200 | 1426.5600 | 42331.4000 | 5.6660 | 0.4900 |
+| Score-Level Fusion (degenerate: equals Autoencoder) | benign_only | Binary anomaly (Benign vs Anomalous) | 0.8934 | 0.7382 | 0.6523 | 0.6926 | 0.6926 | N/A | 0.6820 | 0.7020 | 0.8676 | 0.7290 | N/A | N/A | N/A | N/A | N/A | N/A |
+
+
+> *Note:* F1_Macro_Reliable excludes classes with support below 30 on the evaluated partition and is always shown next to the all-class F1_Macro; use F1_Macro (with its CI) as the headline number. Excluded classes: Bot, Heartbleed, Infiltration, Web Attack.
+
+
+Validation selected a single-detector fusion; no gain from fusing detectors on this data.
 
 
 - **XGBoost Macro-F1 (95% Bootstrap CI, n=1000):** `0.9603` (`[0.9013, 0.9849]`, bootstrap std=`0.0193`)
@@ -41,7 +47,7 @@
 
 - **LOF Binary F1 (95% Bootstrap CI, n=1000):** `0.4647` (`[0.4516, 0.4775]`, bootstrap std=`0.0066`)
 
-- **Score-Level Fusion (AE+OCSVM+IF) Binary F1 (95% Bootstrap CI, n=1000):** `0.6926` (`[0.6820, 0.7020]`, bootstrap std=`0.0053`)
+- **Score-Level Fusion (degenerate: equals Autoencoder) Binary F1 (95% Bootstrap CI, n=1000):** `0.6926` (`[0.6820, 0.7020]`, bootstrap std=`0.0053`)
 
 
 
@@ -63,6 +69,9 @@
 | XGBoost | 0.9924 | 0.9916 | 0.9924 | 0.9917 | 0.7518 | 0.9173 | 0.7098 | 0.8250 | 0.9929 | 0.8049 |
 | 1D-CNN | 0.9521 | 0.9489 | 0.9521 | 0.9456 | 0.4376 | 0.5689 | 0.4265 | 0.4787 | 0.9700 | 0.7024 |
 | MLP | 0.9502 | 0.9376 | 0.9502 | 0.9400 | 0.2767 | 0.3597 | 0.2752 | 0.3004 | 0.9231 | 0.4422 |
+
+
+> *Note:* F1_Macro_Reliable excludes classes with support below 30 on the evaluated partition and is always shown next to the all-class F1_Macro; use F1_Macro (with its CI) as the headline number. Excluded classes: Bot, Heartbleed, Infiltration.
 
 
 - **XGBoost (`time_block`) Macro-F1 (95% Bootstrap CI, n=1000):** `0.7518` (`[0.7098, 0.8250]`, bootstrap std=`0.0273`)
@@ -151,6 +160,32 @@
 ### Time-Block Recall-vs-FPR Mitigation Experiment
 
 
+#### time_block Validation Partition Screening
+
+
+> Evaluated strictly on the validation partition (options screened without touching test data).
+
+
+| Option | Benign_Val_Pct | Threshold | Benign_FPR | Overall_Attack_Recall | Focus_Mean_Recall | Binary_F1 | Multiclass_Macro_F1 | Focus_Class_Recalls |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Baseline XGBoost ('none') | Argmax | argmax P(c) | 0.0610 | 0.9953 | 0.7083 | 0.8780 | 0.8440 | Bot=0.593, Heartbleed=0.000, Web Attack=0.943, Infiltration=0.714, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| XGBoost ('class_weight') | Argmax | argmax P(c) | 0.0793 | 0.9974 | 0.9397 | 0.8485 | 0.8713 | Bot=0.667, Heartbleed=1.000, Web Attack=0.971, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| Hybrid Override (XGBoost OR AE) | P90 | AE>0.0475 | 0.1301 | 0.9973 | 0.9226 | 0.7739 | N/A | Bot=0.593, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P90 | 1-P(B)>0.2449 | 0.0995 | 0.9971 | 0.7668 | 0.8172 | N/A | Bot=0.630, Heartbleed=0.000, Web Attack=0.971, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| Hybrid Override (XGBoost OR AE) | P95 | AE>0.1008 | 0.0833 | 0.9971 | 0.9226 | 0.8421 | N/A | Bot=0.593, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P95 | 1-P(B)>0.5884 | 0.0490 | 0.9940 | 0.6250 | 0.8986 | N/A | Bot=0.556, Heartbleed=0.000, Web Attack=0.943, Infiltration=0.286, DoS slowloris=1.000, DoS GoldenEye=0.966 |
+| Hybrid Override (XGBoost OR AE) | P97 | AE>0.1385 | 0.0733 | 0.9971 | 0.9226 | 0.8581 | N/A | Bot=0.593, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P97 | 1-P(B)>0.5986 | 0.0297 | 0.9940 | 0.6250 | 0.9349 | N/A | Bot=0.556, Heartbleed=0.000, Web Attack=0.943, Infiltration=0.286, DoS slowloris=1.000, DoS GoldenEye=0.966 |
+| Hybrid Override (XGBoost OR AE) | P99 | AE>0.1652 | 0.0699 | 0.9971 | 0.9226 | 0.8639 | N/A | Bot=0.593, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P99 | 1-P(B)>0.6067 | 0.0090 | 0.9938 | 0.6250 | 0.9772 | N/A | Bot=0.556, Heartbleed=0.000, Web Attack=0.943, Infiltration=0.286, DoS slowloris=1.000, DoS GoldenEye=0.966 |
+
+
+#### time_block Held-Out Test Partition (Descriptive Only)
+
+
+> **Evaluated on the held-out test partition for description only; options were NOT selected on test data.**
+
+
 | Option | Benign_Val_Pct | Threshold | Benign_FPR | Overall_Attack_Recall | Focus_Mean_Recall | Binary_F1 | Multiclass_Macro_F1 | Focus_Class_Recalls |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Baseline XGBoost ('none') | Argmax | argmax P(c) | 0.0001 | 0.9613 | 0.4276 | 0.9800 | 0.7518 | Bot=0.000, Heartbleed=0.000, Web Attack=0.543, Infiltration=0.429, DoS slowloris=0.765, DoS GoldenEye=0.829 |
@@ -165,7 +200,9 @@
 | Lower P(Benign) Gate (1 - P_Benign > tau) | P99 | 1-P(B)>0.6067 | 0.0001 | 0.9524 | 0.3684 | 0.9754 | N/A | Bot=0.000, Heartbleed=0.000, Web Attack=0.486, Infiltration=0.143, DoS slowloris=0.753, DoS GoldenEye=0.829 |
 
 
-- **Mitigation Assessment (`time_block`):** XGBoost ('class_weight') (Argmax) raises focus attack recall from 0.4276 to 0.7816 with bounded Benign FPR=0.0144 vs baseline 0.0001.
+- **Validation vs. Test Ranking Agreement:** Validation ranking agrees with test (Spearman rho=0.9655; top bounded-FPR option is 'XGBoost ('class_weight') (Argmax)' on both splits).
+
+- **Mitigation Assessment (`time_block`):** Descriptively on the held-out test partition (not used for selection), XGBoost ('class_weight') (Argmax) shows focus attack recall 0.7816 at Benign FPR=0.0144 vs baseline 0.4276 (Benign FPR=0.0001).
 
 
 ## 3. Open-Set Cross-Day Protocol (`by_day`: Mon–Wed Train / Thu Val / Thu–Fri Unseen Attacks)
@@ -200,7 +237,36 @@
 | 1D-CNN | 0.6860 | 0.4871 | 0.6860 | 0.5697 | 0.0691 | 0.1659 | 0.1382 | 0.6507 |
 
 
+> *Note:* F1_Macro_Reliable excludes classes with support below 30 on the evaluated partition and is always shown next to the all-class F1_Macro; use F1_Macro (with its CI) as the headline number. Excluded classes: DoS GoldenEye, DoS Hulk, DoS Slowhttptest, DoS slowloris, FTP-Patator, Heartbleed, Infiltration, SSH-Patator.
+
+
 ### Open-Set Cross-Day Recall-vs-FPR Mitigation Experiment (Thu–Fri Unseen Attacks)
+
+
+#### by_day Validation Partition Screening
+
+
+> Evaluated strictly on the validation partition (options screened without touching test data).
+
+
+| Option | Benign_Val_Pct | Threshold | Benign_FPR | Overall_Attack_Recall | Focus_Mean_Recall | Binary_F1 | Multiclass_Macro_F1 | Focus_Class_Recalls |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Baseline XGBoost ('none') | Argmax | argmax P(c) | 0.0005 | 0.0283 | 0.0170 | 0.0517 | 0.1661 | Infiltration=0.000, Web Attack=0.034 |
+| XGBoost ('class_weight') | Argmax | argmax P(c) | 0.0008 | 0.3396 | 0.2046 | 0.4675 | 0.1247 | Infiltration=0.000, Web Attack=0.409 |
+| Hybrid Override (XGBoost OR AE) | P90 | AE>0.0616 | 0.1003 | 0.2075 | 0.5228 | 0.0265 | N/A | Infiltration=1.000, Web Attack=0.045 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P90 | 1-P(B)>0.0001 | 0.1000 | 0.8585 | 0.5834 | 0.1054 | N/A | Infiltration=0.167, Web Attack=1.000 |
+| Hybrid Override (XGBoost OR AE) | P95 | AE>0.1169 | 0.0503 | 0.1792 | 0.4394 | 0.0425 | N/A | Infiltration=0.833, Web Attack=0.045 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P95 | 1-P(B)>0.0002 | 0.0501 | 0.8396 | 0.5278 | 0.1852 | N/A | Infiltration=0.056, Web Attack=1.000 |
+| Hybrid Override (XGBoost OR AE) | P97 | AE>0.1252 | 0.0303 | 0.1792 | 0.4394 | 0.0645 | N/A | Infiltration=0.833, Web Attack=0.045 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P97 | 1-P(B)>0.0005 | 0.0301 | 0.8302 | 0.5000 | 0.2691 | N/A | Infiltration=0.000, Web Attack=1.000 |
+| Hybrid Override (XGBoost OR AE) | P99 | AE>0.1888 | 0.0103 | 0.1415 | 0.3283 | 0.1075 | N/A | Infiltration=0.611, Web Attack=0.045 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P99 | 1-P(B)>0.0020 | 0.0101 | 0.8302 | 0.5000 | 0.5057 | N/A | Infiltration=0.000, Web Attack=1.000 |
+
+
+#### by_day Held-Out Test Partition (Descriptive Only)
+
+
+> **Evaluated on the held-out test partition for description only; options were NOT selected on test data.**
 
 
 | Option | Benign_Val_Pct | Threshold | Benign_FPR | Overall_Attack_Recall | Focus_Mean_Recall | Binary_F1 | Multiclass_Macro_F1 | Focus_Class_Recalls |
@@ -217,7 +283,9 @@
 | Lower P(Benign) Gate (1 - P_Benign > tau) | P99 | 1-P(B)>0.0020 | 0.0103 | 0.3290 | 0.3412 | 0.4868 | N/A | Bot=0.000, DDoS=0.680, Infiltration=0.000, PortScan=0.026, Web Attack=1.000 |
 
 
-- **Mitigation Assessment (`by_day`):** Lower P(Benign) Gate (1 - P_Benign > tau) (P99) raises focus attack recall from 0.1349 to 0.3412 with bounded Benign FPR=0.0103 vs baseline 0.0001.
+- **Validation vs. Test Ranking Agreement:** Validation ranking agrees with test (Spearman rho=0.9756; top bounded-FPR option is 'Lower P(Benign) Gate (1 - P_Benign > tau) (P99)' on both splits).
+
+- **Mitigation Assessment (`by_day`):** Descriptively on the held-out test partition (not used for selection), Lower P(Benign) Gate (1 - P_Benign > tau) (P99) shows focus attack recall 0.3412 at Benign FPR=0.0103 vs baseline 0.1349 (Benign FPR=0.0001).
 
 
 ## 4. Shortcut Feature Ablation (With vs. Without `Destination Port`)
@@ -318,6 +386,9 @@
 | 5 | 130062 | 32083 | 0.9985 | 0.9985 | 0.9522 | 0.9829 | 0.9993 |
 
 
+> *Note:* F1_Macro_Reliable excludes classes with support below 30 on the evaluated partition and is always shown next to the all-class F1_Macro; use F1_Macro (with its CI) as the headline number. Excluded classes: Bot, Heartbleed, Infiltration.
+
+
 ### Pooled Out-of-Fold (OOF) Per-Class Evaluation (5-Fold CV Dev Pool, Wilson 95% Recall CI)
 
 
@@ -350,6 +421,9 @@
 | confidence_weighted | 0.9983 | 0.9356 | 0.9876 | 0.9983 | 0.9989 | 0.0111 |
 | val_weighted_voting | 0.9970 | 0.9184 | 0.9786 | 0.9970 | 0.9985 | 0.0110 |
 | stacking | 0.9988 | 0.9725 | 0.9921 | 0.9987 | 0.9988 | 0.0007 |
+
+
+> *Note:* F1_Macro_Reliable excludes classes with support below 30 on the evaluated partition and is always shown next to the all-class F1_Macro; use F1_Macro (with its CI) as the headline number. Excluded classes: Bot, Heartbleed, Infiltration, Web Attack.
 
 
 ### Paired Bootstrap Macro-F1 Significance vs. Best Single (`XGBoost`)
@@ -390,7 +464,10 @@
 | Isolation Forest | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 0.0499 | 0.0000 | 0.6101 |  |
 | One-Class SVM | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 0.0504 | 0.0000 | 0.6385 |  |
 | LOF | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 0.0520 | 0.1154 | 0.4188 |  |
-| Score-Level Fusion (AE+OCSVM+IF) | 0.8934 | 0.7382 | 0.6523 | 0.6926 | 0.6820 | 0.7020 | 0.8676 | 0.7290 | 0.0522 | 0.0000 | 0.5816 | YES |
+| Score-Level Fusion (degenerate: equals Autoencoder) | 0.8934 | 0.7382 | 0.6523 | 0.6926 | 0.6820 | 0.7020 | 0.8676 | 0.7290 | 0.0522 | 0.0000 | 0.5816 | YES |
+
+
+Validation selected a single-detector fusion; no gain from fusing detectors on this data.
 
 
 - **Non-Test Validation Selection (Benign Percentile + Leave-Attack-Out Validation):** Best single=`Autoencoder`, Selected overall=`Score-Level Fusion (AE+OCSVM+IF)`, Fusion weights=[`Autoencoder`=1.00, `One-Class SVM`=0.00, `Isolation Forest`=0.00], Fusion threshold=`0.0179`.
@@ -410,7 +487,7 @@
 | Score-Level Fusion (AE+OCSVM+IF) | fusion | Autoencoder=1.00 | 0.1539 | 0.8554 | 0.4549 |
 
 
-- **Verdict:** Best binary F1 at 95th-pct threshold: Autoencoder (F1=0.6926 [0.6820, 0.7020], Recall=0.6523, FPR=0.0522); best overall ROC-AUC ranking: Autoencoder (ROC-AUC=0.8676); validation-selected option (leave-attack-out non-test): 'Score-Level Fusion (AE+OCSVM+IF)'. Even the best unsupervised option/fusion still trails supervised attribution by a wide margin and remains strictly a supplementary zero-day signal, not a replacement for XGBoost.
+- **Verdict:** Best binary F1 at 95th-pct threshold: Autoencoder (F1=0.6926 [0.6820, 0.7020], Recall=0.6523, FPR=0.0522); best overall ROC-AUC ranking: Autoencoder (ROC-AUC=0.8676); validation-selected option (leave-attack-out non-test): 'Score-Level Fusion (degenerate: equals Autoencoder)'. Validation selected a single-detector fusion; no gain from fusing detectors on this data.
 
 
 ### Percentile Threshold Trade-Off Sweep Across Detectors
@@ -442,10 +519,10 @@
 | LOF | 95.0000 | 1.1482 | 0.6178 | 0.3724 | 0.4647 | 0.0520 | 0.6276 |
 | LOF | 97.0000 | 2.1977 | 0.6481 | 0.2611 | 0.3723 | 0.0320 | 0.7389 |
 | LOF | 99.0000 | 6.2781 | 0.4178 | 0.0351 | 0.0648 | 0.0110 | 0.9649 |
-| Score-Level Fusion (AE+OCSVM+IF) | 90.0000 | 0.0090 | 0.6172 | 0.7187 | 0.6641 | 0.1005 | 0.2813 |
-| Score-Level Fusion (AE+OCSVM+IF) | 95.0000 | 0.0179 | 0.7382 | 0.6523 | 0.6926 | 0.0522 | 0.3477 |
-| Score-Level Fusion (AE+OCSVM+IF) | 97.0000 | 0.0297 | 0.7977 | 0.5652 | 0.6617 | 0.0323 | 0.4348 |
-| Score-Level Fusion (AE+OCSVM+IF) | 99.0000 | 0.0782 | 0.8997 | 0.4472 | 0.5975 | 0.0112 | 0.5528 |
+| Score-Level Fusion (degenerate: equals Autoencoder) | 90.0000 | 0.0090 | 0.6172 | 0.7187 | 0.6641 | 0.1005 | 0.2813 |
+| Score-Level Fusion (degenerate: equals Autoencoder) | 95.0000 | 0.0179 | 0.7382 | 0.6523 | 0.6926 | 0.0522 | 0.3477 |
+| Score-Level Fusion (degenerate: equals Autoencoder) | 97.0000 | 0.0297 | 0.7977 | 0.5652 | 0.6617 | 0.0323 | 0.4348 |
+| Score-Level Fusion (degenerate: equals Autoencoder) | 99.0000 | 0.0782 | 0.8997 | 0.4472 | 0.5975 | 0.0112 | 0.5528 |
 
 
 ## 9. XGBoost Sample-Size Sensitivity Experiment (`data.sample_size`)
@@ -457,6 +534,9 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 200000 | 191268 | 138190 | 28324 | 0.9989 | 0.9988 | 0.9603 | 0.9972 | 0.9013 | 0.9849 | 0.9995 | completed |
 | 500000 | 470048 | 339608 | 69026 | 0.9993 | 0.9993 | 0.9894 | 0.9875 | 0.9837 | 0.9943 | 0.9997 | completed |
+
+
+> *Note:* F1_Macro_Reliable excludes classes with support below 30 on the evaluated partition and is always shown next to the all-class F1_Macro; use F1_Macro (with its CI) as the headline number. Excluded classes: N=200,000: Bot, Heartbleed, Infiltration, Web Attack; N=500,000: Heartbleed, Infiltration.
 
 
 - **Sensitivity Verdict:** Scaling stratified sample from 200,000 to 500,000 rows changed XGBoost F1_Macro by +0.0291 (0.9603 [0.9013, 0.9849] -> 0.9894 [0.9837, 0.9943]) and F1_Macro_Reliable by -0.0097 (95% CIs overlap=True); conclusions_change=False.
@@ -494,7 +574,7 @@
 | MLP | focal_loss | reverted | 0.7618 | 0.9712 | 0.8436 | 0.1075 | -0.0516 | 31.1100 |
 | 1D-CNN | cross_entropy (baseline) | baseline | 0.8701 | 0.9933 | 0.9120 | 0.0220 | 0.0000 | 0.0000 |
 | 1D-CNN | label_smoothing | reverted | 0.6562 | 0.9696 | 0.7350 | 0.1153 | -0.2138 | 120.9400 |
-| 1D-CNN | focal_loss | skipped_time_budget | N/A | N/A | N/A | N/A | N/A | 0.0000 |
+| 1D-CNN | focal_loss | skipped_time_budget | N/A | N/A | N/A | N/A | N/A | N/A |
 
 
 - **MLP Decision:** Reverted to baseline 'cross_entropy' for MLP (baseline val Macro-F1=0.8134; no variant exceeded +0.0020 tolerance within bounded neural budget).
@@ -505,4 +585,4 @@
 
 ## 12. Preprocessing vs. Model Inference Latency
 
-- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** median = `828.35 µs`, P95 = `1344.52 µs` (mean = `906.76 µs`, `50` warm-up calls discarded; `1102.8` flows/sec).
+- **Isolated Single-Flow Preprocessing (Imputer + 5-Sigma Clipper + StandardScaler):** median = `814.00 µs`, P95 = `1057.99 µs` (mean = `855.75 µs`, `50` warm-up calls discarded; `1168.6` flows/sec).

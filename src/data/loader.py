@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.config import PROJECT_ROOT, DataConfig
+from src.config import PROJECT_ROOT, DataConfig, to_repo_relative_path
 from src.data.cleaner import CHRON_ORDER_COLUMN, SOURCE_FILE_COLUMN, normalize_label_text
 from src.utils.logging import get_logger
 
@@ -592,6 +592,7 @@ def align_real_timestamps(
     """
     n_total = len(df_main)
     ts_dir = _resolve_project_path(timestamp_source_dir)
+    rel_ts_dir = to_repo_relative_path(ts_dir)
 
     existing_ts_col = next(
         (c for c in df_main.columns if str(c).strip().lower() == "timestamp"),
@@ -601,7 +602,7 @@ def align_real_timestamps(
         matched = int(df_main[existing_ts_col].notna().sum())
         return df_main, {
             "status": "native_column",
-            "source_dir": str(ts_dir) if ts_dir else None,
+            "source_dir": rel_ts_dir,
             "directory_exists": bool(ts_dir and ts_dir.exists()),
             "csv_files_found": 0,
             "real_timestamps_available": True,
@@ -621,7 +622,7 @@ def align_real_timestamps(
         )
         return df_main, {
             "status": "directory_not_found",
-            "source_dir": str(ts_dir) if ts_dir else None,
+            "source_dir": rel_ts_dir,
             "directory_exists": False,
             "csv_files_found": 0,
             "real_timestamps_available": False,
@@ -641,7 +642,7 @@ def align_real_timestamps(
         )
         return df_main, {
             "status": "no_csv_files",
-            "source_dir": str(ts_dir),
+            "source_dir": rel_ts_dir,
             "directory_exists": True,
             "csv_files_found": 0,
             "real_timestamps_available": False,
@@ -679,7 +680,7 @@ def align_real_timestamps(
         )
         return df_main, {
             "status": "no_timestamp_column",
-            "source_dir": str(ts_dir),
+            "source_dir": rel_ts_dir,
             "directory_exists": True,
             "csv_files_found": len(ts_csvs),
             "real_timestamps_available": False,
@@ -705,7 +706,7 @@ def align_real_timestamps(
         logger.warning("No shared join keys found between raw CSVs and %s; skipping timestamp merge.", ts_dir)
         return df_main, {
             "status": "no_shared_keys",
-            "source_dir": str(ts_dir),
+            "source_dir": rel_ts_dir,
             "directory_exists": True,
             "csv_files_found": len(ts_csvs),
             "real_timestamps_available": False,
@@ -741,7 +742,7 @@ def align_real_timestamps(
     )
     return final_df, {
         "status": "aligned" if matched_rows > 0 else "zero_matches",
-        "source_dir": str(ts_dir),
+        "source_dir": rel_ts_dir,
         "directory_exists": True,
         "csv_files_found": len(ts_csvs),
         "real_timestamps_available": matched_rows > 0,
@@ -762,6 +763,7 @@ def apply_label_corrections(
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Optionally apply Engelen et al. (2021) corrected CICIDS2017 labels when configured."""
     corr_path = _resolve_project_path(correction_file)
+    rel_corr_path = to_repo_relative_path(corr_path)
     n_total = len(df_main)
     if corr_path is None or not corr_path.exists() or not corr_path.is_file():
         logger.warning(
@@ -771,7 +773,7 @@ def apply_label_corrections(
         return df_main, {
             "status": "file_not_found" if corr_path is not None else "disabled",
             "applied": False,
-            "file_path": str(corr_path) if corr_path else None,
+            "file_path": rel_corr_path,
             "join_strategy": "none",
             "join_keys_used": [],
             "total_rows": n_total,
@@ -803,7 +805,7 @@ def apply_label_corrections(
         return df_main, {
             "status": "invalid_schema",
             "applied": False,
-            "file_path": str(corr_path),
+            "file_path": rel_corr_path,
             "join_strategy": "none",
             "join_keys_used": [],
             "total_rows": n_total,
@@ -826,7 +828,7 @@ def apply_label_corrections(
         return df_main, {
             "status": "no_shared_keys",
             "applied": False,
-            "file_path": str(corr_path),
+            "file_path": rel_corr_path,
             "join_strategy": join_strategy,
             "join_keys_used": [],
             "total_rows": n_total,
@@ -846,7 +848,7 @@ def apply_label_corrections(
         return df_main, {
             "status": "zero_matches",
             "applied": False,
-            "file_path": str(corr_path),
+            "file_path": rel_corr_path,
             "join_strategy": join_strategy,
             "join_keys_used": used_keys,
             "total_rows": n_total,
@@ -886,7 +888,7 @@ def apply_label_corrections(
     return out_df, {
         "status": "applied",
         "applied": True,
-        "file_path": str(corr_path),
+        "file_path": rel_corr_path,
         "join_strategy": join_strategy,
         "join_keys_used": used_keys,
         "total_rows": n_total,

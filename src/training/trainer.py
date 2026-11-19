@@ -11,7 +11,7 @@ from typing import Any
 import joblib
 import numpy as np
 
-from src.config import AppConfig, AutoencoderConfig, ModelConfig
+from src.config import AppConfig, AutoencoderConfig, ModelConfig, sanitize_machine_paths
 from src.data.preprocessing import PreparedDataset
 from src.detection.anomaly_detection import (
     AnomalyFusionDetector,
@@ -821,35 +821,34 @@ def train_all_models(
     registry.save_model_metadata(model_metadata)
     registry.save_artifact_manifest()
 
-    with (artifacts_dir / "training_diagnostics.json").open("w", encoding="utf-8") as fh:
-        json.dump(
-            {
-                "training_durations_sec": durations,
-                "overfitting_analysis": overfit_stats,
-                "imbalance_experiment": imb_result.to_dict(),
-                "imbalance_strategies_by_model": selected_strategies,
-                "neural_loss_experiments": neural_loss_experiments,
-                "model_metadata": model_metadata,
-                "xgboost_optimization": xgb_opt.to_summary_dict(),
-                "calibration_report": calibration_report,
-                "stacking_summary": stacker.to_summary_dict(),
-                "best_supervised_model": best_sup_model,
-                "anomaly_baselines_meta": {
-                    k: {"threshold": float(v.threshold), "train_samples": int(v.train_samples_used)}
-                    for k, v in anomaly_baselines.items()
-                },
-                "anomaly_variants_meta": anomaly_variants_meta,
-                "anomaly_validation_selection": anomaly_validation_selection,
-                "hardware": {
-                    "tf_device": hardware.tf_device,
-                    "xgb_device": hardware.xgb_device,
-                    "cuda_driver_detected": hardware.cuda_driver_detected,
-                    "notes": hardware.notes,
-                },
+    diagnostics_payload = sanitize_machine_paths(
+        {
+            "training_durations_sec": durations,
+            "overfitting_analysis": overfit_stats,
+            "imbalance_experiment": imb_result.to_dict(),
+            "imbalance_strategies_by_model": selected_strategies,
+            "neural_loss_experiments": neural_loss_experiments,
+            "model_metadata": model_metadata,
+            "xgboost_optimization": xgb_opt.to_summary_dict(),
+            "calibration_report": calibration_report,
+            "stacking_summary": stacker.to_summary_dict(),
+            "best_supervised_model": best_sup_model,
+            "anomaly_baselines_meta": {
+                k: {"threshold": float(v.threshold), "train_samples": int(v.train_samples_used)}
+                for k, v in anomaly_baselines.items()
             },
-            fh,
-            indent=2,
-        )
+            "anomaly_variants_meta": anomaly_variants_meta,
+            "anomaly_validation_selection": anomaly_validation_selection,
+            "hardware": {
+                "tf_device": hardware.tf_device,
+                "xgb_device": hardware.xgb_device,
+                "cuda_driver_detected": hardware.cuda_driver_detected,
+                "notes": hardware.notes,
+            },
+        }
+    )
+    with (artifacts_dir / "training_diagnostics.json").open("w", encoding="utf-8") as fh:
+        json.dump(diagnostics_payload, fh, indent=2)
 
     return TrainingOutputs(
         models=trained_models,

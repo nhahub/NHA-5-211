@@ -11,6 +11,7 @@ from typing import Any
 
 import joblib
 
+from src.config import sanitize_machine_paths
 from src.utils.logging import get_logger
 
 logger = get_logger("smart_ids.registry")
@@ -149,10 +150,12 @@ class ModelRegistry:
 
     def save_manifest(self, metadata: dict[str, Any]) -> Path:
         """Persist run manifest tracking dataset provenance, versions, and metrics."""
-        payload = {
-            "saved_at_utc": datetime.now(UTC).isoformat(),
-            **metadata,
-        }
+        payload = sanitize_machine_paths(
+            {
+                "saved_at_utc": datetime.now(UTC).isoformat(),
+                **metadata,
+            }
+        )
         out_path = self.artifacts_dir / "run_manifest.json"
         with out_path.open("w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, default=str)

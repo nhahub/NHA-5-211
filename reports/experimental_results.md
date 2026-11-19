@@ -83,10 +83,13 @@ Selection mode: `per_model` (neural candidates capped at `10` epochs during sele
 | Isolation Forest | 0.8385 | 0.6085 | 0.3438 | 0.4394 | 0.4253 | 0.4531 | 0.7710 | 0.5005 | 0.0499 | 0.0000 | 0.6101 |  |
 | One-Class SVM | 0.8690 | 0.6960 | 0.5117 | 0.5898 | 0.5770 | 0.6020 | 0.7467 | 0.5649 | 0.0504 | 0.0000 | 0.6385 |  |
 | LOF | 0.8421 | 0.6178 | 0.3724 | 0.4647 | 0.4516 | 0.4775 | 0.8607 | 0.5391 | 0.0520 | 0.1154 | 0.4188 |  |
-| Score-Level Fusion (AE+OCSVM+IF) | 0.8934 | 0.7382 | 0.6523 | 0.6926 | 0.6820 | 0.7020 | 0.8676 | 0.7290 | 0.0522 | 0.0000 | 0.5816 | YES |
+| Score-Level Fusion (degenerate: equals Autoencoder) | 0.8934 | 0.7382 | 0.6523 | 0.6926 | 0.6820 | 0.7020 | 0.8676 | 0.7290 | 0.0522 | 0.0000 | 0.5816 | YES |
 
 
-- **Assessment:** Best binary F1 at 95th-pct threshold: Autoencoder (F1=0.6926 [0.6820, 0.7020], Recall=0.6523, FPR=0.0522); best overall ROC-AUC ranking: Autoencoder (ROC-AUC=0.8676); validation-selected option (leave-attack-out non-test): 'Score-Level Fusion (AE+OCSVM+IF)'. Even the best unsupervised option/fusion still trails supervised attribution by a wide margin and remains strictly a supplementary zero-day signal, not a replacement for XGBoost.
+Validation selected a single-detector fusion; no gain from fusing detectors on this data.
+
+
+- **Assessment:** Best binary F1 at 95th-pct threshold: Autoencoder (F1=0.6926 [0.6820, 0.7020], Recall=0.6523, FPR=0.0522); best overall ROC-AUC ranking: Autoencoder (ROC-AUC=0.8676); validation-selected option (leave-attack-out non-test): 'Score-Level Fusion (degenerate: equals Autoencoder)'. Validation selected a single-detector fusion; no gain from fusing detectors on this data.
 
 
 - **Autoencoder 95th Percentile Benign Validation Threshold:** `0.023815`
@@ -119,23 +122,23 @@ Selection mode: `per_model` (neural candidates capped at `10` epochs during sele
 | LOF | 95.0000 | 1.1482 | 0.6178 | 0.3724 | 0.4647 | 0.0520 | 0.6276 |
 | LOF | 97.0000 | 2.1977 | 0.6481 | 0.2611 | 0.3723 | 0.0320 | 0.7389 |
 | LOF | 99.0000 | 6.2781 | 0.4178 | 0.0351 | 0.0648 | 0.0110 | 0.9649 |
-| Score-Level Fusion (AE+OCSVM+IF) | 90.0000 | 0.0090 | 0.6172 | 0.7187 | 0.6641 | 0.1005 | 0.2813 |
-| Score-Level Fusion (AE+OCSVM+IF) | 95.0000 | 0.0179 | 0.7382 | 0.6523 | 0.6926 | 0.0522 | 0.3477 |
-| Score-Level Fusion (AE+OCSVM+IF) | 97.0000 | 0.0297 | 0.7977 | 0.5652 | 0.6617 | 0.0323 | 0.4348 |
-| Score-Level Fusion (AE+OCSVM+IF) | 99.0000 | 0.0782 | 0.8997 | 0.4472 | 0.5975 | 0.0112 | 0.5528 |
+| Score-Level Fusion (degenerate: equals Autoencoder) | 90.0000 | 0.0090 | 0.6172 | 0.7187 | 0.6641 | 0.1005 | 0.2813 |
+| Score-Level Fusion (degenerate: equals Autoencoder) | 95.0000 | 0.0179 | 0.7382 | 0.6523 | 0.6926 | 0.0522 | 0.3477 |
+| Score-Level Fusion (degenerate: equals Autoencoder) | 97.0000 | 0.0297 | 0.7977 | 0.5652 | 0.6617 | 0.0323 | 0.4348 |
+| Score-Level Fusion (degenerate: equals Autoencoder) | 99.0000 | 0.0782 | 0.8997 | 0.4472 | 0.5975 | 0.0112 | 0.5528 |
 
 
 ## 5. Unseen-Attack Holdout Protocol
 
 - **Held-Out Attack Class:** `Web Attack` (`26` test flows)
 - **Closed-Set Supervised Unseen-Class Recall:** `0.0000`
-- **Benign-Only Autoencoder Unseen-Attack Recall:** `0.0000` (Benign vs Unseen ROC-AUC = `0.5569`)
+- **Benign-Only Autoencoder Unseen-Attack Recall:** `0.0000` (Benign vs Unseen ROC-AUC = `0.5626`)
 
 
 ## 6. SHAP Explainability Summary
 
-- **XGBoost Top-5 (`TreeExplainer`, 0.44s):** `Destination Port` (0.8597), `Init_Win_bytes_backward` (0.3706), `Init_Win_bytes_forward` (0.2930), `min_seg_size_forward` (0.2793), `Bwd Packets/s` (0.2136)
+- **XGBoost Top-5 (`TreeExplainer`, 0.46s):** `Destination Port` (0.8597), `Init_Win_bytes_backward` (0.3706), `Init_Win_bytes_forward` (0.2930), `min_seg_size_forward` (0.2793), `Bwd Packets/s` (0.2136)
 
-- **MLP Top-5 (`GradientExplainer`, 2.33s):** `Min Packet Length` (0.0078), `ACK Flag Count` (0.0071), `PSH Flag Count` (0.0062), `Packet Length Variance` (0.0044), `Packet Length Std` (0.0042)
+- **MLP Top-5 (`GradientExplainer`, 2.43s):** `Min Packet Length` (0.0065), `ACK Flag Count` (0.0061), `PSH Flag Count` (0.0054), `Destination Port` (0.0037), `Packet Length Std` (0.0036)
 
-- **MLP Explainer Trade-Off:** `GradientExplainer` speedup vs `KernelExplainer` = `2.82x`, Spearman rank correlation = `0.6694`.
+- **MLP Explainer Trade-Off:** `GradientExplainer` speedup vs `KernelExplainer` = `2.86x`, Spearman rank correlation = `0.7402`.

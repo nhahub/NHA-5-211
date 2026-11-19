@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 import joblib
 import numpy as np
 import pandas as pd
 import pytest
+from scripts.check_optional_data import check_optional_data_status, format_optional_data_report
 from scripts.download_models import download_model_assets
 from scripts.export_onnx import check_onnx_environment
 from scripts.export_onnx import main as export_onnx_main
@@ -16,6 +18,7 @@ from scripts.generate_test_report import CommandRun, parse_pytest_output, render
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from src.config import (
+    PROJECT_ROOT,
     AppConfig,
     DataConfig,
     EvaluationConfig,
@@ -23,6 +26,8 @@ from src.config import (
     SecurityConfig,
     SplitConfig,
     get_app_config,
+    sanitize_machine_paths,
+    to_repo_relative_path,
 )
 from src.data.feature_engineering import SchemaValidationError
 from src.data.loader import CICIDS2017_FEATURES, generate_synthetic_cicids2017
@@ -563,3 +568,68 @@ def test_model_registry_stub_mode_graceful_degradation(tmp_path: Path) -> None:
     assert loaded.feature_names == ["f1", "f2"]
     assert loaded.anomaly_threshold == pytest.approx(0.025)
     assert loaded.model_imbalance_strategies == {"XGBoost": "none"}
+
+
+def test_no_absolute_machine_paths_in_artifacts_and_sanitizer(tmp_path: Path) -> None:
+    """Committed reports, artifacts, and processed JSONs must not leak local machine paths."""
+    sample = {
+        "win": r"D:\IDS_Final\data\TrafficLabelling",
+        "win_ext": r"C:\Users\dev\external_folder",
+        "unix": "/home/alice/TrafficLabelling",
+        "rel": "data/engelen2021_label_corrections.csv",
+    }
+    cleaned = sanitize_machine_paths(sample, root=Path(r"D:\IDS_Final"))
+    assert cleaned == {
+        "win": "data/TrafficLabelling",
+        "win_ext": "external_folder",
+        "unix": "TrafficLabelling",
+        "rel": "data/engelen2021_label_corrections.csv",
+    }
+    assert to_repo_relative_path(tmp_path / "custom_dir") == "custom_dir"
+
+    leak_pattern = re.compile(r"(?:[A-Za-z]:\\\\|[A-Za-z]:/|/home/)")
+    scan_targets = [
+        *sorted((PROJECT_ROOT / "reports").glob("*.json")),
+        *sorted((PROJECT_ROOT / "reports").glob("*.md")),
+        *sorted((PROJECT_ROOT / "reports").glob("*.csv")),
+        *sorted((PROJECT_ROOT / "artifacts").glob("*.json")),
+        *sorted((PROJECT_ROOT / "data" / "processed").glob("*.json")),
+    ]
+    leaks: list[str] = []
+    for artifact in scan_targets:
+        text = artifact.read_text(encoding="utf-8", errors="ignore")
+        if leak_pattern.search(text):
+            leaks.append(artifact.relative_to(PROJECT_ROOT).as_posix())
+    assert leaks == [], f"Absolute machine paths detected in generated artifacts: {leaks}"
+
+
+def test_check_optional_data_present_and_missing(tmp_path: Path) -> None:
+    """Optional data checker reports missing files and detects TrafficLabelling + Engelen CSVs when placed."""
+    cfg = AppConfig()
+    missing_status = check_optional_data_status(app_cfg=cfg, root=tmp_path)
+    assert missing_status["timestamp_source"]["ready"] is False
+    assert missing_status["label_correction"]["ready"] is False
+    assert missing_status["all_optional_present"] is False
+    missing_report = format_optional_data_report(missing_status)
+    assert "TrafficLabelling_.zip" in missing_report
+    assert "intrusion-detection.distrinet-research.be/CNS2021/" in missing_report
+    assert "python scripts/evaluate.py --time-block-only" in missing_report
+
+    ts_dir = tmp_path / "data" / "TrafficLabelling"
+    ts_dir.mkdir(parents=True, exist_ok=True)
+    (ts_dir / "Monday-WorkingHours.pcap_ISCX.csv").write_text(
+        "Flow ID,Timestamp,Destination Port,Label\n1,03/07/2017 08:55,80,BENIGN\n",
+        encoding="utf-8",
+    )
+    corr_file = tmp_path / "data" / "engelen2021_label_corrections.csv"
+    corr_file.write_text("Flow ID,Corrected Label\n1,BENIGN\n", encoding="utf-8")
+
+    present_status = check_optional_data_status(app_cfg=cfg, root=tmp_path)
+    assert present_status["timestamp_source"]["ready"] is True
+    assert present_status["timestamp_source"]["csv_count"] == 1
+    assert (
+        "Monday-WorkingHours.pcap_ISCX.csv"
+        in present_status["timestamp_source"]["files_with_timestamp_column"]
+    )
+    assert present_status["label_correction"]["ready"] is True
+    assert present_status["all_optional_present"] is True

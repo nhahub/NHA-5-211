@@ -17,7 +17,7 @@
     "warning_message": null,
     "timestamp_alignment": {
       "status": "directory_not_found",
-      "source_dir": "D:\\IDS_Final\\data\\TrafficLabelling",
+      "source_dir": "data/TrafficLabelling",
       "directory_exists": false,
       "csv_files_found": 0,
       "real_timestamps_available": false,
@@ -31,7 +31,7 @@
     "label_correction": {
       "status": "file_not_found",
       "applied": false,
-      "file_path": "D:\\IDS_Final\\data\\engelen2021_label_corrections.csv",
+      "file_path": "data/engelen2021_label_corrections.csv",
       "join_strategy": "none",
       "join_keys_used": [],
       "total_rows": 2830743,
@@ -45,7 +45,7 @@
   },
   "timestamp_alignment": {
     "status": "directory_not_found",
-    "source_dir": "D:\\IDS_Final\\data\\TrafficLabelling",
+    "source_dir": "data/TrafficLabelling",
     "directory_exists": false,
     "csv_files_found": 0,
     "real_timestamps_available": false,
