@@ -53,11 +53,9 @@ Validation selected a single-detector fusion; no gain from fusing detectors on t
 
 ## 2. Chronological Drift Evaluation (`time_block`: Per-Class Earliest ~60% Train / Next ~20% Val / Last ~20% Test)
 
-- **Partitions (`split_strategy='time_block'`):** Train pre-SMOTE=`114,762`, Validation=`37,952`, Test=`37,862` (Ordering=`Capture_Order (capture session schedule + CSV row index; Timestamp column absent in MachineLearningCVE CSVs)`, `leakage_checks.passed=True`).
+- **Partitions (`split_strategy='time_block'`):** Train pre-SMOTE=`115,669`, Validation=`37,420`, Test=`37,535` (Ordering=`Timestamp`, `leakage_checks.passed=True`).
 
-- **Warning:** `time_block ordering = CSV row order (no real Timestamp)`
-
-- **Timestamp Alignment:** status=`directory_not_found`, strategy=`none (CSV row order fallback)`, keys=`[]`, matched=`0` / `2,830,743` (unmatched=`2,830,743`).
+- **Timestamp Alignment:** status=`aligned`, strategy=`flow_telemetry_signature`, keys=`['Source_Session_Day', 'Destination Port', 'Flow Duration', 'Total Fwd Packets', 'Total Backward Packets', 'Total Length of Fwd Packets', 'Total Length of Bwd Packets', 'Flow IAT Mean', 'Label', 'Occurrence_Index']`, matched=`2,830,471` / `2,830,743` (unmatched=`272`).
 
 - **Low-Support / Tiny-Class Chronological Allocations:** `Heartbleed`: Low-support chronological split (n=11): 7 earliest train / 2 middle val / 2 latest test.
 
@@ -66,21 +64,21 @@ Validation selected a single-detector fusion; no gain from fusing detectors on t
 
 | Model | Accuracy | Precision_Weighted | Recall_Weighted | F1_Weighted | F1_Macro | F1_Macro_Reliable | F1_Macro_CI95_Low | F1_Macro_CI95_High | ROC_AUC_OVR | PR_AUC_OVR |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| XGBoost | 0.9924 | 0.9916 | 0.9924 | 0.9917 | 0.7518 | 0.9173 | 0.7098 | 0.8250 | 0.9929 | 0.8049 |
-| 1D-CNN | 0.9521 | 0.9489 | 0.9521 | 0.9456 | 0.4376 | 0.5689 | 0.4265 | 0.4787 | 0.9700 | 0.7024 |
-| MLP | 0.9502 | 0.9376 | 0.9502 | 0.9400 | 0.2767 | 0.3597 | 0.2752 | 0.3004 | 0.9231 | 0.4422 |
+| XGBoost | 0.9922 | 0.9914 | 0.9922 | 0.9916 | 0.7571 | 0.9116 | 0.7087 | 0.8316 | 0.9918 | 0.7987 |
+| 1D-CNN | 0.9250 | 0.9287 | 0.9250 | 0.9187 | 0.3073 | 0.3995 | 0.3019 | 0.3359 | 0.9405 | 0.4047 |
+| MLP | 0.9511 | 0.9380 | 0.9511 | 0.9411 | 0.2770 | 0.3601 | 0.2756 | 0.3011 | 0.9526 | 0.4331 |
 
 
 > *Note:* F1_Macro_Reliable excludes classes with support below 30 on the evaluated partition and is always shown next to the all-class F1_Macro; use F1_Macro (with its CI) as the headline number. Excluded classes: Bot, Heartbleed, Infiltration.
 
 
-- **XGBoost (`time_block`) Macro-F1 (95% Bootstrap CI, n=1000):** `0.7518` (`[0.7098, 0.8250]`, bootstrap std=`0.0273`)
+- **XGBoost (`time_block`) Macro-F1 (95% Bootstrap CI, n=1000):** `0.7571` (`[0.7087, 0.8316]`, bootstrap std=`0.0280`)
 
-- **1D-CNN (`time_block`) Macro-F1 (95% Bootstrap CI, n=1000):** `0.4376` (`[0.4265, 0.4787]`, bootstrap std=`0.0137`)
+- **1D-CNN (`time_block`) Macro-F1 (95% Bootstrap CI, n=1000):** `0.3073` (`[0.3019, 0.3359]`, bootstrap std=`0.0095`)
 
-- **MLP (`time_block`) Macro-F1 (95% Bootstrap CI, n=1000):** `0.2767` (`[0.2752, 0.3004]`, bootstrap std=`0.0081`)
+- **MLP (`time_block`) Macro-F1 (95% Bootstrap CI, n=1000):** `0.2770` (`[0.2756, 0.3011]`, bootstrap std=`0.0081`)
 
-- **Autoencoder (`time_block`, benign-only binary):** Accuracy=`0.8456`, F1=`0.5003` (`[0.4892, 0.5107]`, n=1000), ROC-AUC=`0.8263`, FPR=`0.0589`.
+- **Autoencoder (`time_block`, benign-only binary):** Accuracy=`0.8420`, F1=`0.4819` (`[0.4705, 0.4926]`, n=1000), ROC-AUC=`0.8151`, FPR=`0.0623`.
 
 
 
@@ -89,19 +87,19 @@ Validation selected a single-detector fusion; no gain from fusing detectors on t
 
 | Class | Precision | Recall | F1_Score | Support | Reliability |
 | --- | --- | --- | --- | --- | --- |
-| BENIGN | 0.9914 | 0.9999 | 0.9956 | 30907 | Adequate |
+| BENIGN | 0.9914 | 0.9998 | 0.9956 | 30763 | Adequate |
 | Bot | 0.0000 | 0.0000 | 0.0000 | 28 | Statistically Unreliable |
-| DDoS | 1.0000 | 0.9939 | 0.9970 | 1809 | Adequate |
-| DoS GoldenEye | 0.9528 | 0.8288 | 0.8864 | 146 | Adequate |
-| DoS Hulk | 0.9979 | 0.9376 | 0.9668 | 2516 | Adequate |
-| DoS Slowhttptest | 0.9494 | 0.9868 | 0.9677 | 76 | Adequate |
-| DoS slowloris | 1.0000 | 0.7160 | 0.8345 | 81 | Adequate |
-| FTP-Patator | 1.0000 | 0.9785 | 0.9891 | 93 | Adequate |
+| DDoS | 1.0000 | 0.9934 | 0.9967 | 1809 | Adequate |
+| DoS GoldenEye | 0.9603 | 0.8288 | 0.8897 | 146 | Adequate |
+| DoS Hulk | 0.9978 | 0.9367 | 0.9663 | 2463 | Adequate |
+| DoS Slowhttptest | 0.9012 | 0.9865 | 0.9419 | 74 | Adequate |
+| DoS slowloris | 0.9655 | 0.7000 | 0.8116 | 80 | Adequate |
+| FTP-Patator | 1.0000 | 1.0000 | 1.0000 | 96 | Adequate |
 | Heartbleed | 0.0000 | 0.0000 | 0.0000 | 2 | Statistically Unreliable |
-| Infiltration | 1.0000 | 0.4286 | 0.6000 | 7 | Statistically Unreliable |
-| PortScan | 1.0000 | 0.9952 | 0.9976 | 2100 | Adequate |
-| SSH-Patator | 1.0000 | 1.0000 | 1.0000 | 62 | Adequate |
-| Web Attack | 0.8235 | 0.4000 | 0.5385 | 35 | Adequate |
+| Infiltration | 1.0000 | 0.5714 | 0.7273 | 7 | Statistically Unreliable |
+| PortScan | 1.0000 | 0.9949 | 0.9975 | 1978 | Adequate |
+| SSH-Patator | 1.0000 | 0.9245 | 0.9608 | 53 | Adequate |
+| Web Attack | 0.8333 | 0.4167 | 0.5556 | 36 | Adequate |
 
 
 ### Time-Block Error Analysis (Failing Classes with Recall < 0.85)
@@ -114,10 +112,10 @@ Validation selected a single-detector fusion; no gain from fusing detectors on t
 | --- | --- | --- | --- | --- |
 | Bot | 28 | 0.0000 | 0.0000 | BENIGN: 28 (100.0%) |
 | Heartbleed | 2 | 0.0000 | 0.0000 | BENIGN: 2 (100.0%) |
-| Web Attack | 35 | 0.4000 | 0.5385 | BENIGN: 16 (45.7%), Web Attack: 14 (40.0%), DoS GoldenEye: 5 (14.3%) |
-| Infiltration | 7 | 0.4286 | 0.6000 | BENIGN: 4 (57.1%), Infiltration: 3 (42.9%) |
-| DoS slowloris | 81 | 0.7160 | 0.8345 | DoS slowloris: 58 (71.6%), BENIGN: 19 (23.5%), DoS Slowhttptest: 4 (4.9%) |
-| DoS GoldenEye | 146 | 0.8288 | 0.8864 | DoS GoldenEye: 121 (82.9%), BENIGN: 25 (17.1%) |
+| Web Attack | 36 | 0.4167 | 0.5556 | BENIGN: 17 (47.2%), Web Attack: 15 (41.7%), DoS GoldenEye: 4 (11.1%) |
+| Infiltration | 7 | 0.5714 | 0.7273 | Infiltration: 4 (57.1%), BENIGN: 3 (42.9%) |
+| DoS slowloris | 80 | 0.7000 | 0.8116 | DoS slowloris: 56 (70.0%), BENIGN: 16 (20.0%), DoS Slowhttptest: 8 (10.0%) |
+| DoS GoldenEye | 146 | 0.8288 | 0.8897 | DoS GoldenEye: 121 (82.9%), BENIGN: 25 (17.1%) |
 
 
 #### Top Shifted Features Train-vs-Test per Failing Class (KS Statistic)
@@ -125,36 +123,36 @@ Validation selected a single-detector fusion; no gain from fusing detectors on t
 
 | Class | Train_Count | Test_Count | Rank | Feature | KS_Statistic | KS_PValue | Std_Mean_Shift |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Bot | 82 | 28 | 1 | Flow Duration | 1.0000 | 0.0000 | 0.0287 |
-| Bot | 82 | 28 | 2 | Total Length of Fwd Packets | 1.0000 | 0.0000 | -0.8171 |
-| Bot | 82 | 28 | 3 | Fwd Packet Length Max | 1.0000 | 0.0000 | -0.4455 |
-| Bot | 82 | 28 | 4 | Fwd Packet Length Mean | 1.0000 | 0.0000 | -0.5981 |
-| Bot | 82 | 28 | 5 | Flow Bytes/s | 1.0000 | 0.0000 | -0.1109 |
+| Bot | 81 | 28 | 1 | Flow Duration | 1.0000 | 0.0000 | 0.0290 |
+| Bot | 81 | 28 | 2 | Total Length of Fwd Packets | 1.0000 | 0.0000 | -0.8294 |
+| Bot | 81 | 28 | 3 | Fwd Packet Length Max | 1.0000 | 0.0000 | -0.4557 |
+| Bot | 81 | 28 | 4 | Fwd Packet Length Mean | 1.0000 | 0.0000 | -0.6118 |
+| Bot | 81 | 28 | 5 | Flow Bytes/s | 1.0000 | 0.0000 | -0.1159 |
 | Heartbleed | 7 | 2 | 1 | Fwd IAT Std | 1.0000 | 0.0556 | -0.0005 |
-| Heartbleed | 7 | 2 | 2 | Init_Win_bytes_backward | 1.0000 | 0.0556 | 0.0141 |
-| Heartbleed | 7 | 2 | 3 | Total Backward Packets | 0.8571 | 0.1667 | -11.7189 |
-| Heartbleed | 7 | 2 | 4 | Flow IAT Max | 0.8571 | 0.1667 | -0.0231 |
+| Heartbleed | 7 | 2 | 2 | Init_Win_bytes_backward | 1.0000 | 0.0556 | 0.0142 |
+| Heartbleed | 7 | 2 | 3 | Total Backward Packets | 0.8571 | 0.1667 | -11.8875 |
+| Heartbleed | 7 | 2 | 4 | Flow IAT Max | 0.8571 | 0.1667 | -0.0232 |
 | Heartbleed | 7 | 2 | 5 | Fwd IAT Mean | 0.8571 | 0.1667 | -0.0001 |
-| Web Attack | 106 | 35 | 1 | Flow IAT Mean | 0.5059 | 0.0000 | -0.1882 |
-| Web Attack | 106 | 35 | 2 | Bwd Packets/s | 0.5059 | 0.0000 | 0.1001 |
-| Web Attack | 106 | 35 | 3 | Flow IAT Std | 0.4965 | 0.0000 | -0.1177 |
-| Web Attack | 106 | 35 | 4 | Flow Packets/s | 0.4965 | 0.0000 | 0.0230 |
-| Web Attack | 106 | 35 | 5 | Fwd Packets/s | 0.4965 | 0.0000 | 0.0122 |
-| Infiltration | 22 | 7 | 1 | Flow IAT Std | 0.8182 | 0.0004 | 1.4044 |
-| Infiltration | 22 | 7 | 2 | Flow IAT Max | 0.8182 | 0.0004 | 1.4163 |
-| Infiltration | 22 | 7 | 3 | Fwd IAT Max | 0.7208 | 0.0039 | 1.2435 |
-| Infiltration | 22 | 7 | 4 | Idle Max | 0.7208 | 0.0039 | 1.2550 |
-| Infiltration | 22 | 7 | 5 | Flow Packets/s | 0.6818 | 0.0062 | -0.0300 |
-| DoS slowloris | 242 | 81 | 1 | Idle Mean | 0.2904 | 0.0001 | -0.6578 |
-| DoS slowloris | 242 | 81 | 2 | Bwd IAT Min | 0.2865 | 0.0001 | -1.2123 |
-| DoS slowloris | 242 | 81 | 3 | Bwd IAT Max | 0.2858 | 0.0001 | -1.2177 |
-| DoS slowloris | 242 | 81 | 4 | Bwd IAT Total | 0.2741 | 0.0002 | -0.8278 |
-| DoS slowloris | 242 | 81 | 5 | Bwd IAT Mean | 0.2741 | 0.0002 | -1.6249 |
-| DoS GoldenEye | 436 | 146 | 1 | Fwd Packet Length Mean | 0.3100 | 0.0000 | 0.4889 |
-| DoS GoldenEye | 436 | 146 | 2 | Avg Fwd Segment Size | 0.3100 | 0.0000 | 0.4889 |
-| DoS GoldenEye | 436 | 146 | 3 | Fwd Packet Length Std | 0.2965 | 0.0000 | 0.4972 |
-| DoS GoldenEye | 436 | 146 | 4 | Fwd Packet Length Max | 0.2850 | 0.0000 | 0.3080 |
-| DoS GoldenEye | 436 | 146 | 5 | Total Length of Fwd Packets | 0.2758 | 0.0000 | 0.0212 |
+| Web Attack | 105 | 36 | 1 | Flow IAT Mean | 0.4873 | 0.0000 | -0.1820 |
+| Web Attack | 105 | 36 | 2 | Bwd Packets/s | 0.4873 | 0.0000 | 0.0912 |
+| Web Attack | 105 | 36 | 3 | Fwd IAT Min | 0.4786 | 0.0000 | -0.0001 |
+| Web Attack | 105 | 36 | 4 | Flow Packets/s | 0.4778 | 0.0000 | 0.0210 |
+| Web Attack | 105 | 36 | 5 | Flow IAT Std | 0.4778 | 0.0000 | -0.1127 |
+| Infiltration | 22 | 7 | 1 | Flow IAT Std | 0.8182 | 0.0004 | 1.4126 |
+| Infiltration | 22 | 7 | 2 | Flow IAT Max | 0.8182 | 0.0004 | 1.4214 |
+| Infiltration | 22 | 7 | 3 | Fwd IAT Max | 0.7208 | 0.0039 | 1.2480 |
+| Infiltration | 22 | 7 | 4 | Idle Max | 0.7208 | 0.0039 | 1.2595 |
+| Infiltration | 22 | 7 | 5 | Flow Packets/s | 0.6818 | 0.0062 | -0.0294 |
+| DoS slowloris | 242 | 80 | 1 | Idle Mean | 0.2995 | 0.0000 | -0.6642 |
+| DoS slowloris | 242 | 80 | 2 | Bwd IAT Max | 0.2962 | 0.0000 | -1.2590 |
+| DoS slowloris | 242 | 80 | 3 | Bwd IAT Min | 0.2949 | 0.0000 | -1.2758 |
+| DoS slowloris | 242 | 80 | 4 | Idle Max | 0.2830 | 0.0001 | -0.8034 |
+| DoS slowloris | 242 | 80 | 5 | Bwd IAT Total | 0.2824 | 0.0001 | -0.8715 |
+| DoS GoldenEye | 436 | 146 | 1 | Fwd Packet Length Mean | 0.3100 | 0.0000 | 0.4979 |
+| DoS GoldenEye | 436 | 146 | 2 | Avg Fwd Segment Size | 0.3100 | 0.0000 | 0.4979 |
+| DoS GoldenEye | 436 | 146 | 3 | Fwd Packet Length Std | 0.2965 | 0.0000 | 0.5055 |
+| DoS GoldenEye | 436 | 146 | 4 | Fwd Packet Length Max | 0.2850 | 0.0000 | 0.3137 |
+| DoS GoldenEye | 436 | 146 | 5 | Total Length of Fwd Packets | 0.2758 | 0.0000 | 0.0215 |
 
 
 ### Time-Block Recall-vs-FPR Mitigation Experiment
@@ -168,16 +166,16 @@ Validation selected a single-detector fusion; no gain from fusing detectors on t
 
 | Option | Benign_Val_Pct | Threshold | Benign_FPR | Overall_Attack_Recall | Focus_Mean_Recall | Binary_F1 | Multiclass_Macro_F1 | Focus_Class_Recalls |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Baseline XGBoost ('none') | Argmax | argmax P(c) | 0.0610 | 0.9953 | 0.7083 | 0.8780 | 0.8440 | Bot=0.593, Heartbleed=0.000, Web Attack=0.943, Infiltration=0.714, DoS slowloris=1.000, DoS GoldenEye=1.000 |
-| XGBoost ('class_weight') | Argmax | argmax P(c) | 0.0793 | 0.9974 | 0.9397 | 0.8485 | 0.8713 | Bot=0.667, Heartbleed=1.000, Web Attack=0.971, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
-| Hybrid Override (XGBoost OR AE) | P90 | AE>0.0475 | 0.1301 | 0.9973 | 0.9226 | 0.7739 | N/A | Bot=0.593, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
-| Lower P(Benign) Gate (1 - P_Benign > tau) | P90 | 1-P(B)>0.2449 | 0.0995 | 0.9971 | 0.7668 | 0.8172 | N/A | Bot=0.630, Heartbleed=0.000, Web Attack=0.971, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
-| Hybrid Override (XGBoost OR AE) | P95 | AE>0.1008 | 0.0833 | 0.9971 | 0.9226 | 0.8421 | N/A | Bot=0.593, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
-| Lower P(Benign) Gate (1 - P_Benign > tau) | P95 | 1-P(B)>0.5884 | 0.0490 | 0.9940 | 0.6250 | 0.8986 | N/A | Bot=0.556, Heartbleed=0.000, Web Attack=0.943, Infiltration=0.286, DoS slowloris=1.000, DoS GoldenEye=0.966 |
-| Hybrid Override (XGBoost OR AE) | P97 | AE>0.1385 | 0.0733 | 0.9971 | 0.9226 | 0.8581 | N/A | Bot=0.593, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
-| Lower P(Benign) Gate (1 - P_Benign > tau) | P97 | 1-P(B)>0.5986 | 0.0297 | 0.9940 | 0.6250 | 0.9349 | N/A | Bot=0.556, Heartbleed=0.000, Web Attack=0.943, Infiltration=0.286, DoS slowloris=1.000, DoS GoldenEye=0.966 |
-| Hybrid Override (XGBoost OR AE) | P99 | AE>0.1652 | 0.0699 | 0.9971 | 0.9226 | 0.8639 | N/A | Bot=0.593, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
-| Lower P(Benign) Gate (1 - P_Benign > tau) | P99 | 1-P(B)>0.6067 | 0.0090 | 0.9938 | 0.6250 | 0.9772 | N/A | Bot=0.556, Heartbleed=0.000, Web Attack=0.943, Infiltration=0.286, DoS slowloris=1.000, DoS GoldenEye=0.966 |
+| Baseline XGBoost ('none') | Argmax | argmax P(c) | 0.0619 | 0.9952 | 0.7405 | 0.8767 | 0.8534 | Bot=0.500, Heartbleed=0.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| XGBoost ('class_weight') | Argmax | argmax P(c) | 0.0803 | 0.9972 | 0.9417 | 0.8471 | 0.8754 | Bot=0.679, Heartbleed=1.000, Web Attack=0.971, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| Hybrid Override (XGBoost OR AE) | P90 | AE>0.0591 | 0.1320 | 0.9969 | 0.9072 | 0.7717 | N/A | Bot=0.500, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P90 | 1-P(B)>0.2100 | 0.1000 | 0.9967 | 0.7643 | 0.8166 | N/A | Bot=0.643, Heartbleed=0.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| Hybrid Override (XGBoost OR AE) | P95 | AE>0.1127 | 0.0842 | 0.9968 | 0.9072 | 0.8407 | N/A | Bot=0.500, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P95 | 1-P(B)>0.6658 | 0.0496 | 0.9929 | 0.6098 | 0.8972 | N/A | Bot=0.357, Heartbleed=0.000, Web Attack=0.914, Infiltration=0.429, DoS slowloris=1.000, DoS GoldenEye=0.959 |
+| Hybrid Override (XGBoost OR AE) | P97 | AE>0.1214 | 0.0814 | 0.9968 | 0.9072 | 0.8452 | N/A | Bot=0.500, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P97 | 1-P(B)>0.6695 | 0.0290 | 0.9929 | 0.6098 | 0.9359 | N/A | Bot=0.357, Heartbleed=0.000, Web Attack=0.914, Infiltration=0.429, DoS slowloris=1.000, DoS GoldenEye=0.959 |
+| Hybrid Override (XGBoost OR AE) | P99 | AE>0.2067 | 0.0718 | 0.9968 | 0.9072 | 0.8609 | N/A | Bot=0.500, Heartbleed=1.000, Web Attack=0.943, Infiltration=1.000, DoS slowloris=1.000, DoS GoldenEye=1.000 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P99 | 1-P(B)>0.6697 | 0.0086 | 0.9929 | 0.6098 | 0.9777 | N/A | Bot=0.357, Heartbleed=0.000, Web Attack=0.914, Infiltration=0.429, DoS slowloris=1.000, DoS GoldenEye=0.959 |
 
 
 #### time_block Held-Out Test Partition (Descriptive Only)
@@ -188,21 +186,21 @@ Validation selected a single-detector fusion; no gain from fusing detectors on t
 
 | Option | Benign_Val_Pct | Threshold | Benign_FPR | Overall_Attack_Recall | Focus_Mean_Recall | Binary_F1 | Multiclass_Macro_F1 | Focus_Class_Recalls |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Baseline XGBoost ('none') | Argmax | argmax P(c) | 0.0001 | 0.9613 | 0.4276 | 0.9800 | 0.7518 | Bot=0.000, Heartbleed=0.000, Web Attack=0.543, Infiltration=0.429, DoS slowloris=0.765, DoS GoldenEye=0.829 |
-| XGBoost ('class_weight') | Argmax | argmax P(c) | 0.0144 | 0.9797 | 0.7816 | 0.9588 | 0.8512 | Bot=0.000, Heartbleed=1.000, Web Attack=0.714, Infiltration=1.000, DoS slowloris=0.975, DoS GoldenEye=1.000 |
-| Hybrid Override (XGBoost OR AE) | P90 | AE>0.0475 | 0.0962 | 0.9699 | 0.7448 | 0.8091 | N/A | Bot=0.000, Heartbleed=1.000, Web Attack=0.543, Infiltration=1.000, DoS slowloris=0.926, DoS GoldenEye=1.000 |
-| Lower P(Benign) Gate (1 - P_Benign > tau) | P90 | 1-P(B)>0.2449 | 0.0005 | 0.9806 | 0.5616 | 0.9891 | N/A | Bot=0.000, Heartbleed=0.000, Web Attack=0.743, Infiltration=0.714, DoS slowloris=0.926, DoS GoldenEye=0.986 |
-| Hybrid Override (XGBoost OR AE) | P95 | AE>0.1008 | 0.0590 | 0.9691 | 0.7448 | 0.8687 | N/A | Bot=0.000, Heartbleed=1.000, Web Attack=0.543, Infiltration=1.000, DoS slowloris=0.926, DoS GoldenEye=1.000 |
-| Lower P(Benign) Gate (1 - P_Benign > tau) | P95 | 1-P(B)>0.5884 | 0.0001 | 0.9554 | 0.3732 | 0.9770 | N/A | Bot=0.000, Heartbleed=0.000, Web Attack=0.514, Infiltration=0.143, DoS slowloris=0.753, DoS GoldenEye=0.829 |
-| Hybrid Override (XGBoost OR AE) | P97 | AE>0.1385 | 0.0502 | 0.9687 | 0.7169 | 0.8840 | N/A | Bot=0.000, Heartbleed=1.000, Web Attack=0.543, Infiltration=0.857, DoS slowloris=0.901, DoS GoldenEye=1.000 |
-| Lower P(Benign) Gate (1 - P_Benign > tau) | P97 | 1-P(B)>0.5986 | 0.0001 | 0.9531 | 0.3732 | 0.9758 | N/A | Bot=0.000, Heartbleed=0.000, Web Attack=0.514, Infiltration=0.143, DoS slowloris=0.753, DoS GoldenEye=0.829 |
-| Hybrid Override (XGBoost OR AE) | P99 | AE>0.1652 | 0.0462 | 0.9687 | 0.7169 | 0.8911 | N/A | Bot=0.000, Heartbleed=1.000, Web Attack=0.543, Infiltration=0.857, DoS slowloris=0.901, DoS GoldenEye=1.000 |
-| Lower P(Benign) Gate (1 - P_Benign > tau) | P99 | 1-P(B)>0.6067 | 0.0001 | 0.9524 | 0.3684 | 0.9754 | N/A | Bot=0.000, Heartbleed=0.000, Web Attack=0.486, Infiltration=0.143, DoS slowloris=0.753, DoS GoldenEye=0.829 |
+| Baseline XGBoost ('none') | Argmax | argmax P(c) | 0.0002 | 0.9607 | 0.4547 | 0.9795 | 0.7571 | Bot=0.000, Heartbleed=0.000, Web Attack=0.528, Infiltration=0.571, DoS slowloris=0.800, DoS GoldenEye=0.829 |
+| XGBoost ('class_weight') | Argmax | argmax P(c) | 0.0144 | 0.9796 | 0.7968 | 0.9581 | 0.8646 | Bot=0.000, Heartbleed=1.000, Web Attack=0.806, Infiltration=1.000, DoS slowloris=0.975, DoS GoldenEye=1.000 |
+| Hybrid Override (XGBoost OR AE) | P90 | AE>0.0591 | 0.0974 | 0.9681 | 0.7401 | 0.8032 | N/A | Bot=0.000, Heartbleed=1.000, Web Attack=0.528, Infiltration=1.000, DoS slowloris=0.912, DoS GoldenEye=1.000 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P90 | 1-P(B)>0.2100 | 0.0006 | 0.9833 | 0.5795 | 0.9903 | N/A | Bot=0.000, Heartbleed=0.000, Web Attack=0.722, Infiltration=0.857, DoS slowloris=0.925, DoS GoldenEye=0.973 |
+| Hybrid Override (XGBoost OR AE) | P95 | AE>0.1127 | 0.0625 | 0.9680 | 0.7401 | 0.8597 | N/A | Bot=0.000, Heartbleed=1.000, Web Attack=0.528, Infiltration=1.000, DoS slowloris=0.912, DoS GoldenEye=1.000 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P95 | 1-P(B)>0.6658 | 0.0001 | 0.9396 | 0.3527 | 0.9686 | N/A | Bot=0.000, Heartbleed=0.000, Web Attack=0.444, Infiltration=0.143, DoS slowloris=0.700, DoS GoldenEye=0.829 |
+| Hybrid Override (XGBoost OR AE) | P97 | AE>0.1214 | 0.0601 | 0.9680 | 0.7401 | 0.8638 | N/A | Bot=0.000, Heartbleed=1.000, Web Attack=0.528, Infiltration=1.000, DoS slowloris=0.912, DoS GoldenEye=1.000 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P97 | 1-P(B)>0.6695 | 0.0001 | 0.9395 | 0.3527 | 0.9686 | N/A | Bot=0.000, Heartbleed=0.000, Web Attack=0.444, Infiltration=0.143, DoS slowloris=0.700, DoS GoldenEye=0.829 |
+| Hybrid Override (XGBoost OR AE) | P99 | AE>0.2067 | 0.0468 | 0.9677 | 0.7359 | 0.8876 | N/A | Bot=0.000, Heartbleed=1.000, Web Attack=0.528, Infiltration=1.000, DoS slowloris=0.887, DoS GoldenEye=1.000 |
+| Lower P(Benign) Gate (1 - P_Benign > tau) | P99 | 1-P(B)>0.6697 | 0.0001 | 0.9395 | 0.3527 | 0.9686 | N/A | Bot=0.000, Heartbleed=0.000, Web Attack=0.444, Infiltration=0.143, DoS slowloris=0.700, DoS GoldenEye=0.829 |
 
 
-- **Validation vs. Test Ranking Agreement:** Validation ranking agrees with test (Spearman rho=0.9655; top bounded-FPR option is 'XGBoost ('class_weight') (Argmax)' on both splits).
+- **Validation vs. Test Ranking Agreement:** Validation ranking agrees with test (Spearman rho=0.9807; top bounded-FPR option is 'XGBoost ('class_weight') (Argmax)' on both splits).
 
-- **Mitigation Assessment (`time_block`):** Descriptively on the held-out test partition (not used for selection), XGBoost ('class_weight') (Argmax) shows focus attack recall 0.7816 at Benign FPR=0.0144 vs baseline 0.4276 (Benign FPR=0.0001).
+- **Mitigation Assessment (`time_block`):** Descriptively on the held-out test partition (not used for selection), XGBoost ('class_weight') (Argmax) shows focus attack recall 0.7968 at Benign FPR=0.0144 vs baseline 0.4547 (Benign FPR=0.0002).
 
 
 ## 3. Open-Set Cross-Day Protocol (`by_day`: Mon–Wed Train / Thu Val / Thu–Fri Unseen Attacks)
