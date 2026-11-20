@@ -56,13 +56,20 @@ def expand_xgboost_probas(
     present_classes: np.ndarray,
     total_classes: int,
 ) -> np.ndarray:
-    """Project local contiguous-class XGBoost probabilities back onto global class indices."""
+    """Project local contiguous-class XGBoost probabilities onto global class indices.
+
+    Rows are renormalized because XGBoost emits float32 probabilities whose sums can drift
+    slightly beyond scikit-learn's strict tolerance, which otherwise triggers spurious
+    "y_prob values do not sum to one" warnings in ``log_loss`` and related metrics.
+    """
     probs = np.asarray(raw_probs, dtype=np.float64)
     if probs.shape[1] == total_classes and np.array_equal(present_classes, np.arange(total_classes)):
-        return probs
-    full = np.zeros((probs.shape[0], total_classes), dtype=np.float64)
-    full[:, present_classes] = probs
-    return full
+        full = probs
+    else:
+        full = np.zeros((probs.shape[0], total_classes), dtype=np.float64)
+        full[:, present_classes] = probs
+    row_sums = full.sum(axis=1, keepdims=True)
+    return full / np.clip(row_sums, 1e-12, None)
 
 
 def fit_xgboost_safe_multiclass(

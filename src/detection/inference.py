@@ -237,7 +237,7 @@ class UnifiedDetectionEngine:
         timestamps = (
             df_raw["Timestamp"].astype(str).tolist()
             if "Timestamp" in df_raw.columns
-            else [pd.Timestamp.utcnow().isoformat()] * len(df_raw)
+            else [pd.Timestamp.now("UTC").isoformat()] * len(df_raw)
         )
 
         # Optional local SHAP explanation for small batches / single-flow calls
