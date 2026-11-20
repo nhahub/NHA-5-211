@@ -357,6 +357,30 @@ def analyze_time_block_failures(
     }
 
 
+def union_failing_class_indices(
+    y_true: np.ndarray,
+    probability_matrices: list[np.ndarray],
+    num_classes: int,
+    recall_threshold: float = 0.85,
+) -> list[int]:
+    """Union of classes with recall below threshold under any candidate profile (test-derived)."""
+    failing: set[int] = set()
+    labels = list(range(int(num_classes)))
+    for proba in probability_matrices:
+        y_pred = np.argmax(np.asarray(proba), axis=1)
+        cm = confusion_matrix(y_true, y_pred, labels=labels)
+        supports = cm.sum(axis=1)
+        diag = np.diag(cm)
+        for idx in range(int(num_classes)):
+            support = int(supports[idx])
+            if support <= 0:
+                continue
+            recall = float(diag[idx]) / float(support)
+            if recall < float(recall_threshold):
+                failing.add(idx)
+    return sorted(failing)
+
+
 def _eval_binary_attack_option(
     y_test: np.ndarray,
     is_attack_pred: np.ndarray,
@@ -612,7 +636,7 @@ def evaluate_mitigation_tradeoffs(
             f"{base_row['Benign_FPR']:.4f}; peak option '{best_focus_row['Option']}' "
             f"[{best_focus_row['Benign_Val_Pct']}] reaches {best_focus_row['Focus_Mean_Recall']:.4f} at Benign FPR="
             f"{best_focus_row['Benign_FPR']:.4f}) incurs an elevated false-positive rate cost (> +2% FPR); "
-            "the default production model is therefore kept unchanged and trade-offs are reported transparently."
+            "the active production profile is therefore kept unchanged and trade-offs are reported transparently."
         )
 
     return {
@@ -664,6 +688,7 @@ def evaluate_by_day_protocol(
     imbalance_strategy: str = "class_weight",
     keras_epochs: int | None = None,
     force_synthetic: bool = False,
+    xgb_imbalance_strategy: str | None = None,
 ) -> dict[str, Any]:
     """Run open-set cross-day evaluation: Mon-Wed train, part of Thu val, Thu-Fri unseen attacks."""
     if force_synthetic:
@@ -697,17 +722,23 @@ def evaluate_by_day_protocol(
     X_sup_train, y_sup_train, sample_w, keras_cw = _select_supervised_train_arrays(
         dataset, imbalance_strategy
     )
+    # XGBoost follows the configured deployment profile while MLP/1D-CNN keep the protocol strategy.
+    active_xgb_strat = str(xgb_imbalance_strategy or imbalance_strategy).strip().lower()
+    X_xgb_train, y_xgb_train, sw_xgb, _ = _select_supervised_train_arrays(dataset, active_xgb_strat)
     # Supervise Keras early stopping exclusively on an internal Mon-Wed holdout slice so
     # unseen Thursday attack classes cannot distort validation loss tracking.
     X_fit, y_fit, sw_fit, X_es, y_es = _internal_train_es_split(X_sup_train, y_sup_train, sample_w, seed=seed)
+    X_xfit, y_xfit, sw_xfit, X_xes, y_xes = _internal_train_es_split(
+        X_xgb_train, y_xgb_train, sw_xgb, seed=seed
+    )
 
     multiclass_table: dict[str, dict[str, Any]] = {}
     binary_table: dict[str, dict[str, Any]] = {}
 
     # 1. XGBoost Multi-Class (Mon-Wed classes projected onto full class space)
     xgb_clf, present_cls = fit_xgboost_safe_multiclass(
-        X_train=X_sup_train,
-        y_train=y_sup_train,
+        X_train=X_xgb_train,
+        y_train=y_xgb_train,
         X_val=dataset.X_val_scaled,
         y_val=dataset.y_val,
         total_classes=num_classes,
@@ -715,7 +746,7 @@ def evaluate_by_day_protocol(
         params_override=xgb_params,
         device=hardware.xgb_device,
         seed=seed,
-        sample_weight=sample_w,
+        sample_weight=sw_xgb,
     )
     low_sup = int(app_cfg.evaluation.effective_reliable_support_threshold)
     p_xgb = expand_xgboost_probas(xgb_clf.predict_proba(dataset.X_test_scaled), present_cls, num_classes)
@@ -728,8 +759,8 @@ def evaluate_by_day_protocol(
     )
 
     # 2. Dedicated Binary XGBoost (Benign vs Attack trained on Mon-Wed attacks, tested Thu-Fri)
-    y_bin_tr = (y_fit != benign_idx).astype(np.int64)
-    y_bin_es = (y_es != benign_idx).astype(np.int64)
+    y_bin_tr = (y_xfit != benign_idx).astype(np.int64)
+    y_bin_es = (y_xes != benign_idx).astype(np.int64)
     bin_params = {
         k: v
         for k, v in (model_cfg.xgboost.baseline | (xgb_params or {})).items()
@@ -744,14 +775,14 @@ def evaluate_by_day_protocol(
         device=hardware.xgb_device,
         early_stopping_rounds=20,
     )
-    fit_bin_kw: dict[str, Any] = {"eval_set": [(X_es, y_bin_es)], "verbose": False}
-    if sw_fit is not None:
+    fit_bin_kw: dict[str, Any] = {"eval_set": [(X_xes, y_bin_es)], "verbose": False}
+    if sw_xfit is not None:
         # Balanced binary weight for Attack vs Benign when using class_weight
         n_pos = max(1, int(np.sum(y_bin_tr == 1)))
         n_neg = max(1, int(np.sum(y_bin_tr == 0)))
         w_pos = float(n_neg / n_pos)
         fit_bin_kw["sample_weight"] = np.where(y_bin_tr == 1, w_pos, 1.0).astype(np.float32)
-    xgb_bin.fit(X_fit, y_bin_tr, **fit_bin_kw)
+    xgb_bin.fit(X_xfit, y_bin_tr, **fit_bin_kw)
     p_xgb_bin = np.asarray(xgb_bin.predict_proba(dataset.X_test_scaled)[:, 1], dtype=np.float64)
     binary_table["XGBoost (Binary)"] = _binary_metrics(y_test_bin, p_xgb_bin, threshold=0.5)
 
@@ -814,7 +845,7 @@ def evaluate_by_day_protocol(
             dataset=dataset,
             model_cfg=model_cfg,
             xgb_params=xgb_params,
-            imbalance_strategy=imbalance_strategy,
+            imbalance_strategy=active_xgb_strat,
             xgb_device=hardware.xgb_device,
             seed=seed,
             return_val=True,
@@ -834,7 +865,7 @@ def evaluate_by_day_protocol(
                 focus_class_indices=unseen_indices,
                 p_sup_alt_test=p_xgb_alt_test,
                 alt_label=f"XGBoost ('{alt_strat}')",
-                base_label=f"Baseline XGBoost ('{imbalance_strategy}')",
+                base_label=f"Baseline XGBoost ('{active_xgb_strat}')",
                 percentiles=app_cfg.evaluation.mitigation_benign_percentiles,
                 ae_val_all_errors=ae_val_all_err,
                 p_sup_alt_val=p_xgb_alt_val,
@@ -851,6 +882,7 @@ def evaluate_by_day_protocol(
         "protocol_name": "open-set cross-day",
         "split_strategy": "by_day",
         "imbalance_strategy": imbalance_strategy,
+        "xgb_imbalance_strategy": active_xgb_strat,
         "keras_epochs": ep,
         "split_sizes": dataset.audit_report["split_sizes"],
         "split_day_files": dataset.audit_report.get("split_day_files", {}),
@@ -1207,11 +1239,12 @@ def evaluate_time_block_protocol(
                 seed=seed,
                 return_val=True,
             )
-        failing_indices = [
-            dataset.class_names.index(c)
-            for c in failure_analysis.get("failing_class_names", [])
-            if c in dataset.class_names
-        ]
+        failing_indices = union_failing_class_indices(
+            dataset.y_test,
+            [p_xgb, p_xgb_alt_test],
+            num_classes,
+            recall_threshold=float(app_cfg.evaluation.failing_class_recall_threshold),
+        )
         mitigation_res = {
             "executed": True,
             **evaluate_mitigation_tradeoffs(

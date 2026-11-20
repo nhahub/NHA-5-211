@@ -17,6 +17,7 @@ All system parameters are centralized in two Pydantic-validated YAML files:
 | `data` | `outlier_clip_sigma` | `5.0` | Clips rate/duration artifacts to $\mu \pm 5\sigma$ using training statistics only |
 | `data` | `split_strategy` | `random` | `random` (stratified), `time_block` (per-class chronological drift), or `by_day` (open-set cross-day) |
 | `data.split` | `test_size`, `val_size_of_remainder`, `time_block_*` | `0.15`, `0.15`, `0.60`/`0.20` | Stratified `72.25%`/`12.75%`/`15.0%` (`random`) or chronological `60%`/`20%`/`20%` (`time_block`) |
+| `deployment` | `xgboost_imbalance_profile` | `class_weight` | Active XGBoost artifact profile: `class_weight` → `models/xgb_model.json` (default) or `none` → `models/xgb_model_none.json`; selected on validation data only |
 | `data.imbalance` | `strategy`, `imbalance_tie_tolerance` | `auto_compare`, `0.002` | Compares Unweighted, Class-Weighting, and SMOTE on validation Macro-F1; prefers `none > class_weight > smote` when tied within tolerance |
 | `evaluation` | `latency_warmup_calls`, `latency_timed_runs` | `50`, `100` | Discards first N warm-up calls before `time.perf_counter()` single-flow latency timing |
 | `evaluation` | `run_by_day_comparison`, `run_time_block_comparison` | `true`, `true` | Runs secondary open-set cross-day (`by_day`) and chronological drift (`time_block`) benchmarks |
@@ -51,6 +52,7 @@ All system parameters are centralized in two Pydantic-validated YAML files:
 ### D. XGBoost & Optuna HPO (`xgboost` — Recommended Production Model)
 - Report Baseline: `n_estimators=300`, `max_depth=6`, `learning_rate=0.1`, `subsample=0.8`, `colsample_bytree=0.8`, `min_child_weight=5`, `gamma=0.1`, `reg_alpha=0.01`, `reg_lambda=1.0`, `tree_method="hist"`, `early_stopping_rounds=20`
 - Optuna Search: `n_trials=40`, `timeout_minutes=6.0` (`timeout_seconds=360`), TPE sampler minimizing validation `mlogloss`; `tuned` is selected only when validation Macro-F1 beats baseline by more than the 5-fold CV standard deviation (`> cv_macro_f1_std`), otherwise retaining `baseline`.
+- Deployment profiles (`deployment.xgboost_imbalance_profile`): the shipped default is `class_weight` (`models/xgb_model.json`), chosen by chronological `time_block` validation Macro-F1 `0.8754` vs `0.8534` for `none` (`used_test_data = False`). The alternate `none` profile (`models/xgb_model_none.json`) is the ultra-low-FPR option chosen by random-split validation Macro-F1 `0.9518` vs `0.9446`. Both binaries are Git LFS-tracked and verified by `models/MANIFEST.json`.
 
 ### E. Multi-Model Decision & Anomaly Integration (`ensemble`)
 - `strategy: "hybrid_anomaly_override"` (supports `best_single`, `soft_voting`, `confidence_weighted`, `val_weighted_voting`, `stacking`, `hybrid_anomaly_override`)

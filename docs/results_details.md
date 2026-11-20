@@ -22,7 +22,7 @@ This document preserves the complete experimental breakdown referenced from [`RE
 
 | Model | Imbalance | Framing | Accuracy | F1_Weighted | F1_Macro | 95% CI (F1_Macro / F1) | F1_Macro_Reliable | ROC-AUC | Median / P95 (µs) | Batch (flows/s) | Size (MB) | Train (s) |
 |---|---|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|
-| **XGBoost (Rec.)** | `none` | 13-class supervised | **0.9989** | **0.9988** | **0.9603** | `[0.9013, 0.9849]` | **0.9972** | **0.9995** | 344.20 / 485.61 | **252,775.0** | 2.954 | 320.33 |
+| **XGBoost (Rec.)** | `class_weight` | 13-class supervised | **0.9986** | **0.9986** | **0.9661** | `[0.9310, 0.9829]` | **0.9931** | **0.9995** | 754.90 / 1493.02 | **155,163.3** | 3.631 | 10.66 |
 | **1D-CNN** | `smote` | 13-class supervised | 0.9904 | 0.9913 | 0.8447 | `[0.7649, 0.8819]` | 0.9562 | 0.9933 | 661.30 / 806.45 | 17,574.6 | 1.310 | 859.55 |
 | **MLP** | `smote` | 13-class supervised | 0.9766 | 0.9772 | 0.7934 | `[0.7544, 0.8176]` | 0.9286 | 0.9962 | 155.00 / 270.41 | 24,487.8 | 2.534 | 57.84 |
 | **Autoencoder** | `benign_only` | Binary anomaly | **0.8934** | **0.6926** | **0.6926** | `[0.6820, 0.7020]` | N/A | **0.8676** | 207.70 / 357.89 | 23,860.5 | 1.548 | 68.80 |
@@ -42,55 +42,55 @@ This document preserves the complete experimental breakdown referenced from [`RE
 - **Per-Model Imbalance Selection (`tolerance = 0.0020`, `neural_epochs_cap = 10`):**
   - `MLP` chose **`smote`** (val `F1_Macro = 0.7695` vs `none = 0.6924`, `class_weight = 0.4046`), lifting `MLP` held-out test `F1_Macro` from Round 2's `0.6728` (Bot F1 `0.0000`) to **`0.7934`**.
   - `1D-CNN` chose **`smote`** (val `F1_Macro = 0.7501` vs `none = 0.5094`, `class_weight = 0.4150`), reaching held-out test **`0.8447`**.
-  - `XGBoost` stayed on **`none`** (val `F1_Macro = 0.9518` tied within tolerance `0.0020` against `smote = 0.9518`; `class_weight = 0.9446`).
+  - `XGBoost` stayed on **`none`** for the `random` split (val `F1_Macro = 0.9518` tied within tolerance `0.0020` against `smote = 0.9518`; `class_weight = 0.9446`). The shipped deployment artifact is nevertheless the `class_weight` profile because chronological `time_block` validation selects it (`0.8754` vs `0.8534`); both artifacts are persisted and selectable.
 - **Bounded Neural Loss Regularization Trials (`max 3.0 min/model`):** Both `MLP` (`label_smoothing = 0.7138`, `focal_loss = 0.7618` vs baseline `cross_entropy = 0.8134`) and `1D-CNN` (`label_smoothing = 0.6562` vs baseline `0.8701`; `focal_loss` skipped at 3.0 min time budget) underperformed baseline `cross_entropy` and were automatically reverted. Both `MLP` (`512->256->128->64`) and `1D-CNN` are explicitly positioned as **neural baselines for comparison**, while **`XGBoost`** is recommended for production.
 - **Unified 5-Fold Stratified CV & Optuna Gating (`XGBoost`):**
-  - 5-fold stratified CV on the `162,577`-row development pool (`train+val`, held-out test excluded) yielded **`0.9535 ± 0.0121`** `F1_Macro` and **`161,042`-row pooled OOF `F1_Macro` `0.9550`** (`F1_Macro_Reliable = 0.9561`, `oof_total_rows = 161,042` post-collision dedup).
+  - 5-fold stratified CV on the `166,926`-row development pool (`train+val`, held-out test excluded) yielded **`0.9535 ± 0.0121`** `F1_Macro` and **`159,908`-row pooled OOF `F1_Macro` `0.9613`** (`F1_Macro_Reliable = 0.9625`, `oof_total_rows = 159,908` post-collision dedup).
   - `40` Optuna TPE trials reached validation `F1_Macro` `0.9561` vs `baseline` `0.9504` (`+0.0056 <= 0.0121` CV std), so CV-std gating automatically retained `baseline`.
 - **Temperature Scaling & Ensemble Paired Bootstrap:**
-  - Validation temperature scaling gave `T = 0.7948` (`MLP`, ECE `-0.002535`), `T = 0.8749` (`1D-CNN`, ECE `-0.001259`), and `T = 0.9095` (`XGBoost`, ECE `-0.000253`).
-  - Ensemble comparison on test: `best_single (XGBoost)` `0.9603`, `soft_voting` `0.9181` (significant loss `-0.0421`), `confidence_weighted` `0.9356` (significant loss `-0.0246`), `val_weighted_voting` `0.9184` (significant loss `-0.0419`), and validation `stacking` `0.9725` (`+0.0123`, paired bootstrap `95%` CI `[-0.0040, +0.0538]` crosses `0`, `statistically_significant = False`). Consequently `XGBoost` remains the default supervised production classifier.
+  - Validation temperature scaling gave `T = 0.7948` (`MLP`, ECE `-0.002535`), `T = 0.8749` (`1D-CNN`, ECE `-0.001259`), and `T = 0.9702` (`XGBoost`, ECE delta `+0.000072`, already well-calibrated near `T = 1.0`).
+  - Ensemble comparison on test: `best_single (XGBoost)` `0.9661`, `soft_voting` `0.9193` (significant loss `-0.0468`), `confidence_weighted` `0.9536` (loss `-0.0125`, CI `[-0.0537, +0.0063]` includes `0`), `val_weighted_voting` `0.9225` (significant loss `-0.0436`), and validation `stacking` `0.9660` (`-0.0001`, paired bootstrap `95%` CI `[-0.0140, +0.0146]` crosses `0`, `statistically_significant = False`). Consequently `XGBoost` remains the default supervised production classifier.
 
 ---
 
 ## 4. Secondary Evaluation Protocols (`time_block`, `by_day`, Ablation, Unseen, Sensitivity)
 
 ### Chronological Drift (`time_block`)
-- Ordering used session order + CSV row index (`time_block ordering = CSV row order (no real Timestamp)`, `leakage_checks.passed = True`) because `data/TrafficLabelling/` was absent.
+- Ordering used real `Timestamp` values aligned from `data/TrafficLabelling/` (`time_block ordering = Timestamp`, `match_rate = 0.9999`, `leakage_checks.passed = True`). Partitions: train pre-SMOTE `115,669`, validation `37,420`, held-out test `37,535`.
 - Evaluating canonical `random` split configuration under per-class chronological `time_block` shifted test **`F1_Macro`** sharply:
-  - `XGBoost`: **`0.7518`** (`95%` CI `[0.7098, 0.8250]`, Accuracy `0.9924`, `F1_Weighted = 0.9917`, `F1_Macro_Reliable = 0.9173`).
-  - `1D-CNN`: **`0.4376`** (`95%` CI `[0.4265, 0.4787]`, Accuracy `0.9521`, `F1_Macro_Reliable = 0.5689`).
-  - `MLP`: **`0.2767`** (`95%` CI `[0.2752, 0.3004]`, Accuracy `0.9502`, `F1_Macro_Reliable = 0.3597`).
-  - `Autoencoder`: binary `F1 = 0.5003` (`95%` CI `[0.4892, 0.5107]`, `ROC-AUC = 0.8263`, `FPR = 0.0589`).
-- Retraining from scratch directly with `split_strategy=time_block` (per-model selection `MLP=smote`, `CNN=class_weight`, `XGBoost=smote`, `leakage_checks.passed = True`) yielded `XGBoost` Test `F1_Macro` `0.8427`, `MLP` `0.6703`, `1D-CNN` `0.3919`.
+  - `XGBoost` (`class_weight` deployment profile): **`0.8646`** (`95%` CI `[0.8460, 0.8763]`, Accuracy `0.9834`, `F1_Weighted = 0.9876`, `F1_Macro_Reliable = 0.9240`).
+  - `1D-CNN`: **`0.3073`** (`95%` CI `[0.3019, 0.3359]`, Accuracy `0.9250`, `F1_Macro_Reliable = 0.3995`).
+  - `MLP`: **`0.2770`** (`95%` CI `[0.2756, 0.3011]`, Accuracy `0.9511`, `F1_Macro_Reliable = 0.3601`).
+  - `Autoencoder`: binary `F1 = 0.4819` (`95%` CI `[0.4705, 0.4926]`, `ROC-AUC = 0.8151`, `FPR = 0.0623`).
 
 ### Open-Set Cross-Day Protocol (`by_day`: Mon–Wed Train / Thu Val / Thu–Fri Unseen Attacks)
-- In CICIDS2017, all five Thursday–Friday attack families (`Bot`, `DDoS`, `Infiltration`, `PortScan`, `Web Attack`) never appear in Monday–Wednesday training (`leakage_checks.passed = True`):
-  - Closed-set 13-class reference: `XGBoost` `F1_Macro = 0.0860` (`Acc=0.6868`; full primary `by_day` retrain `0.0952`), `1D-CNN` `0.0691`, `MLP` `0.0661`.
-  - Open-set binary novelty (`Benign vs. Attack`): `XGBoost (1 - P_Benign)` recall **`0.2876`** (`F1 = 0.4467`, precision `0.9991`, `FPR = 0.0001` — missing `71.24%` of unseen attacks), `XGBoost (Binary)` recall `0.2690` (`F1 = 0.4238`, precision `0.9981`), `MLP (1 - P_Benign)` recall `0.2839` (`F1 = 0.4417`, precision `0.9942`), `1D-CNN (1 - P_Benign)` recall `0.1227` (`F1 = 0.2177`), and benign-only `Autoencoder` recall **`0.3419`** (`F1 = 0.4676`, `ROC-AUC = 0.8784`, `FPR = 0.0549`).
+- In CICIDS2017, all five Thursday–Friday attack families (`Bot`, `DDoS`, `Infiltration`, `PortScan`, `Web Attack`) never appear in Monday–Wednesday training (`leakage_checks.passed = True`). Partitions: train pre-SMOTE `112,124`, validation `15,537`, held-out test `63,001`.
+  - Closed-set 13-class reference: `XGBoost` `F1_Macro = 0.0716` (`Acc=0.6856`, `F1_Macro_Reliable=0.1718`), `MLP` `0.0716`, `1D-CNN` `0.0696`.
+  - Open-set binary novelty (`Benign vs. Attack`): `XGBoost (1 - P_Benign)` recall **`0.2829`** (`F1 = 0.4407`, precision `0.9970`, `FPR = 0.0004` — missing `71.71%` of unseen attacks), `XGBoost (Binary)` recall `0.2806` (`F1 = 0.4379`, precision `0.9968`), `MLP (1 - P_Benign)` recall `0.2841` (`F1 = 0.4420`, precision `0.9956`), `1D-CNN (1 - P_Benign)` recall `0.1663` (`F1 = 0.2812`), and benign-only `Autoencoder` recall **`0.3400`** (`F1 = 0.4663`, `ROC-AUC = 0.8760`, `FPR = 0.0542`).
 
 ### Recall-vs-FPR Mitigation Screening & Deployment Profiles
 
-> **Important:** Full validation-screening tables and held-out test tables live in [`reports/model_comparison_report.md`](../reports/model_comparison_report.md). Test-partition mitigation tables are reported **for description only**; options were **not** selected on held-out test data. Validation ranking agreed strongly with test ranking (`time_block` Spearman `rho = 0.9655`, top bounded-FPR option `XGBoost ('class_weight') (Argmax)`; `by_day` Spearman `rho = 0.9756`, top option `Lower P(Benign) Gate (1 - P_Benign > tau) (P99)`).
+> **Important:** Full validation-screening tables and held-out test tables live in [`reports/model_comparison_report.md`](../reports/model_comparison_report.md). Test-partition mitigation tables are reported **for description only**; options were **not** selected on held-out test data. Validation ranking agreed with test ranking (`time_block` Spearman `rho = 0.9895`, top bounded-FPR option `XGBoost ('class_weight') (Argmax)`; `by_day` Spearman `rho = 0.8415`, top option `Lower P(Benign) Gate (1 - P_Benign > tau) (P99)`).
 
-| Profile | Persistence Status | Random `F1_Macro` | `time_block` Benign FPR | `time_block` Focus Mean Recall | `time_block` `F1_Macro` | Operational Trade-off |
-|---|---|---:|---:|---:|---:|---|
-| **Default `'none'`** | Persisted in [`models/xgb_model.json`](../models/xgb_model.json) | `0.9603` | `0.0001` | `0.4276` | `0.7518` | Lowest false positives on benign traffic, but weak recall on drifted/rare attacks (`Bot = 0.000`, `Heartbleed = 0.000`, `Web Attack = 0.543` in mitigation / `0.400` in model eval, `Infiltration = 0.429`). |
-| **`'class_weight'`** | **Requires retraining** (`data.imbalance.strategy: class_weight`, `imbalance_selection.per_model: false`) | *(retrain required)* | `0.0144` (~`1.4%`) | `0.7816` | `0.8512` | Higher recall on drifted classes (`Web Attack = 0.714`, `DoS slowloris = 0.975`) at ~`1.4%` Benign FPR (`144x` baseline false-alarm rate). |
+| Profile | Persistence Status | Selection Basis (`used_test_data = False`) | Random-Split Val `F1_Macro` | `time_block` Test `F1_Macro` | `time_block` Benign FPR | `time_block` Focus Mean Recall | Operational Trade-off |
+|---|---|---|---:|---:|---:|---:|---|
+| **Default active `'class_weight'`** | [`models/xgb_model.json`](../models/xgb_model.json) | `time_block` val `0.8754` vs `0.8534` | `0.9446` | `0.8646` | `0.0144` | `0.7968` | Higher recall on drifted classes (`DoS GoldenEye = 1.000`, `DoS slowloris = 0.975`, `Web Attack = 0.806`, `Heartbleed = 1.000`, `Infiltration = 1.000`) at ≈`443` false alarms on `30,763` benign test flows. |
+| **Alternate `'none'` (ultra-low FPR)** | [`models/xgb_model_none.json`](../models/xgb_model_none.json) | random-split val `0.9518` vs `0.9446` | `0.9518` | `0.7571` | `0.0002` | `0.4547` | ≈`6` false alarms, but weaker drifted/rare recall (`Bot = 0.000`, `Heartbleed = 0.000`, `Web Attack = 0.528`, `Infiltration = 0.571`, `DoS GoldenEye = 0.829`, `DoS slowloris = 0.800`). |
 
-- Choice between profiles depends on SOC operational tolerance for false alarms vs. missed drifted attacks. Under every mitigation option evaluated (`none`, `class_weight`, `Hybrid Override`, lowered `P(Benign)` gates), **`Bot` recall stays `0.000` on `time_block` and `~0.015` at best on `by_day`**.
+- On the held-out `time_block` partition (`37,535` flows: `30,763` Benign, `6,772` attack), `class_weight` raises overall attack recall from `0.9607` to `0.9796` (≈`128` extra attacks caught) at `0.0144` versus `0.0002` Benign FPR.
+- Choice between profiles depends on SOC operational tolerance for false alarms vs. missed drifted attacks. Under every mitigation option evaluated (`none`, `class_weight`, `Hybrid Override`, lowered `P(Benign)` gates), **`Bot` recall stays `0.000` on `time_block` (`0/28`, `KS = 1.0000` on `Flow Duration`) and `~0.015` at best on `by_day`**; `Heartbleed` has only `2` test flows and is `statistically_unreliable`.
 
 ### Feature Ablation (`Destination Port` Dropped), Leave-One-Attack-Out & Sample-Size Sensitivity
-- **Feature Ablation (`Destination Port`):** Global SHAP on `XGBoost` is led by `Destination Port` (`0.8610` vs runner-up `Init_Win_bytes_backward` `0.3711`). Dropping `Destination Port` on identical `28,324` held-out test rows (`sha256: 85c3896d...` verified) shifted `XGBoost` Test `F1_Macro` from `0.9603` to `0.9540` (`delta = -0.0063`).
-- **Leave-One-Attack-Out (`Web Attack` withheld from training, `26` test attack vs `23,112` benign):** Supervised closed-set recall on withheld `Web Attack` was `0.0`, while benign-only `Autoencoder` (`threshold = 0.0744` at P95) achieved `0.0` unseen recall (`ROC-AUC = 0.5626`, `FPR = 0.0498`), illustrating that stealthy web-attack flows mimic benign HTTP statistics.
-- **Sample-Size Sensitivity (`200k` vs. `500k`):** Scaling `XGBoost` (`none`) from `200,000` requested rows (`191,268` deduplicated, `28,324` test) to `500,000` (`470,048` deduplicated, `69,026` test) shifted `F1_Macro` from `0.9603` (`[0.9013, 0.9849]`) to `0.9894` (`[0.9837, 0.9943]`, `+0.0291` delta, overlapping 95% CIs, `conclusions_change = False`).
+- **Feature Ablation (`Destination Port`):** Global SHAP on `XGBoost` is led by `Destination Port` (`1.2368` vs runner-up `Init_Win_bytes_backward` `0.4690`). Dropping `Destination Port` on identical `28,126` held-out test rows (`sha256: 6c72618b...` verified) shifted `XGBoost` Test `F1_Macro` from `0.9465` to `0.9325` (`delta = -0.0140`).
+- **Leave-One-Attack-Out (`Web Attack` withheld from training, `26` test attack vs `23,112` benign):** Supervised closed-set recall on withheld `Web Attack` was `0.0`, while benign-only `Autoencoder` (`threshold = 0.0751` at P95) achieved `0.0` unseen recall (`ROC-AUC = 0.4750`, `FPR = 0.0509`), illustrating that stealthy web-attack flows mimic benign HTTP statistics.
+- **Sample-Size Sensitivity (`200k` vs. `500k`):** Scaling `XGBoost` (`class_weight`) from `200,000` requested rows (`196,384` deduplicated, `28,126` test) to `500,000` (`488,531` deduplicated, `68,466` test) shifted `F1_Macro` from `0.9465` (`[0.9084, 0.9673]`) to `0.9736` (`[0.9651, 0.9800]`, `+0.0271` delta, overlapping 95% CIs, `conclusions_change = False`).
 - **ONNX Export & Inference Latency Path:** `onnx` and `tf2onnx` are omitted from `requirements.txt` to avoid resolver conflicts on Python `3.13` + TensorFlow `2.21.0` + NumPy `2.x`; single-flow latency uses warmed `tf.function` graphs (Keras) and `booster.inplace_predict(...)` (XGBoost). See [`docs/project_details.md`](project_details.md#4-onnx-export-feasibility-notes).
 
 ---
 
 ## Using a Larger Sample
 
-The committed production weights in [`models/`](../models/) were trained at the default stratified budget (`data.sample_size: 200000`, `data.use_full_dataset: false`) and have **not** been retrained here. In the evaluation sensitivity protocol (fit in-memory on `XGBoost`), increasing the stratified sample from `200,000` (`191,268` clean flows) to `500,000` (`470,048` clean flows) yielded XGBoost Macro-F1 `0.9894 [0.9837, 0.9943]` vs `0.9603 [0.9013, 0.9849]` at `200k` (`F1_Macro_Reliable` `0.9875` vs `0.9972`), with overlapping 95% bootstrap CIs (`conclusions_change = False`).
+The committed production weights in [`models/`](../models/) were trained at the default stratified budget (`data.sample_size: 200000`, `data.use_full_dataset: false`) and have **not** been retrained here. In the evaluation sensitivity protocol (fit in-memory on `XGBoost` with the active `class_weight` profile), increasing the stratified sample from `200,000` (`196,384` clean flows) to `500,000` (`488,531` clean flows) yielded XGBoost Macro-F1 `0.9736 [0.9651, 0.9800]` vs `0.9465 [0.9084, 0.9673]` at `200k` (`F1_Macro_Reliable` `0.9688` vs `0.9854`), with overlapping 95% bootstrap CIs (`conclusions_change = False`).
 
 ### How to Retrain at `500k` or Full Dataset
 
@@ -105,4 +105,4 @@ The committed production weights in [`models/`](../models/) were trained at the 
    .venv\Scripts\python.exe scripts/train.py --run-eval
    ```
 
-> **Expected Training-Time Warning:** At `200,000` requested rows, single baseline training runs measured in [`reports/model_comparison.csv`](../reports/model_comparison.csv) already required **`859.55s` (`14.3 min`)** for `1D-CNN` on CPU TensorFlow, **`320.33s` (`5.3 min`)** for `XGBoost`, `68.80s` for `Autoencoder`, `57.84s` for `MLP`, `53.46s` for `Autoencoder (Deep Reg)`, and `33.46s` for `VAE` — in addition to per-model imbalance screening, bounded loss trials, 40 Optuna trials, 5-fold stratified CV, and secondary protocol runs. Increasing the sample `2.5x` (`500k`) or `~14x` (full `2.83M` rows) scales CPU TensorFlow, CV, and neighbor-based anomaly detectors substantially; budget **1+ hour** at `500k` and **multiple hours / high RAM** for a full `2.83M`-row run on Windows CPU TensorFlow.
+> **Expected Training-Time Warning:** At `200,000` requested rows, single baseline training runs measured in [`reports/model_comparison.csv`](../reports/model_comparison.csv) already required **`859.55s` (`14.3 min`)** for `1D-CNN` on CPU TensorFlow, **`10.66s`** for the `class_weight` `XGBoost` profile, `68.80s` for `Autoencoder`, `57.84s` for `MLP`, `53.46s` for `Autoencoder (Deep Reg)`, and `33.46s` for `VAE` — in addition to per-model imbalance screening, bounded loss trials, 40 Optuna trials, 5-fold stratified CV, and secondary protocol runs. Increasing the sample `2.5x` (`500k`) or `~14x` (full `2.83M` rows) scales CPU TensorFlow, CV, and neighbor-based anomaly detectors substantially; budget **1+ hour** at `500k` and **multiple hours / high RAM** for a full `2.83M`-row run on Windows CPU TensorFlow.

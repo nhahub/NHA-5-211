@@ -804,6 +804,7 @@ def run_evaluation_suite(
         xgb_opt_diag.get("best_params") if xgb_opt_diag.get("selected_variant") == "tuned" else None
     )
     imb_strategy = train_diag.get("imbalance_experiment", {}).get("selected_strategy", "none")
+    active_xgb_profile = app_c.deployment.xgboost_imbalance_profile
     random_xgb_context = (
         (
             train_diag.get("imbalance_experiment", {})
@@ -811,7 +812,7 @@ def run_evaluation_suite(
             .get("XGBoost", {})
             .get("metrics_by_strategy")
         )
-        or (artifacts.model_metadata.get("models", {}).get("XGBoost", {}).get("profiles"))
+        or (artifacts.model_metadata.get("XGBoost", {}).get("profiles"))
         or {}
     )
 
@@ -833,6 +834,7 @@ def run_evaluation_suite(
                 imbalance_strategy=imb_strategy,
                 keras_epochs=app_c.evaluation.by_day_keras_epochs,
                 force_synthetic=is_synth,
+                xgb_imbalance_strategy=active_xgb_profile,
             )
         if app_c.evaluation.run_time_block_comparison:
             time_block_res = evaluate_time_block_protocol(
@@ -842,6 +844,7 @@ def run_evaluation_suite(
                 imbalance_strategy=imb_strategy,
                 keras_epochs=app_c.evaluation.time_block_keras_epochs,
                 force_synthetic=is_synth,
+                xgb_imbalance_strategy=active_xgb_profile,
                 random_context=random_xgb_context,
             )
             time_block_profile_selection = time_block_res.get("profile_selection") or {
@@ -862,7 +865,7 @@ def run_evaluation_suite(
                 model_cfg=model_c,
                 drop_features=app_c.evaluation.ablation_drop_features,
                 xgb_params=selected_xgb_params,
-                imbalance_strategy=imb_strategy,
+                imbalance_strategy=active_xgb_profile,
                 force_synthetic=is_synth,
                 compute_shap=not skip_shap,
             )
@@ -877,7 +880,7 @@ def run_evaluation_suite(
                     app_cfg=app_c,
                     model_cfg=model_c,
                     xgb_params=selected_xgb_params,
-                    imbalance_strategy=imb_strategy,
+                    imbalance_strategy=active_xgb_profile,
                     n_splits=app_c.evaluation.cv_n_splits,
                     force_synthetic=is_synth,
                 )
@@ -892,7 +895,7 @@ def run_evaluation_suite(
                     app_cfg=app_c,
                     model_cfg=model_c,
                     xgb_params=selected_xgb_params,
-                    imbalance_strategy=imb_strategy,
+                    imbalance_strategy=active_xgb_profile,
                     sample_sizes=app_c.evaluation.sensitivity_sample_sizes,
                     force_synthetic=False,
                 )
@@ -982,6 +985,7 @@ def run_time_block_refresh(
         imbalance_strategy=imb_strategy,
         keras_epochs=app_c.evaluation.time_block_keras_epochs,
         force_synthetic=is_synth,
+        xgb_imbalance_strategy=app_c.deployment.xgboost_imbalance_profile,
         random_context=random_xgb_context,
     )
     full_summary["time_block_protocol"] = time_block_res

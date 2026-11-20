@@ -30,6 +30,7 @@ def render_system_settings_page(sidebar_state: dict[str, Any]) -> None:
     with c1:
         st.markdown("#### 🧠 Persisted Model & Artifact Inventory")
         pointer_set = set(artifacts.lfs_pointers)
+        models_dir = app_cfg.paths.resolve("models_dir")
 
         def _status(is_loaded: bool, fname: str) -> str:
             if is_loaded:
@@ -37,6 +38,18 @@ def render_system_settings_page(sidebar_state: dict[str, Any]) -> None:
             if fname in pointer_set:
                 return "LFS Pointer (run git lfs pull)"
             return "Missing"
+
+        def _file_status(fname: str) -> str:
+            if fname in pointer_set:
+                return "LFS Pointer (run git lfs pull)"
+            if (models_dir / fname).exists():
+                return "Available (not loaded)"
+            return "Missing"
+
+        active_profile = artifacts.active_xgboost_profile
+        active_artifact = artifacts.active_xgboost_artifact
+        alt_profile = "none" if active_profile == "class_weight" else "class_weight"
+        alt_artifact = artifacts.available_xgboost_profiles.get(alt_profile, f"xgb_model_{alt_profile}.json")
 
         inv_rows = [
             {
@@ -52,8 +65,12 @@ def render_system_settings_page(sidebar_state: dict[str, Any]) -> None:
                 "Status": _status("Autoencoder" in artifacts.models, "best_autoencoder.keras"),
             },
             {
-                "Artifact": "XGBoost Classifier (`xgb_model.json`)",
-                "Status": _status("XGBoost" in artifacts.models, "xgb_model.json"),
+                "Artifact": f"XGBoost Active (`{active_artifact}`, profile `{active_profile}`)",
+                "Status": _status("XGBoost" in artifacts.models, active_artifact),
+            },
+            {
+                "Artifact": f"XGBoost Alternate (`{alt_artifact}`, profile `{alt_profile}`)",
+                "Status": _file_status(alt_artifact),
             },
             {
                 "Artifact": "StandardScaler (`scaler.pkl`)",
@@ -95,6 +112,8 @@ def render_system_settings_page(sidebar_state: dict[str, Any]) -> None:
             "calibrated_anomaly_threshold": artifacts.anomaly_threshold,
             "active_anomaly_threshold": sidebar_state["anomaly_threshold"],
             "ensemble_strategy": model_cfg.ensemble.strategy,
+            "xgboost_imbalance_profile": artifacts.active_xgboost_profile,
+            "xgboost_artifact": artifacts.active_xgboost_artifact,
         }
         st.json(runtime_info)
 

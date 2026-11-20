@@ -89,6 +89,17 @@ def load_model_comparison_df() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def load_model_metadata() -> dict[str, Any]:
+    """Load persisted models/model_metadata.json (XGBoost deployment profiles) if available."""
+    app_cfg = get_app_config()
+    path = app_cfg.paths.resolve("models_dir") / "model_metadata.json"
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+@st.cache_data(show_spinner=False)
 def load_training_histories() -> dict[str, dict[str, list[float]]]:
     """Load persisted training_histories.json if available."""
     app_cfg = get_app_config()

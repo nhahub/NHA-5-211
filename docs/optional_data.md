@@ -1,9 +1,9 @@
 # Optional CICIDS2017 Datasets (Real Timestamps & Corrected Labels)
 
-This repository keeps `data/` small by default and runs the main benchmark against the 8 `MachineLearningCVE` CSV files in `data/raw/`. Two optional upstream extensions are supported via [`configs/config.yaml`](../configs/config.yaml) without code changes, but neither was present locally when the committed benchmark reports were generated:
+This repository keeps `data/` small by default and runs the main benchmark against the 8 `MachineLearningCVE` CSV files in `data/raw/`. Two optional upstream extensions are supported via [`configs/config.yaml`](../configs/config.yaml) without code changes. **Current status:** `data/TrafficLabelling/` is present locally and was used for the committed `time_block` evaluation (`ordering = Timestamp`, `match_rate = 0.9999`), but it is intentionally untracked and never committed to git; `data/engelen2021_label_corrections.csv` remains absent and was skipped cleanly:
 
 1. **Real Capture Timestamps for `time_block` (`TrafficLabelling_.zip` / `GeneratedLabelledFlows`)**
-   - **Why optional:** Standard `MachineLearningCVE` CSVs in `data/raw/` omit the `Timestamp` column, so chronological `time_block` evaluation falls back to session order + CSV row index and warns explicitly: `time_block ordering = CSV row order (no real Timestamp)`.
+   - **Why optional:** Standard `MachineLearningCVE` CSVs in `data/raw/` omit the `Timestamp` column. When `data/TrafficLabelling/` is absent, chronological `time_block` evaluation falls back to session order + CSV row index and warns explicitly: `time_block ordering = CSV row order (no real Timestamp)`.
    - **Where to download:** Download **`GeneratedLabelledFlows` / `TrafficLabelling_.zip`** from the UNB Canadian Institute for Cybersecurity CICIDS2017 page: <https://www.unb.ca/cic/datasets/ids-2017.html>.
    - **Where to place:** Extract all 8 daily CSVs into `data/TrafficLabelling/` (matching `data.timestamp_source_dir: "data/TrafficLabelling"`):
      - `Monday-WorkingHours.pcap_ISCX.csv`

@@ -12,6 +12,7 @@ from dashboard.data_access import (
     get_figure_path,
     load_evaluation_summary,
     load_model_comparison_df,
+    load_model_metadata,
     load_training_histories,
 )
 from src.evaluation.report_writer import (
@@ -113,6 +114,126 @@ def render_model_performance_page() -> None:
                     title="Single-Flow Inference Latency: Median & P95 (µs, lower is faster)",
                 )
                 st.plotly_chart(apply_soc_plotly_theme(fig_l, height=380), use_container_width=True)
+
+    # XGBoost Deployment Profiles & Time-Aware Selection (reads generated metadata/reports only)
+    xgb_meta = load_model_metadata().get("models", {}).get("XGBoost", {})
+    tb_deploy = eval_summary.get("time_block_protocol", {})
+    tb_sel = eval_summary.get("time_block_profile_selection") or tb_deploy.get("profile_selection") or {}
+    if xgb_meta or tb_sel:
+        st.markdown("#### ⚖️ XGBoost Deployment Profiles & Time-Aware Selection")
+        xgb_profiles_meta = xgb_meta.get("profiles", {}) if isinstance(xgb_meta, dict) else {}
+        active_profile = (
+            xgb_meta.get("active_profile") or tb_deploy.get("xgb_imbalance_strategy") or "class_weight"
+        )
+        alt_profile = "none" if active_profile == "class_weight" else "class_weight"
+        active_artifact = (
+            xgb_profiles_meta.get(active_profile, {}).get("artifact_file")
+            or xgb_meta.get("profile_files", {}).get(active_profile)
+            or "xgb_model.json"
+        )
+        alt_artifact = (
+            xgb_profiles_meta.get(alt_profile, {}).get("artifact_file")
+            or xgb_meta.get("profile_files", {}).get(alt_profile)
+            or f"xgb_model_{alt_profile}.json"
+        )
+        st.caption(
+            f"Active deployment profile: `{active_profile}` (`models/{active_artifact}`); "
+            f"alternate: `{alt_profile}` (`models/{alt_artifact}`). "
+            "Profile choice is made on validation data only — never on held-out test flows."
+        )
+
+        sel_map = tb_sel.get("metrics_by_profile", {}) if isinstance(tb_sel, dict) else {}
+        if sel_map:
+            st.markdown("**Chronological `time_block` Validation Selection (`used_test_data=False`)**")
+            sel_rows = []
+            for prof in ("class_weight", "none"):
+                m = sel_map.get(prof)
+                if not m:
+                    continue
+                sel_rows.append(
+                    {
+                        "Profile": prof,
+                        "Val_Macro_F1": round(float(m.get("val_macro_f1", 0.0)), 4),
+                        "Val_Weighted_F1": round(float(m.get("val_weighted_f1", 0.0)), 4),
+                        "Val_Benign_FPR": round(float(m.get("val_benign_fpr", 0.0)), 4),
+                        "Selected": "YES" if prof == tb_sel.get("selected_profile") else "",
+                    }
+                )
+            if sel_rows:
+                st.dataframe(pd.DataFrame(sel_rows), use_container_width=True, hide_index=True)
+            if tb_sel.get("justification"):
+                st.caption(f"Selection justification: {tb_sel['justification']}")
+
+        rand_ctx = tb_sel.get("random_split_context", {}) if isinstance(tb_sel, dict) else {}
+        if rand_ctx:
+            st.markdown("**Random-Split Validation Context (Alternate-Profile Rationale)**")
+            rand_rows = []
+            for prof in ("class_weight", "none"):
+                m = rand_ctx.get(prof)
+                if not isinstance(m, dict):
+                    continue
+                rand_rows.append(
+                    {
+                        "Profile": prof,
+                        "Val_Macro_F1": round(float(m.get("val_macro_f1", 0.0)), 4),
+                        "Val_Weighted_F1": round(float(m.get("val_weighted_f1", 0.0)), 4),
+                        "Val_Benign_FPR": round(float(m.get("val_benign_fpr", 0.0)), 4),
+                    }
+                )
+            if rand_rows:
+                st.dataframe(pd.DataFrame(rand_rows), use_container_width=True, hide_index=True)
+
+        mit_rows = tb_deploy.get("mitigation_experiments", {}).get("rows", [])
+        if mit_rows:
+            wanted = {
+                f"Baseline XGBoost ('{active_profile}')": f"{active_profile} (active)",
+                f"XGBoost ('{alt_profile}')": f"{alt_profile} (alternate)",
+            }
+            trade_rows = []
+            for row in mit_rows:
+                label = wanted.get(str(row.get("Option")))
+                if not label:
+                    continue
+                trade_rows.append(
+                    {
+                        "Profile": label,
+                        "Benign_FPR": row.get("Benign_FPR"),
+                        "Overall_Attack_Recall": row.get("Overall_Attack_Recall"),
+                        "Focus_Mean_Recall": row.get("Focus_Mean_Recall"),
+                        "Binary_F1": row.get("Binary_F1"),
+                        "Multiclass_Macro_F1": row.get("Multiclass_Macro_F1"),
+                        "Focus_Class_Recalls": row.get("Focus_Class_Recalls"),
+                    }
+                )
+            if trade_rows:
+                st.markdown(
+                    "**Held-Out `time_block` Test Trade-Off (Descriptive Only, Not Used for Selection)**"
+                )
+                st.dataframe(
+                    _display_df_with_na(pd.DataFrame(trade_rows)),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        tb_pc = tb_deploy.get("per_class_metrics", {}).get("XGBoost", [])
+        caveats = []
+        for cname in ("Bot", "Heartbleed"):
+            pc = next((r for r in tb_pc if r.get("class_name") == cname), None)
+            if not pc:
+                continue
+            suffix = " (statistically unreliable)" if pc.get("statistically_unreliable") else ""
+            caveats.append(
+                f"`{cname}` recall={float(pc.get('recall', 0.0)):.3f} "
+                f"on {int(pc.get('support', 0))} test flows{suffix}"
+            )
+        drift = tb_deploy.get("failure_analysis", {}).get("feature_drift_top_features", [])
+        bot_ks = next(
+            (r for r in drift if r.get("Class") == "Bot" and r.get("Feature") == "Flow Duration"), None
+        )
+        if bot_ks:
+            caveats.append(f"`Bot` Flow Duration shift KS={float(bot_ks.get('KS_Statistic', 0.0)):.4f}")
+        if caveats:
+            st.caption("Honest caveats — " + "; ".join(caveats) + ".")
 
     # Interactive Training Curves
     if histories:

@@ -428,7 +428,13 @@ def write_academic_reports(
         drift_rows = tb_fail.get("feature_drift_top_features", [])
         if conf_rows or drift_rows:
             comp_lines.append(
-                f"### Time-Block Error Analysis (Failing Classes with Recall < {tb_fail.get('recall_threshold', 0.85):.2f})\n\n"
+                "### Time-Block Error Analysis (Active Deployment Profile Failing Classes with "
+                f"Recall < {tb_fail.get('recall_threshold', 0.85):.2f})\n\n"
+            )
+            comp_lines.append(
+                "> The error breakdown below reflects the active XGBoost deployment profile only; "
+                "the mitigation focus set is the union of classes failing under either candidate "
+                "profile (`none` / `class_weight`).\n\n"
             )
             if conf_rows:
                 comp_lines.append("#### Confusion-Matrix Breakdown for Failing Classes\n\n")

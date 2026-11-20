@@ -211,21 +211,132 @@ def check_readme_numbers(
         rd_text = rd_path.read_text(encoding="utf-8")
         sens_rows = summary.get("sample_size_sensitivity", {}).get("rows", [])
         if len(sens_rows) >= 2:
+            sens_200 = next((r for r in sens_rows if r.get("Requested_Sample_Size") == 200000), None)
             sens_500 = next((r for r in sens_rows if r.get("Requested_Sample_Size") == 500000), None)
             sens_m = re.search(
                 r"Macro-F1\s+`?([0-9.]+)\s*\[([0-9.]+),\s*([0-9.]+)\]`?\s+vs\s+`?([0-9.]+)\s*\[([0-9.]+),\s*([0-9.]+)\]`?",
                 rd_text,
             )
-            if sens_m and sens_500:
+            if sens_m and sens_500 and sens_200:
                 _check_close(errors, "docs 500k Macro-F1", float(sens_m.group(1)), sens_500.get("F1_Macro"))
                 _check_close(errors, "docs 500k CI low", float(sens_m.group(2)), sens_500.get("CI95_Low"))
                 _check_close(errors, "docs 500k CI high", float(sens_m.group(3)), sens_500.get("CI95_High"))
-                _check_close(
-                    errors,
-                    "docs 200k Macro-F1",
-                    float(sens_m.group(4)),
-                    sup.get("XGBoost", {}).get("f1_macro"),
-                )
+                _check_close(errors, "docs 200k Macro-F1", float(sens_m.group(4)), sens_200.get("F1_Macro"))
+                _check_close(errors, "docs 200k CI low", float(sens_m.group(5)), sens_200.get("CI95_Low"))
+                _check_close(errors, "docs 200k CI high", float(sens_m.group(6)), sens_200.get("CI95_High"))
+
+    # 7. Verify README XGBoost deployment-profile table against generated reports/metadata
+    tb_proto = summary.get("time_block_protocol", {})
+    tb_sel_dep = summary.get("time_block_profile_selection") or tb_proto.get("profile_selection") or {}
+    tb_mit_rows = tb_proto.get("mitigation_experiments", {}).get("rows", [])
+    mit_by_option = {str(r.get("Option")): r for r in tb_mit_rows}
+    dep_expect = {
+        "class_weight": {
+            "artifact": "xgb_model.json",
+            "f1": tb_models.get("XGBoost", {}).get("f1_macro"),
+            "ci": tb_models.get("XGBoost", {}).get("f1_macro_ci95", {}),
+            "mit": mit_by_option.get("Baseline XGBoost ('class_weight')", {}),
+            "selection": tb_sel_dep.get("metrics_by_profile", {}).get("class_weight", {}),
+        },
+        "none": {
+            "artifact": "xgb_model_none.json",
+            "f1": mit_by_option.get("XGBoost ('none')", {}).get("Multiclass_Macro_F1"),
+            "ci": {},
+            "mit": mit_by_option.get("XGBoost ('none')", {}),
+            "selection": tb_sel_dep.get("metrics_by_profile", {}).get("none", {}),
+        },
+    }
+    dep_re = re.compile(
+        r"^\|\s*\*{0,2}`(?P<prof>class_weight|none)`[^|]*\|\s*`(?P<artifact>[^`]+)`\s*\|"
+        r"\s*[^|]*?`(?P<sel_a>[0-9.]+)`\s*(?:\([^)]*\)\s*)?vs\s*`(?P<sel_b>[0-9.]+)`[^|]*\|"
+        r"\s*(?:\*\*)?(?P<f1>[0-9.]+)(?:\*\*)?\s*(?:`\[(?P<lo>[0-9.]+),\s*(?P<hi>[0-9.]+)\]`)?\s*\|"
+        r"\s*`(?P<fpr>[0-9.]+)`\s*\|\s*`(?P<rec>[0-9.]+)`\s*\|\s*`(?P<focus>[0-9.]+)`\s*\|"
+    )
+    dep_seen: set[str] = set()
+    for line in readme_lines:
+        dm = dep_re.match(line.strip())
+        if not dm:
+            continue
+        prof = dm.group("prof")
+        dep_seen.add(prof)
+        exp = dep_expect[prof]
+        if dm.group("artifact") != f"models/{exp['artifact']}":
+            errors.append(
+                f"README {prof} artifact {dm.group('artifact')} != expected models/{exp['artifact']}"
+            )
+        _check_close(errors, f"README {prof} time_block F1_Macro", float(dm.group("f1")), exp["f1"])
+        if exp["ci"]:
+            _check_close(
+                errors, f"README {prof} time_block CI low", float(dm.group("lo")), exp["ci"].get("ci95_low")
+            )
+            _check_close(
+                errors, f"README {prof} time_block CI high", float(dm.group("hi")), exp["ci"].get("ci95_high")
+            )
+        _check_close(
+            errors, f"README {prof} Benign FPR", float(dm.group("fpr")), exp["mit"].get("Benign_FPR")
+        )
+        _check_close(
+            errors,
+            f"README {prof} attack recall",
+            float(dm.group("rec")),
+            exp["mit"].get("Overall_Attack_Recall"),
+        )
+        _check_close(
+            errors,
+            f"README {prof} focus recall",
+            float(dm.group("focus")),
+            exp["mit"].get("Focus_Mean_Recall"),
+        )
+        # Selection-basis numbers must reflect the corresponding validation metric.
+        if prof == "class_weight":
+            tb_profiles = tb_sel_dep.get("metrics_by_profile", {})
+            _check_close(
+                errors,
+                "README class_weight time_block val Macro-F1",
+                float(dm.group("sel_a")),
+                tb_profiles.get("class_weight", {}).get("val_macro_f1"),
+            )
+            _check_close(
+                errors,
+                "README none time_block val Macro-F1",
+                float(dm.group("sel_b")),
+                tb_profiles.get("none", {}).get("val_macro_f1"),
+            )
+        else:
+            rand_ctx = tb_sel_dep.get("random_split_context", {})
+            _check_close(
+                errors,
+                "README none random-split val Macro-F1",
+                float(dm.group("sel_a")),
+                rand_ctx.get("none", {}).get("val_macro_f1"),
+            )
+            _check_close(
+                errors,
+                "README class_weight random-split val Macro-F1",
+                float(dm.group("sel_b")),
+                rand_ctx.get("class_weight", {}).get("val_macro_f1"),
+            )
+
+    if dep_seen != {"class_weight", "none"}:
+        errors.append("README.md deployment-profile table must list both 'class_weight' and 'none'")
+
+    if tb_sel_dep.get("used_test_data") is not False:
+        errors.append("time_block profile selection must record used_test_data=False")
+
+    meta_path = PROJECT_ROOT / "models" / "model_metadata.json"
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        xgb_meta = meta.get("models", {}).get("XGBoost", {})
+        profile_files = xgb_meta.get("profile_files", {})
+        if xgb_meta.get("active_profile") != "class_weight":
+            errors.append(
+                f"models/model_metadata.json active XGBoost profile is "
+                f"{xgb_meta.get('active_profile')!r}, expected 'class_weight'"
+            )
+        if profile_files.get("class_weight") != "xgb_model.json":
+            errors.append("models/model_metadata.json must map class_weight -> xgb_model.json")
+        if profile_files.get("none") != "xgb_model_none.json":
+            errors.append("models/model_metadata.json must map none -> xgb_model_none.json")
 
     return errors
 

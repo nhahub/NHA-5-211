@@ -37,6 +37,25 @@ def test_dashboard_charts_and_badges_render_cleanly() -> None:
         assert len(fig.data) >= 1
 
 
+def _rendered_markdown(at) -> str:
+    parts = [str(m.value) for m in at.markdown]
+    parts.extend(str(c.value) for c in at.caption)
+    return " ".join(parts)
+
+
+def _dataframe_columns(at) -> set[str]:
+    cols: set[str] = set()
+    for df_el in at.dataframe:
+        value = getattr(df_el, "value", None)
+        if value is None:
+            continue
+        try:
+            cols.update(str(c) for c in value.columns)
+        except AttributeError:
+            continue
+    return cols
+
+
 def test_streamlit_apptest_smoke_with_existing_artifacts() -> None:
     from streamlit.testing.v1 import AppTest
 
@@ -45,13 +64,21 @@ def test_streamlit_apptest_smoke_with_existing_artifacts() -> None:
     at.run()
     assert not at.exception
     assert len(at.tabs) >= 7
+    md = _rendered_markdown(at)
+    assert "XGBoost Deployment Profiles" in md
+    assert "class_weight" in md
+    assert "Focus_Mean_Recall" in _dataframe_columns(at)
 
 
 def test_streamlit_apptest_graceful_degradation_without_models(tmp_path: Path, monkeypatch) -> None:
     """Dashboard degrades cleanly with a clear banner when models/ is empty or LFS pointers."""
     from streamlit.testing.v1 import AppTest
 
-    from dashboard.data_access import build_test_detection_logs, load_cached_artifacts
+    from dashboard.data_access import (
+        build_test_detection_logs,
+        load_cached_artifacts,
+        load_model_metadata,
+    )
     from src.config import get_app_config
 
     empty_models = tmp_path / "empty_models"
@@ -67,6 +94,7 @@ def test_streamlit_apptest_graceful_degradation_without_models(tmp_path: Path, m
     monkeypatch.setattr("dashboard.data_access.get_app_config", lambda *args, **kwargs: cfg_copy)
     load_cached_artifacts.clear()
     build_test_detection_logs.clear()
+    load_model_metadata.clear()
 
     try:
         app_path = Path(__file__).resolve().parent.parent / "app.py"
@@ -76,6 +104,12 @@ def test_streamlit_apptest_graceful_degradation_without_models(tmp_path: Path, m
         assert len(at.tabs) >= 7
         warnings_text = " ".join(str(w.value) for w in at.warning)
         assert "Git LFS" in warnings_text or "Absent" in warnings_text
+        # Deployment-profile and validation-only trade-off metadata still render in stub mode.
+        md = _rendered_markdown(at)
+        assert "XGBoost Deployment Profiles" in md
+        assert "class_weight" in md
+        assert "Focus_Mean_Recall" in _dataframe_columns(at)
     finally:
         load_cached_artifacts.clear()
         build_test_detection_logs.clear()
+        load_model_metadata.clear()

@@ -61,13 +61,30 @@ Selection mode: `per_model` (neural candidates capped at `10` epochs during sele
 - **Overall Summary:** Per-model imbalance selection (independent validation Macro-F1 with tie_tolerance=0.0020, neural_epochs_cap=10): MLP -> 'smote', CNN -> 'smote', XGBoost -> 'none'.
 
 
+### Time-Aware XGBoost Deployment Profile Selection (`time_block` Validation Only; Random Split Context Retained)
+
+
+> Selected strictly on chronological `time_block` **validation** Macro-F1 with simplicity tie-breaking (`tie_tolerance=0.0020`, `used_test_data=False`, validation flows=`37,420`, ordering=`Timestamp`).
+
+
+| Profile | Val_Macro_F1 | Val_Weighted_F1 | Val_Macro_Recall | Val_MLogLoss | Val_Benign_FPR | Selected |
+| --- | --- | --- | --- | --- | --- | --- |
+| none | 0.8534 | 0.9556 | 0.8633 | 0.0872 | 0.0619 |  |
+| class_weight | 0.8754 | 0.9443 | 0.9566 | 0.3263 | 0.0803 | YES |
+
+
+- **Selected XGBoost Deployment Profile (`time_block` Val):** `class_weight`
+
+- **Selection Justification:** Data-driven selection chose 'class_weight' with highest validation Macro-F1=0.8754 (Weighted-F1=0.9443, Macro-Recall=0.9566, mlogloss=0.3263), beating runner-up 'none' by +0.0220 Macro-F1 (> tolerance=0.0020; Unweighted ('none') Macro-F1=0.8534 (Weighted-F1=0.9556, mlogloss=0.0872)). Validation Benign FPR (time_block): 'class_weight'=0.0803 vs 'none'=0.0619. Random-split validation context: 'none' Macro-F1=0.9518 vs 'class_weight' Macro-F1=0.9446.
+
+
 ## 3. Probability Calibration (Validation Temperature Scaling)
 
 | Model | temperature | ece_before | ece_after | ece_delta | brier_before | brier_after | nll_before | nll_after | status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | MLP | 0.7948 | 0.0083 | 0.0057 | -0.0025 | 0.0299 | 0.0297 | 0.0498 | 0.0483 | Recalibrated (T=0.7948, ECE delta=-0.002535) |
 | CNN | 0.8749 | 0.0045 | 0.0033 | -0.0013 | 0.0113 | 0.0111 | 0.0220 | 0.0218 | Recalibrated (T=0.8749, ECE delta=-0.001259) |
-| XGBoost | 0.9095 | 0.0005 | 0.0003 | -0.0003 | 0.0017 | 0.0017 | 0.0042 | 0.0041 | Already well-calibrated near T=1.0 |
+| XGBoost | 0.9702 | 0.0005 | 0.0006 | 0.0001 | 0.0025 | 0.0025 | 0.0066 | 0.0066 | Already well-calibrated near T=1.0 |
 
 
 - **Calibration Evidence:** Bounded float64 Brent optimization recalibrated overconfident probabilities on `MLP` (T=0.7948, ECE 0.008277 -> 0.005742), `CNN` (T=0.8749, ECE 0.004522 -> 0.003263).
@@ -132,13 +149,13 @@ Validation selected a single-detector fusion; no gain from fusing detectors on t
 
 - **Held-Out Attack Class:** `Web Attack` (`26` test flows)
 - **Closed-Set Supervised Unseen-Class Recall:** `0.0000`
-- **Benign-Only Autoencoder Unseen-Attack Recall:** `0.0000` (Benign vs Unseen ROC-AUC = `0.5626`)
+- **Benign-Only Autoencoder Unseen-Attack Recall:** `0.0000` (Benign vs Unseen ROC-AUC = `0.4750`)
 
 
 ## 6. SHAP Explainability Summary
 
-- **XGBoost Top-5 (`TreeExplainer`, 0.46s):** `Destination Port` (0.8597), `Init_Win_bytes_backward` (0.3706), `Init_Win_bytes_forward` (0.2930), `min_seg_size_forward` (0.2793), `Bwd Packets/s` (0.2136)
+- **XGBoost Top-5 (`TreeExplainer`, 0.70s):** `Destination Port` (1.2368), `Init_Win_bytes_backward` (0.4690), `min_seg_size_forward` (0.3915), `Init_Win_bytes_forward` (0.3858), `Bwd Packet Length Mean` (0.3119)
 
-- **MLP Top-5 (`GradientExplainer`, 2.43s):** `Min Packet Length` (0.0065), `ACK Flag Count` (0.0061), `PSH Flag Count` (0.0054), `Destination Port` (0.0037), `Packet Length Std` (0.0036)
+- **MLP Top-5 (`GradientExplainer`, 3.81s):** `ACK Flag Count` (0.0070), `PSH Flag Count` (0.0065), `Min Packet Length` (0.0064), `Down/Up Ratio` (0.0041), `Packet Length Variance` (0.0039)
 
-- **MLP Explainer Trade-Off:** `GradientExplainer` speedup vs `KernelExplainer` = `2.86x`, Spearman rank correlation = `0.7402`.
+- **MLP Explainer Trade-Off:** `GradientExplainer` speedup vs `KernelExplainer` = `2.94x`, Spearman rank correlation = `0.7243`.

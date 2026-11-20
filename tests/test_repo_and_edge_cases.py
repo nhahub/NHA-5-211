@@ -678,7 +678,7 @@ def test_readme_numbers_match_generated_reports_and_detect_drift(tmp_path: Path)
 
     # Negative check: altering an F1_Macro value in a temporary README copy must be flagged
     tampered_readme = tmp_path / "README.md"
-    tampered_readme.write_text(readme_text.replace("0.9603", "0.9999", 1), encoding="utf-8")
+    tampered_readme.write_text(readme_text.replace("0.9661", "0.9999", 1), encoding="utf-8")
     tamper_errs = check_readme_numbers(readme_path=tampered_readme)
     assert any("XGBoost random F1_Macro" in e for e in tamper_errs)
 
