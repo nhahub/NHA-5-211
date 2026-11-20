@@ -41,6 +41,7 @@ from src.evaluation.protocols import (
     evaluate_mitigation_tradeoffs,
     evaluate_time_block_protocol,
     run_xgboost_stratified_cv,
+    select_xgboost_profile_time_aware,
 )
 from src.evaluation.report_writer import format_ensemble_empirical_conclusion, write_academic_reports
 from src.models.autoencoder import (
@@ -1682,3 +1683,88 @@ def test_degenerate_fusion_labeling_and_na_unmeasured_values(tmp_path: Path) -> 
     assert ui_df.loc[1, "Model"] == "Score-Level Fusion (degenerate: equals Autoencoder)"
     assert ui_df.loc[1, "Latency_Median_us"] == "N/A"
     assert ui_df.loc[1, "Training_Duration_s"] == "N/A"
+
+
+def test_time_aware_xgboost_profile_selection_validation_only_and_reporting(
+    tmp_app_config: AppConfig,
+    tmp_path: Path,
+) -> None:
+    """select_xgboost_profile_time_aware never touches test data, tracks Benign FPR, and renders reports."""
+    tb_cfg = copy.deepcopy(tmp_app_config)
+    tb_cfg.data.split_strategy = "time_block"
+    ds = run_preprocessing_pipeline(tb_cfg, force_synthetic=True, save_outputs=False)
+
+    model_cfg = ModelConfig()
+    model_cfg.hardware.use_gpu = False
+    fast_xgb = {"n_estimators": 12, "max_depth": 3}
+
+    rand_ctx = {
+        "none": {"val_macro_f1": 0.9518},
+        "class_weight": {"val_macro_f1": 0.9446},
+    }
+    res_clean = select_xgboost_profile_time_aware(
+        app_cfg=tb_cfg,
+        model_cfg=model_cfg,
+        dataset=ds,
+        xgb_params=fast_xgb,
+        random_context=rand_ctx,
+    )
+
+    ds_corrupt = copy.deepcopy(ds)
+    ds_corrupt.y_test = (ds_corrupt.y_test + 1) % max(len(ds_corrupt.class_names), 2)
+    ds_corrupt.X_test_scaled = np.zeros_like(ds_corrupt.X_test_scaled)
+    res_corrupt = select_xgboost_profile_time_aware(
+        app_cfg=tb_cfg,
+        model_cfg=model_cfg,
+        dataset=ds_corrupt,
+        xgb_params=fast_xgb,
+        random_context=rand_ctx,
+    )
+
+    assert res_clean["executed"] is True
+    assert res_clean["used_test_data"] is False
+    assert res_clean["selection_split"] == "time_block"
+    assert res_clean["selected_profile"] in {"none", "class_weight"}
+    assert res_clean["selected_profile"] == res_corrupt["selected_profile"]
+    assert res_clean["metrics_by_profile"] == res_corrupt["metrics_by_profile"]
+    for prof in ("none", "class_weight"):
+        assert "val_macro_f1" in res_clean["metrics_by_profile"][prof]
+        assert "val_benign_fpr" in res_clean["metrics_by_profile"][prof]
+    assert "Validation Benign FPR (time_block):" in res_clean["justification"]
+    assert "Random-split validation context:" in res_clean["justification"]
+
+    cmp_df = pd.DataFrame(
+        [
+            {
+                "Model": "XGBoost",
+                "Accuracy": 0.9,
+                "F1_Weighted": 0.9,
+                "F1_Macro": 0.85,
+            }
+        ]
+    )
+    summary = {
+        "dataset_source": {"is_synthetic": True},
+        "split_strategy": "random",
+        "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+        "training_diagnostics": {},
+        "time_block_profile_selection": res_clean,
+        "time_block_protocol": {
+            "executed": True,
+            "split_sizes": ds.audit_report.get("split_sizes", {}),
+            "leakage_checks": {"passed": True},
+            "ordering_source": ds.audit_report.get("time_block_details", {}).get(
+                "ordering_source", "CSV_Row_Order"
+            ),
+            "models": {},
+            "profile_selection": res_clean,
+        },
+    }
+    cmp_md_path, exp_md_path = write_academic_reports(summary, cmp_df, tmp_path / "rep")
+    cmp_md = cmp_md_path.read_text(encoding="utf-8")
+    exp_md = exp_md_path.read_text(encoding="utf-8")
+    for md_text in (cmp_md, exp_md):
+        assert "Time-Aware XGBoost" in md_text
+        assert "Val_Benign_FPR" in md_text
+        assert "used_test_data=False" in md_text
+        assert "Random-split validation context" in md_text

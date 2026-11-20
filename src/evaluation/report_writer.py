@@ -188,6 +188,51 @@ def _append_mitigation_section(
         comp_lines.append("\n")
 
 
+def _append_time_aware_profile_section(
+    lines: list[str],
+    tb_prof_sel: dict[str, Any],
+    *,
+    heading: str,
+) -> None:
+    """Append time_block validation-only XGBoost profile comparison and random-split context."""
+    if not (tb_prof_sel and tb_prof_sel.get("executed") and tb_prof_sel.get("metrics_by_profile")):
+        return
+
+    lines.append(f"### {heading}\n\n")
+    lines.append(
+        "> Selected strictly on chronological `time_block` **validation** Macro-F1 with simplicity "
+        f"tie-breaking (`tie_tolerance={float(tb_prof_sel.get('tie_tolerance', 0.002)):.4f}`, "
+        f"`used_test_data={bool(tb_prof_sel.get('used_test_data', False))}`, "
+        f"validation flows=`{int(tb_prof_sel.get('validation_size', 0)):,}`, "
+        f"ordering=`{tb_prof_sel.get('ordering_source', 'Timestamp')}`).\n\n"
+    )
+    sel_prof = str(tb_prof_sel.get("selected_profile", ""))
+    metrics_map = tb_prof_sel.get("metrics_by_profile", {})
+    prof_rows = []
+    for prof_key in ("none", "class_weight"):
+        m = metrics_map.get(prof_key)
+        if not m:
+            continue
+        prof_rows.append(
+            {
+                "Profile": prof_key,
+                "Val_Macro_F1": round(float(m.get("val_macro_f1", 0.0)), 4),
+                "Val_Weighted_F1": round(float(m.get("val_weighted_f1", 0.0)), 4),
+                "Val_Macro_Recall": round(float(m.get("val_macro_recall", 0.0)), 4),
+                "Val_MLogLoss": round(float(m.get("val_mlogloss", 0.0)), 4),
+                "Val_Benign_FPR": round(float(m.get("val_benign_fpr", 0.0)), 4),
+                "Selected": "YES" if prof_key == sel_prof else "",
+            }
+        )
+    if prof_rows:
+        lines.append(_df_to_markdown(pd.DataFrame(prof_rows)) + "\n\n")
+    lines.append(f"- **Selected XGBoost Deployment Profile (`time_block` Val):** `{sel_prof}`\n")
+    if tb_prof_sel.get("justification"):
+        lines.append(f"- **Selection Justification:** {tb_prof_sel['justification']}\n\n")
+    else:
+        lines.append("\n")
+
+
 def write_academic_reports(
     summary: dict[str, Any],
     comparison_df: pd.DataFrame,
@@ -203,6 +248,7 @@ def write_academic_reports(
     unseen = summary.get("unseen_attack_protocol", {})
     by_day = summary.get("by_day_protocol", {})
     time_block = summary.get("time_block_protocol", {})
+    tb_prof_sel = summary.get("time_block_profile_selection") or time_block.get("profile_selection") or {}
     ablation = summary.get("feature_ablation", {})
     xgb_cv = summary.get("xgboost_cross_validation", {})
     sens_exp = summary.get("sample_size_sensitivity", {})
@@ -353,6 +399,11 @@ def write_academic_reports(
                 f"FPR=`{tb_ae.get('fpr', 0.0):.4f}`.\n"
             )
         comp_lines.append("\n")
+        _append_time_aware_profile_section(
+            comp_lines,
+            tb_prof_sel,
+            heading="Time-Aware XGBoost Profile Selection (Validation-Only)",
+        )
         tb_pc_map = time_block.get("per_class_metrics", {})
         pc_target = "XGBoost" if "XGBoost" in tb_pc_map else next(iter(tb_pc_map), None)
         if pc_target and tb_pc_map.get(pc_target):
@@ -957,6 +1008,15 @@ def write_academic_reports(
                 exp_lines.append(_df_to_markdown(pd.DataFrame(imb_rows)) + "\n\n")
             exp_lines.append(f"- **Selected Strategy:** `{imb_exp.get('selected_strategy')}`\n")
             exp_lines.append(f"- **Justification:** {imb_exp.get('justification')}\n\n")
+
+    if tb_prof_sel.get("executed"):
+        if not imb_exp:
+            exp_lines.append("## 2. Class Imbalance & Deployment Profile Selection\n")
+        _append_time_aware_profile_section(
+            exp_lines,
+            tb_prof_sel,
+            heading="Time-Aware XGBoost Deployment Profile Selection (`time_block` Validation Only; Random Split Context Retained)",
+        )
 
     cal_rep = diag.get("calibration_report", {})
     if cal_rep:

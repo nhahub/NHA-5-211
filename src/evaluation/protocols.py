@@ -50,6 +50,11 @@ from src.models.cnn import build_cnn1d
 from src.models.mlp import build_mlp
 from src.models.xgboost_model import expand_xgboost_probas, fit_xgboost_safe_multiclass
 from src.training.callbacks import build_keras_callbacks
+from src.training.optimization import (
+    _eval_val_scores,
+    prepare_strategy_training_data,
+    select_imbalance_strategy,
+)
 from src.utils.logging import get_logger
 from src.utils.reproducibility import configure_hardware, set_global_seed
 
@@ -869,6 +874,185 @@ def evaluate_by_day_protocol(
     }
 
 
+def evaluate_xgboost_profiles_validation(
+    X_train_scaled: np.ndarray,
+    y_train: np.ndarray,
+    X_val_scaled: np.ndarray,
+    y_val: np.ndarray,
+    class_weights: dict[int, float] | None,
+    class_names: list[str],
+    benign_idx: int,
+    *,
+    model_cfg: ModelConfig,
+    xgb_params: dict[str, Any] | None = None,
+    profiles: tuple[str, ...] = ("none", "class_weight"),
+    xgb_device: str = "cpu",
+    seed: int = 42,
+    tie_tolerance: float = 0.002,
+    random_context: dict[str, Any] | None = None,
+    selection_split: str = "time_block",
+    return_fitted: bool = False,
+) -> dict[str, Any] | tuple[dict[str, Any], dict[str, tuple[Any, list[int], np.ndarray]]]:
+    """Compare XGBoost deployment profiles strictly on training/validation partitions (never test)."""
+    num_classes = len(class_names)
+    metrics_by_profile: dict[str, dict[str, float]] = {}
+    fitted_by_profile: dict[str, tuple[Any, list[int], np.ndarray]] = {}
+
+    y_val_arr = np.asarray(y_val, dtype=np.int64)
+    val_ben_mask = y_val_arr == int(benign_idx)
+    val_ben_total = int(np.sum(val_ben_mask))
+
+    for profile in profiles:
+        norm = str(profile).strip().lower()
+        X_fit, y_fit, _, sample_w = prepare_strategy_training_data(
+            norm, X_train_scaled, y_train, X_train_scaled, y_train, class_weights
+        )
+        clf, present_cls = fit_xgboost_safe_multiclass(
+            X_train=X_fit,
+            y_train=y_fit,
+            X_val=X_val_scaled,
+            y_val=y_val_arr,
+            total_classes=num_classes,
+            cfg=model_cfg.xgboost,
+            params_override=xgb_params,
+            device=xgb_device,
+            seed=seed,
+            sample_weight=sample_w,
+        )
+        probs_val = expand_xgboost_probas(clf.predict_proba(X_val_scaled), present_cls, num_classes)
+        scores = _eval_val_scores(y_val_arr, probs_val, num_classes)
+        preds_val = np.argmax(probs_val, axis=1)
+        val_benign_fpr = (
+            float(np.sum((preds_val != int(benign_idx)) & val_ben_mask) / val_ben_total)
+            if val_ben_total > 0
+            else 0.0
+        )
+        metrics_by_profile[norm] = {
+            **{k: round(float(v), 6) for k, v in scores.items()},
+            "val_benign_fpr": round(val_benign_fpr, 6),
+        }
+        if return_fitted:
+            fitted_by_profile[norm] = (clf, present_cls, probs_val)
+
+    selected_profile, base_justification = select_imbalance_strategy(
+        metrics_by_profile, tie_tolerance=float(tie_tolerance)
+    )
+    cw_fpr = metrics_by_profile.get("class_weight", {}).get("val_benign_fpr")
+    none_fpr = metrics_by_profile.get("none", {}).get("val_benign_fpr")
+    fpr_parts = [
+        f"'{prof}'={metrics_by_profile[prof]['val_benign_fpr']:.4f}"
+        for prof in ("class_weight", "none")
+        if prof in metrics_by_profile
+    ]
+    if cw_fpr is not None or none_fpr is not None:
+        fpr_sentence = f" Validation Benign FPR ({selection_split}): " + " vs ".join(fpr_parts) + "."
+    else:
+        fpr_sentence = ""
+
+    rand_ctx = random_context or {}
+    rand_parts: list[str] = []
+    for prof in ("none", "class_weight"):
+        entry = rand_ctx.get(prof)
+        if isinstance(entry, dict) and entry.get("val_macro_f1") is not None:
+            piece = f"'{prof}' Macro-F1={float(entry['val_macro_f1']):.4f}"
+            if entry.get("val_benign_fpr") is not None:
+                piece += f" (Benign FPR={float(entry['val_benign_fpr']):.4f})"
+            rand_parts.append(piece)
+    rand_sentence = (
+        f" Random-split validation context: {' vs '.join(rand_parts)}." if len(rand_parts) >= 2 else ""
+    )
+
+    result = {
+        "executed": True,
+        "selection_split": selection_split,
+        "used_test_data": False,
+        "tie_tolerance": float(tie_tolerance),
+        "selected_profile": selected_profile,
+        "profiles": list(metrics_by_profile.keys()),
+        "metrics_by_profile": metrics_by_profile,
+        "random_split_context": rand_ctx,
+        "justification": f"{base_justification}{fpr_sentence}{rand_sentence}",
+    }
+    if return_fitted:
+        return result, fitted_by_profile
+    return result
+
+
+def select_xgboost_profile_time_aware(
+    app_cfg: AppConfig,
+    model_cfg: ModelConfig,
+    *,
+    dataset: PreparedDataset | None = None,
+    xgb_params: dict[str, Any] | None = None,
+    tie_tolerance: float | None = None,
+    random_context: dict[str, Any] | None = None,
+    force_synthetic: bool = False,
+    return_fitted: bool = False,
+) -> dict[str, Any] | tuple[dict[str, Any], dict[str, tuple[Any, list[int], np.ndarray]]]:
+    """Select the XGBoost deployment profile using chronological time_block validation ONLY (never test)."""
+    seed = app_cfg.project.random_seed
+    set_global_seed(seed)
+    hardware = configure_hardware(
+        use_gpu=model_cfg.hardware.use_gpu,
+        memory_growth=model_cfg.hardware.memory_growth,
+        mixed_precision=model_cfg.hardware.mixed_precision,
+    )
+
+    prep_ds = dataset
+    if prep_ds is None:
+        time_cfg = app_cfg.model_copy(deep=True)
+        time_cfg.data.split_strategy = "time_block"
+        prep_ds = run_preprocessing_pipeline(time_cfg, force_synthetic=force_synthetic, save_outputs=False)
+
+    benign_idx, _ = find_benign_class_index(prep_ds.label_encoder)
+    cw = getattr(prep_ds, "class_weights", None)
+    if not cw:
+        classes = np.unique(prep_ds.y_train)
+        weights = compute_class_weight(class_weight="balanced", classes=classes, y=prep_ds.y_train)
+        cw = {int(c): float(w) for c, w in zip(classes, weights, strict=False)}
+
+    tol = float(
+        tie_tolerance
+        if tie_tolerance is not None
+        else (
+            app_cfg.imbalance_selection.tie_tolerance
+            if app_cfg.imbalance_selection.tie_tolerance is not None
+            else app_cfg.data.imbalance.imbalance_tie_tolerance
+        )
+    )
+    out = evaluate_xgboost_profiles_validation(
+        X_train_scaled=prep_ds.X_train_scaled,
+        y_train=prep_ds.y_train,
+        X_val_scaled=prep_ds.X_val_scaled,
+        y_val=prep_ds.y_val,
+        class_weights=cw,
+        class_names=list(prep_ds.class_names),
+        benign_idx=int(benign_idx),
+        model_cfg=model_cfg,
+        xgb_params=xgb_params,
+        profiles=("none", "class_weight"),
+        xgb_device=hardware.xgb_device,
+        seed=seed,
+        tie_tolerance=tol,
+        random_context=random_context,
+        selection_split="time_block",
+        return_fitted=return_fitted,
+    )
+
+    tb_details = prep_ds.audit_report.get("time_block_details", {})
+    meta = {
+        "validation_size": int(len(prep_ds.y_val)),
+        "ordering_source": str(tb_details.get("ordering_source", "Timestamp")),
+        "timestamp_alignment": prep_ds.audit_report.get("timestamp_alignment", {}),
+    }
+    if return_fitted:
+        sel_dict, fitted = out
+        sel_dict.update(meta)
+        return sel_dict, fitted
+    out.update(meta)
+    return out
+
+
 def evaluate_time_block_protocol(
     app_cfg: AppConfig,
     model_cfg: ModelConfig,
@@ -876,6 +1060,8 @@ def evaluate_time_block_protocol(
     imbalance_strategy: str = "none",
     keras_epochs: int | None = None,
     force_synthetic: bool = False,
+    xgb_imbalance_strategy: str | None = None,
+    random_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate closed-set temporal drift using chronological per-class ~60%/~20%/~20% splits."""
     seed = app_cfg.project.random_seed
@@ -895,23 +1081,44 @@ def evaluate_time_block_protocol(
     boot_n = int(app_cfg.evaluation.bootstrap_n_resamples)
     low_sup = int(app_cfg.evaluation.effective_reliable_support_threshold)
 
+    active_xgb_strat = str(xgb_imbalance_strategy or imbalance_strategy).strip().lower()
+    alt_xgb_strat = "none" if active_xgb_strat == "class_weight" else "class_weight"
+
+    # Data-driven deployment profile comparison strictly on time_block train+validation (never test)
+    profile_selection, fitted_profiles = select_xgboost_profile_time_aware(
+        app_cfg=app_cfg,
+        model_cfg=model_cfg,
+        dataset=dataset,
+        xgb_params=xgb_params,
+        random_context=random_context,
+        force_synthetic=force_synthetic,
+        return_fitted=True,
+    )
+
     X_sup_train, y_sup_train, sample_w, keras_cw = _select_supervised_train_arrays(
         dataset, imbalance_strategy
     )
 
-    # 1. XGBoost (baseline or selected variant) evaluated against chronological middle val / latest test
-    xgb_clf, present_cls = fit_xgboost_safe_multiclass(
-        X_train=X_sup_train,
-        y_train=y_sup_train,
-        X_val=dataset.X_val_scaled,
-        y_val=dataset.y_val,
-        total_classes=num_classes,
-        cfg=model_cfg.xgboost,
-        params_override=xgb_params,
-        device=hardware.xgb_device,
-        seed=seed,
-        sample_weight=sample_w,
-    )
+    # 1. XGBoost evaluated using configured active profile (reusing fitted classifier if in profiles)
+    if active_xgb_strat in fitted_profiles:
+        xgb_clf, present_cls, p_xgb_val = fitted_profiles[active_xgb_strat]
+    else:
+        X_xgb_train, y_xgb_train, sw_xgb, _ = _select_supervised_train_arrays(dataset, active_xgb_strat)
+        xgb_clf, present_cls = fit_xgboost_safe_multiclass(
+            X_train=X_xgb_train,
+            y_train=y_xgb_train,
+            X_val=dataset.X_val_scaled,
+            y_val=dataset.y_val,
+            total_classes=num_classes,
+            cfg=model_cfg.xgboost,
+            params_override=xgb_params,
+            device=hardware.xgb_device,
+            seed=seed,
+            sample_weight=sw_xgb,
+        )
+        p_xgb_val = expand_xgboost_probas(
+            xgb_clf.predict_proba(dataset.X_val_scaled), present_cls, num_classes
+        )
     p_xgb = expand_xgboost_probas(xgb_clf.predict_proba(dataset.X_test_scaled), present_cls, num_classes)
 
     # 2. MLP & 1D-CNN trained in memory on earliest 60%, early-stopped on middle 20%
@@ -984,18 +1191,22 @@ def evaluate_time_block_protocol(
     mitigation_res: dict[str, Any] = {"executed": False}
     if app_cfg.evaluation.run_mitigation_analysis:
         benign_idx, _ = find_benign_class_index(dataset.label_encoder)
-        p_xgb_val = expand_xgboost_probas(
-            xgb_clf.predict_proba(dataset.X_val_scaled), present_cls, num_classes
-        )
-        alt_strat, p_xgb_alt_test, p_xgb_alt_val = _fit_and_predict_alt_xgb(
-            dataset=dataset,
-            model_cfg=model_cfg,
-            xgb_params=xgb_params,
-            imbalance_strategy=imbalance_strategy,
-            xgb_device=hardware.xgb_device,
-            seed=seed,
-            return_val=True,
-        )
+        if alt_xgb_strat in fitted_profiles:
+            alt_clf, alt_cls, p_xgb_alt_val = fitted_profiles[alt_xgb_strat]
+            p_xgb_alt_test = expand_xgboost_probas(
+                alt_clf.predict_proba(dataset.X_test_scaled), alt_cls, num_classes
+            )
+            alt_strat = alt_xgb_strat
+        else:
+            alt_strat, p_xgb_alt_test, p_xgb_alt_val = _fit_and_predict_alt_xgb(
+                dataset=dataset,
+                model_cfg=model_cfg,
+                xgb_params=xgb_params,
+                imbalance_strategy=active_xgb_strat,
+                xgb_device=hardware.xgb_device,
+                seed=seed,
+                return_val=True,
+            )
         failing_indices = [
             dataset.class_names.index(c)
             for c in failure_analysis.get("failing_class_names", [])
@@ -1015,7 +1226,7 @@ def evaluate_time_block_protocol(
                 focus_class_indices=failing_indices,
                 p_sup_alt_test=p_xgb_alt_test,
                 alt_label=f"XGBoost ('{alt_strat}')",
-                base_label=f"Baseline XGBoost ('{imbalance_strategy}')",
+                base_label=f"Baseline XGBoost ('{active_xgb_strat}')",
                 percentiles=app_cfg.evaluation.mitigation_benign_percentiles,
                 ae_val_all_errors=ae_val_all_err,
                 p_sup_alt_val=p_xgb_alt_val,
@@ -1032,6 +1243,8 @@ def evaluate_time_block_protocol(
         "executed": True,
         "split_strategy": "time_block",
         "imbalance_strategy": imbalance_strategy,
+        "xgb_imbalance_strategy": active_xgb_strat,
+        "profile_selection": profile_selection,
         "keras_epochs": ep,
         "ordering_source": ordering_src,
         "has_real_timestamps": bool(tb_details.get("has_real_timestamps", ordering_src == "Timestamp")),
