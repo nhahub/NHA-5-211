@@ -23,7 +23,7 @@ At development time (November 2026), Python **3.14.5** and **3.13.12** are insta
    - Consolidates duplicated notebook/dashboard logic into `src/response/response_engine.py`, and fixes a critical safety flaw where high-confidence `BENIGN` classifications would trigger `Critical`/`BLOCK` under naive confidence thresholding.
 5. **Architectural Honesty, Temporal Drift & Open-Set Cross-Day Evaluation:**
    - Explicitly documents that CICFlowMeter tabular feature order is not a genuine temporal signal, evaluating 1D-CNN empirically against MLP and XGBoost.
-   - Separates closed-set **chronological drift (`time_block`)** (per-class earliest ~60% train / middle ~20% val / latest ~20% test sorted chronologically with `Timestamp` or raw capture order dropped from features before training) from **open-set cross-day (`by_day`)** evaluation (Mon–Wed train vs. Thu–Fri unseen attack families), plus an explicit **Leave-One-Attack-Out novelty protocol** and benign-only Autoencoder percentile sweeps (`90, 95, 97, 99`).
+   - Separates closed-set **chronological drift (`time_block`)** (per-class earliest ~60% train `115,669` / middle ~20% val `37,420` / latest ~20% test `37,535`, ordered by real `Timestamp` aligned via `flow_telemetry_signature` (`2,830,471 / 2,830,743` = `99.99%` matched) and dropped from features before training, with CSV row-order fallback only when `data/TrafficLabelling/` is absent) from **open-set cross-day (`by_day`)** evaluation (Mon–Wed train vs. Thu–Fri unseen attack families), plus an explicit **Leave-One-Attack-Out novelty protocol** and benign-only Autoencoder percentile sweeps (`90, 95, 97, 99`).
 
 ---
 

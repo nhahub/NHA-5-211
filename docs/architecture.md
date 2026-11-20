@@ -57,6 +57,8 @@ flowchart LR
     G -->|Benign Val Subset| J["Calibrate 95th Percentile Anomaly Threshold"]
 ```
 
+> **Chronological `time_block` Alignment:** Before dropping `Timestamp` from model features, `time_block` evaluation aligns real capture `Timestamp` values from `data/TrafficLabelling/` onto `MachineLearningCVE` flows via [`align_real_timestamps`](../src/data/loader.py) (`flow_telemetry_signature`, `2,830,471 / 2,830,743` = `99.99%` matched; Train `115,669` / Val `37,420` / Test `37,535`, `leakage_checks.passed = True`).
+
 ---
 
 ## 3. Model Architecture Specifications
