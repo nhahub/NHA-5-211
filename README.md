@@ -19,7 +19,7 @@
 
 ### Key Findings
 
-1. **Production Classifier:** `XGBoost` (`class_weight` deployment profile) leads `random` (`0.9661`) at `155,163` flows/s batch; `40` Optuna trials and `stacking` (`0.9660`, paired-bootstrap CI crossing `0`) brought no statistically significant gain, so baseline `XGBoost` remains the default.
+1. **Production Classifier:** `XGBoost` (`class_weight` deployment profile) leads `random` (`0.9661`) at `155,163` flows/s batch; `40` Optuna trials and `stacking` (`0.9660`, paired-bootstrap CI crossing `0`) brought no statistically significant gain, so plain `XGBoost` (no Optuna tuning or stacking) remains the production model.
 2. **Per-Model Imbalance Selection:** On `random`-split validation, `{none, class_weight, smote}` selection kept `XGBoost` on `none` (`0.9518` vs `0.9446`) and switched `MLP` and `1D-CNN` to `smote`, lifting `MLP` test `F1_Macro` from `0.6728` to `0.7934`. The shipped deployment artifact is nevertheless trained with `class_weight`, because chronological `time_block` validation selects it (`0.8754` vs `0.8534`).
 3. **Drift & Unseen Attacks:** With real `Timestamp` ordering, `XGBoost` `time_block` `F1_Macro` is `0.8646`; under open-set `by_day` binary evaluation `XGBoost (1 - P_Benign)` detects `28.29%` of unseen attacks (`F1 = 0.4407`).
 4. **Deployment Profiles:** Both profiles are persisted and Git LFS-tracked — active `class_weight` (`models/xgb_model.json`) and alternate ultra-low-FPR `none` (`models/xgb_model_none.json`); see the dedicated section below.
