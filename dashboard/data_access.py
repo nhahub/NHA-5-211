@@ -34,6 +34,7 @@ def load_cached_artifacts() -> LoadedArtifacts:
     registry = ModelRegistry(
         models_dir=app_cfg.paths.resolve("models_dir"),
         artifacts_dir=app_cfg.paths.resolve("artifacts_dir"),
+        xgboost_profile=app_cfg.deployment.xgboost_imbalance_profile,
     )
     return registry.load_all(load_keras=True)
 
@@ -85,6 +86,17 @@ def load_model_comparison_df() -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
     return pd.read_csv(path)
+
+
+@st.cache_data(show_spinner=False)
+def load_model_metadata() -> dict[str, Any]:
+    """Load persisted models/model_metadata.json (XGBoost deployment profiles) if available."""
+    app_cfg = get_app_config()
+    path = app_cfg.paths.resolve("models_dir") / "model_metadata.json"
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as fh:
+        return json.load(fh)
 
 
 @st.cache_data(show_spinner=False)

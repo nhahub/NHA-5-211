@@ -11,19 +11,34 @@
 
 | Model | Imbalance | `random` `F1_Macro` (95% CI) | `time_block` `F1_Macro` (95% CI) | `by_day` Closed-Set `F1_Macro` |
 |---|---|---:|---:|---:|
-| **XGBoost (Rec.)** | `none` | **0.9603** `[0.9013, 0.9849]` | **0.7571** `[0.7087, 0.8316]` | **0.0860** |
-| **1D-CNN (Baseline)** | `smote` | 0.8447 `[0.7649, 0.8819]` | 0.3073 `[0.3019, 0.3359]` | 0.0691 |
-| **MLP (Baseline)** | `smote` | 0.7934 `[0.7544, 0.8176]` | 0.2770 `[0.2756, 0.3011]` | 0.0661 |
+| **XGBoost (Rec.)** | `class_weight` | **0.9661** `[0.9310, 0.9829]` | **0.8646** `[0.8460, 0.8763]` | **0.0716** |
+| **1D-CNN (Baseline)** | `smote` | 0.8447 `[0.7649, 0.8819]` | 0.3073 `[0.3019, 0.3359]` | 0.0696 |
+| **MLP (Baseline)** | `smote` | 0.7934 `[0.7544, 0.8176]` | 0.2770 `[0.2756, 0.3011]` | 0.0716 |
 
-> All-class `F1_Macro` is the headline metric throughout; per-protocol `F1_Macro_Reliable` (`0.9972` / `0.9562` / `0.9286` on `random`), which excludes rare classes with `< 30` test flows, appears only alongside `F1_Macro` in [`docs/results_details.md`](docs/results_details.md) and [`reports/model_comparison_report.md`](reports/model_comparison_report.md).
+> All-class `F1_Macro` is the headline metric throughout; per-protocol `F1_Macro_Reliable` (`0.9931` / `0.9562` / `0.9286` on `random`), which excludes rare classes with `< 30` test flows, appears only alongside `F1_Macro` in [`docs/results_details.md`](docs/results_details.md) and [`reports/model_comparison_report.md`](reports/model_comparison_report.md).
 
 ### Key Findings
 
-1. **Production Classifier:** `XGBoost` (`none`) leads `random` (`0.9603`) at `252,775` flows/s batch; `40` Optuna trials and `stacking` (`0.9725`, CI crossing `0`) brought no statistically significant gain, so baseline `XGBoost` remains default.
-2. **Per-Model Imbalance Selection:** Evaluating `{none, class_weight, smote}` per model kept `XGBoost` on `none` and switched `MLP` and `1D-CNN` to `smote`, lifting `MLP` test `F1_Macro` from `0.6728` to `0.7934`.
-3. **Drift & Unseen Attacks:** With real `Timestamp` aligned via `flow_telemetry_signature` (`2,830,471 / 2,830,743`, `99.99%` matched), `XGBoost` `time_block` `F1_Macro` shifted only slightly vs. the earlier row-order proxy (`0.7518` → `0.7571`, within CI) while `1D-CNN` dropped (`0.4376` → `0.3073`), showing neural baselines are unstable across splits; `Bot` recall remains `0.000` (`28/28` predicted `BENIGN`, `KS = 1.0` on `Flow Duration`), so it is real drift, not an ordering artifact, and `by_day` `XGBoost (1 - P_Benign)` detects only `28.76%` of unseen attacks (`F1 = 0.4467`).
-4. **Deployment Profiles:** Saved `models/xgb_model.json` uses `'none'` (`time_block` Benign FPR `0.0002`, focus recall `0.4547`); `'class_weight'` **requires retraining** (`0.8646` `F1_Macro`, `0.7968` focus recall at `~1.4%` FPR), and `Bot` recall stays `0.000` on `time_block` (`~0.015` max on `by_day`).
+1. **Production Classifier:** `XGBoost` (`class_weight` deployment profile) leads `random` (`0.9661`) at `155,163` flows/s batch; `40` Optuna trials and `stacking` (`0.9660`, paired-bootstrap CI crossing `0`) brought no statistically significant gain, so plain `XGBoost` (no Optuna tuning or stacking) remains the production model.
+2. **Per-Model Imbalance Selection:** On `random`-split validation, `{none, class_weight, smote}` selection kept `XGBoost` on `none` (`0.9518` vs `0.9446`) and switched `MLP` and `1D-CNN` to `smote`, lifting `MLP` test `F1_Macro` from `0.6728` to `0.7934`. The shipped deployment artifact is nevertheless trained with `class_weight`, because chronological `time_block` validation selects it (`0.8754` vs `0.8534`).
+3. **Drift & Unseen Attacks:** With real `Timestamp` ordering, `XGBoost` `time_block` `F1_Macro` is `0.8646`; under open-set `by_day` binary evaluation `XGBoost (1 - P_Benign)` detects `28.29%` of unseen attacks (`F1 = 0.4407`).
+4. **Deployment Profiles:** Both profiles are persisted and Git LFS-tracked — active `class_weight` (`models/xgb_model.json`) and alternate ultra-low-FPR `none` (`models/xgb_model_none.json`); see the dedicated section below.
 5. **Anomaly Detectors (Supplementary):** Benign-only `Autoencoder` (`F1 = 0.6926`, `ROC-AUC = 0.8676`) leads all 6 individual baselines, while `Score-Level Fusion (degenerate: equals Autoencoder)` adds zero fusion gain (`weights: Autoencoder=1.00`, unmeasured cols `N/A`).
+
+---
+
+## XGBoost Deployment Profiles (`deployment.xgboost_imbalance_profile`)
+
+Both profiles were trained on the same `random` split with the same seed and are selected **only on validation data** (`used_test_data = False`).
+
+| Profile | Artifact | Selection Basis | `time_block` Test `F1_Macro` | Benign FPR | Attack Recall | Focus Mean Recall |
+|---|---|---:|---:|---:|---:|
+| **`class_weight` (default active)** | `models/xgb_model.json` | `time_block` val `0.8754` vs `0.8534` | **0.8646** `[0.8460, 0.8763]` | `0.0144` | `0.9796` | `0.7968` |
+| `none` (alternate ultra-low-FPR) | `models/xgb_model_none.json` | random-split val `0.9518` vs `0.9446` | 0.7571 | `0.0002` | `0.9607` | `0.4547` |
+
+On the held-out `time_block` test partition (`37,535` flows: `30,763` Benign, `6,772` attack), the default `class_weight` profile raises overall attack recall from `0.9607` to `0.9796` (≈`128` extra attacks caught) and six-class focus recall from `0.4547` to `0.7968`, at the cost of `0.0144` Benign FPR (≈`443` false alarms) versus `0.0002` (≈`6` false alarms) for `none`. Set `deployment.xgboost_imbalance_profile` to `"class_weight"` or `"none"` and restart; `ModelRegistry` resolves the matching artifact.
+
+- **Honest caveat:** `Bot` recall remains `0.000` (`0 / 28` test flows) under both profiles because of severe temporal feature shift (`KS = 1.0000` on `Flow Duration`), and `Heartbleed` has only `2` test flows (`statistically_unreliable = true`).
 
 ---
 
@@ -54,9 +69,9 @@ docker run --rm -p 8501:8501 smart-ids-v3
 
 ## Limitations
 
-- **Random Split Optimism:** Random flow splitting mixes burst neighbors, inflating supervised scores vs. chronological `time_block` (`0.7571`) and open-set `by_day` (`0.0860`). See [`docs/evaluation_caveats.md`](docs/evaluation_caveats.md) and [`docs/optional_data.md`](docs/optional_data.md).
+- **Random Split Optimism & Real-Timestamp `time_block`:** Random flow splitting mixes burst neighbors; the committed `time_block` run now uses real `Timestamp` ordering from the optional `data/TrafficLabelling/` corpus (`match_rate = 0.9999`), which is local-only and intentionally untracked. See [`docs/optional_data.md`](docs/optional_data.md) and [`docs/evaluation_caveats.md`](docs/evaluation_caveats.md).
 - **Rare-Class Instability & Upstream Labels:** `Heartbleed`, `Infiltration`, `Bot`, and `Web Attack` have `< 30` test flows (`< 30` reliability threshold), and Engelen et al. (2021) label corrections were absent/not applied ([`docs/optional_data.md`](docs/optional_data.md)).
-- **Shortcut-Feature & Zero-Day Limits:** Global SHAP relies strongly on `Destination Port` (`delta = -0.0063` when dropped), `by_day` misses `71.24%` of unseen attacks, and unsupervised detectors (`AE`/`VAE`/`OCSVM`/`IF`/`LOF`) are supplementary signals only.
+- **Shortcut-Feature & Zero-Day Limits:** Global SHAP relies strongly on `Destination Port` (`delta = -0.0140` when dropped), `by_day` misses `71.71%` of unseen attacks, and unsupervised detectors (`AE`/`VAE`/`OCSVM`/`IF`/`LOF`) are supplementary signals only.
 - **Offline Batch & Dry-Run Response Scope:** Live `libpcap`/`eBPF` capture is out of scope, and `ActiveResponseEngine` outputs `NOT EXECUTED (dry-run)` firewall command previews rather than executing host rules ([`docs/evaluation_caveats.md`](docs/evaluation_caveats.md)).
 
 ---

@@ -1,7 +1,7 @@
 {
   "algorithm": "sha256",
-  "generated_at_utc": "2026-11-19T18:23:01.852851+00:00",
-  "artifact_count": 18,
+  "generated_at_utc": "2026-11-20T14:08:28.931834+00:00",
+  "artifact_count": 19,
   "artifacts": {
     "anomaly_baselines.pkl": {
       "sha256": "644f8d83eb4d5a9749a322e610561114f42d80473ed001f78a3b72fcfa5f98c7",
@@ -36,7 +36,7 @@
       "size_bytes": 1647599
     },
     "calibrators.pkl": {
-      "sha256": "93b6afba20c7614c0de12393a70deff7204a41af8d5dfa5b5b63467fb4aef720",
+      "sha256": "be53f5e60a73e7e467aa8ef32c6f89c4c39ecc8a6dc86a5a32327416e623b881",
       "size_bytes": 242
     },
     "feature_names.json": {
@@ -52,8 +52,8 @@
       "size_bytes": 637
     },
     "model_metadata.json": {
-      "sha256": "33d68e362fd31248d483608e5fcd1a6956d3dfe07147b0d17ab9dd6980f839e1",
-      "size_bytes": 580
+      "sha256": "0680059180c3e4c944b3e8b2eb40872af2df87a38676e7b8ca35897432cc1ca0",
+      "size_bytes": 1816
     },
     "outlier_clipper.pkl": {
       "sha256": "77579c1ff07cee73d266b803bddc59df64327a8c1a866942a9e0580fcf7fbe03",
@@ -64,7 +64,7 @@
       "size_bytes": 4095
     },
     "stacking_meta.pkl": {
-      "sha256": "eb2f6edc08c8078310e28f602212994b5f9273e529169f74bc950a71ef4aec39",
+      "sha256": "f3e173529b66a878ee9cf6c315c47fd6a3d002f0498bf4eb9da2cbb25e75d5ee",
       "size_bytes": 5387
     },
     "training_histories.json": {
@@ -72,6 +72,10 @@
       "size_bytes": 18988
     },
     "xgb_model.json": {
+      "sha256": "f0d60e3d5c9ddcaa768c040bdeea0248a1556347653159ea23afef6348fba184",
+      "size_bytes": 3807446
+    },
+    "xgb_model_none.json": {
       "sha256": "07e4dfe1f9a8c3fded20547933337f7a64ad908e411af9bef9457a97a400c706",
       "size_bytes": 3097766
     }

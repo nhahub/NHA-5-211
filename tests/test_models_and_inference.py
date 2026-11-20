@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 
 import joblib
@@ -41,6 +42,7 @@ from src.evaluation.protocols import (
     evaluate_mitigation_tradeoffs,
     evaluate_time_block_protocol,
     run_xgboost_stratified_cv,
+    select_xgboost_profile_time_aware,
 )
 from src.evaluation.report_writer import format_ensemble_empirical_conclusion, write_academic_reports
 from src.models.autoencoder import (
@@ -67,7 +69,11 @@ from src.training.optimization import (
     optimize_xgboost_with_optuna,
     select_imbalance_strategy,
 )
-from src.training.trainer import train_all_models
+from src.training.trainer import (
+    refit_xgboost_downstream_artifacts,
+    train_all_models,
+    train_xgboost_only_profiles,
+)
 from src.utils.model_registry import ModelRegistry
 
 
@@ -1682,3 +1688,161 @@ def test_degenerate_fusion_labeling_and_na_unmeasured_values(tmp_path: Path) -> 
     assert ui_df.loc[1, "Model"] == "Score-Level Fusion (degenerate: equals Autoencoder)"
     assert ui_df.loc[1, "Latency_Median_us"] == "N/A"
     assert ui_df.loc[1, "Training_Duration_s"] == "N/A"
+
+
+def test_time_aware_xgboost_profile_selection_validation_only_and_reporting(
+    tmp_app_config: AppConfig,
+    tmp_path: Path,
+) -> None:
+    """select_xgboost_profile_time_aware never touches test data, tracks Benign FPR, and renders reports."""
+    tb_cfg = copy.deepcopy(tmp_app_config)
+    tb_cfg.data.split_strategy = "time_block"
+    ds = run_preprocessing_pipeline(tb_cfg, force_synthetic=True, save_outputs=False)
+
+    model_cfg = ModelConfig()
+    model_cfg.hardware.use_gpu = False
+    fast_xgb = {"n_estimators": 12, "max_depth": 3}
+
+    rand_ctx = {
+        "none": {"val_macro_f1": 0.9518},
+        "class_weight": {"val_macro_f1": 0.9446},
+    }
+    res_clean = select_xgboost_profile_time_aware(
+        app_cfg=tb_cfg,
+        model_cfg=model_cfg,
+        dataset=ds,
+        xgb_params=fast_xgb,
+        random_context=rand_ctx,
+    )
+
+    ds_corrupt = copy.deepcopy(ds)
+    ds_corrupt.y_test = (ds_corrupt.y_test + 1) % max(len(ds_corrupt.class_names), 2)
+    ds_corrupt.X_test_scaled = np.zeros_like(ds_corrupt.X_test_scaled)
+    res_corrupt = select_xgboost_profile_time_aware(
+        app_cfg=tb_cfg,
+        model_cfg=model_cfg,
+        dataset=ds_corrupt,
+        xgb_params=fast_xgb,
+        random_context=rand_ctx,
+    )
+
+    assert res_clean["executed"] is True
+    assert res_clean["used_test_data"] is False
+    assert res_clean["selection_split"] == "time_block"
+    assert res_clean["selected_profile"] in {"none", "class_weight"}
+    assert res_clean["selected_profile"] == res_corrupt["selected_profile"]
+    assert res_clean["metrics_by_profile"] == res_corrupt["metrics_by_profile"]
+    for prof in ("none", "class_weight"):
+        assert "val_macro_f1" in res_clean["metrics_by_profile"][prof]
+        assert "val_benign_fpr" in res_clean["metrics_by_profile"][prof]
+    assert "Validation Benign FPR (time_block):" in res_clean["justification"]
+    assert "Random-split validation context:" in res_clean["justification"]
+
+    cmp_df = pd.DataFrame(
+        [
+            {
+                "Model": "XGBoost",
+                "Accuracy": 0.9,
+                "F1_Weighted": 0.9,
+                "F1_Macro": 0.85,
+            }
+        ]
+    )
+    summary = {
+        "dataset_source": {"is_synthetic": True},
+        "split_strategy": "random",
+        "preprocessing_audit": {"split_strategy": "random", "dropped_features": []},
+        "training_diagnostics": {},
+        "time_block_profile_selection": res_clean,
+        "time_block_protocol": {
+            "executed": True,
+            "split_sizes": ds.audit_report.get("split_sizes", {}),
+            "leakage_checks": {"passed": True},
+            "ordering_source": ds.audit_report.get("time_block_details", {}).get(
+                "ordering_source", "CSV_Row_Order"
+            ),
+            "models": {},
+            "profile_selection": res_clean,
+        },
+    }
+    cmp_md_path, exp_md_path = write_academic_reports(summary, cmp_df, tmp_path / "rep")
+    cmp_md = cmp_md_path.read_text(encoding="utf-8")
+    exp_md = exp_md_path.read_text(encoding="utf-8")
+    for md_text in (cmp_md, exp_md):
+        assert "Time-Aware XGBoost" in md_text
+        assert "Val_Benign_FPR" in md_text
+        assert "used_test_data=False" in md_text
+        assert "Random-split validation context" in md_text
+
+
+def test_xgboost_downstream_refit_validation_only_keeps_mlp_cnn_calibrators(
+    tmp_app_config: AppConfig,
+) -> None:
+    """Refit touches only the XGBoost calibrator/stacker/SHAP entries, using validation data only."""
+    dataset = run_preprocessing_pipeline(tmp_app_config, force_synthetic=True, save_outputs=True)
+    m_cfg = ModelConfig()
+    m_cfg.mlp.epochs = 1
+    m_cfg.cnn.epochs = 1
+    m_cfg.autoencoder.epochs = 1
+    m_cfg.xgboost.optuna.n_trials = 1
+    m_cfg.xgboost.baseline["n_estimators"] = 10
+    m_cfg.anomaly_baselines.enabled = False
+    tmp_app_config.evaluation.cv_n_splits = 2
+    train_all_models(
+        dataset=dataset,
+        app_cfg=tmp_app_config,
+        model_cfg=m_cfg,
+        epochs_override=1,
+        optuna_trials_override=1,
+    )
+    train_xgboost_only_profiles(
+        app_cfg=tmp_app_config,
+        model_cfg=m_cfg,
+        profiles=("none", "class_weight"),
+        optuna_trials_override=0,
+    )
+
+    models_dir = tmp_app_config.paths.resolve("models_dir")
+    artifacts_dir = tmp_app_config.paths.resolve("artifacts_dir")
+    cal_before = joblib.load(models_dir / "calibrators.pkl")
+    mlp_t_before = cal_before["MLP"].temperature
+    cnn_t_before = cal_before["CNN"].temperature
+    mlp_ckpt_bytes = (models_dir / "best_mlp.keras").read_bytes()
+
+    shap_path = artifacts_dir / "shap_summary.json"
+    shap_path.parent.mkdir(parents=True, exist_ok=True)
+    shap_path.write_text('{"MLP": {"explainer_type": "sentinel"}}', encoding="utf-8")
+
+    res_a = refit_xgboost_downstream_artifacts(tmp_app_config, m_cfg, compute_shap=False)
+    cal_a = joblib.load(models_dir / "calibrators.pkl")
+    assert res_a["active_profile"] == "class_weight"
+    assert cal_a["MLP"].temperature == mlp_t_before
+    assert cal_a["CNN"].temperature == cnn_t_before
+    assert res_a["untouched_calibrators_after"] == res_a["untouched_calibrators_before"]
+    assert res_a["shap_refreshed"] is False
+    assert (models_dir / "best_mlp.keras").read_bytes() == mlp_ckpt_bytes
+
+    # Corrupt the held-out test partition: validation-only fitting must be invariant to it.
+    npz_path = tmp_app_config.paths.resolve("processed_data_dir") / "preprocessed_splits.npz"
+    arrays = dict(np.load(npz_path))
+    arrays["y_test"] = (arrays["y_test"] + 1) % int(arrays["y_test"].max() + 1)
+    arrays["X_test_scaled"] = np.zeros_like(arrays["X_test_scaled"])
+    np.savez(npz_path, **arrays)
+    res_b = refit_xgboost_downstream_artifacts(tmp_app_config, m_cfg, compute_shap=False)
+    assert res_b["xgboost_temperature"] == res_a["xgboost_temperature"]
+    assert res_b["stacking_summary"] == res_a["stacking_summary"]
+
+    res_c = refit_xgboost_downstream_artifacts(tmp_app_config, m_cfg, compute_shap=True)
+    assert res_c["shap_refreshed"] is True
+    shap_after = json.loads(shap_path.read_text(encoding="utf-8"))
+    assert shap_after["MLP"] == {"explainer_type": "sentinel"}
+    assert shap_after["XGBoost"]["profile"] == "class_weight"
+    assert shap_after["XGBoost"]["top_features"]
+    assert "local_example" in shap_after
+
+    diag = json.loads((artifacts_dir / "training_diagnostics.json").read_text(encoding="utf-8"))
+    assert diag["downstream_refit"]["used_test_data_for_fitting"] is False
+    assert "XGBoost" in diag["calibration_report"]
+    manifest = json.loads((models_dir / "MANIFEST.json").read_text(encoding="utf-8"))
+    assert "calibrators.pkl" in manifest["artifacts"]
+    assert "stacking_meta.pkl" in manifest["artifacts"]

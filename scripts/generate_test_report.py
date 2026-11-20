@@ -23,6 +23,15 @@ from src.utils.model_registry import compute_file_sha256
 _LFS_POINTER_SUFFIXES = {".keras", ".pkl", ".h5", ".onnx", ".npz", ".parquet"}
 _LFS_POINTER_EXACT = {"models/xgb_model.json"}
 
+
+def _is_lfs_tracked_model_path(rel_norm: str, suffix: str) -> bool:
+    return rel_norm.startswith("models/") and (
+        suffix.lower() in _LFS_POINTER_SUFFIXES
+        or rel_norm in _LFS_POINTER_EXACT
+        or (rel_norm.startswith("models/xgb_model_") and suffix.lower() == ".json")
+    )
+
+
 _TEST_CASE_RE = re.compile(
     r"^(tests/[^:\s]+)::([^\s]+)\s+(PASSED|FAILED|ERROR|SKIPPED|XFAILED|XPASSED)(?=\s|$|\(|[A-Za-z_])",
     re.MULTILINE,
@@ -123,9 +132,7 @@ def prepare_stub_ci_copy(src_root: Path, dest_dir: Path) -> list[str]:
         dst = dest_dir / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         rel_norm = rel.replace("\\", "/")
-        is_lfs_target = rel_norm.startswith("models/") and (
-            src.suffix.lower() in _LFS_POINTER_SUFFIXES or rel_norm in _LFS_POINTER_EXACT
-        )
+        is_lfs_target = _is_lfs_tracked_model_path(rel_norm, src.suffix)
         if is_lfs_target:
             sha = compute_file_sha256(src)
             size = int(src.stat().st_size)

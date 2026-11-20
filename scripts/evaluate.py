@@ -37,6 +37,7 @@ from src.evaluation.protocols import (
     evaluate_time_block_protocol,
     run_sample_size_sensitivity,
     run_xgboost_stratified_cv,
+    select_xgboost_profile_time_aware,
 )
 from src.evaluation.report_writer import format_ensemble_empirical_conclusion, write_academic_reports
 from src.evaluation.visualizations import (
@@ -102,7 +103,11 @@ def run_evaluation_suite(
         with diag_path.open("r", encoding="utf-8") as fh:
             train_diag = json.load(fh)
 
-    registry = ModelRegistry(models_dir=models_dir, artifacts_dir=artifacts_dir)
+    registry = ModelRegistry(
+        models_dir=models_dir,
+        artifacts_dir=artifacts_dir,
+        xgboost_profile=app_c.deployment.xgboost_imbalance_profile,
+    )
     artifacts = registry.load_all(load_keras=True)
     class_names = [str(c) for c in artifacts.label_encoder.classes_]
     benign_idx, _ = find_benign_class_index(artifacts.label_encoder)
@@ -799,9 +804,24 @@ def run_evaluation_suite(
         xgb_opt_diag.get("best_params") if xgb_opt_diag.get("selected_variant") == "tuned" else None
     )
     imb_strategy = train_diag.get("imbalance_experiment", {}).get("selected_strategy", "none")
+    active_xgb_profile = app_c.deployment.xgboost_imbalance_profile
+    random_xgb_context = (
+        (
+            train_diag.get("imbalance_experiment", {})
+            .get("per_model", {})
+            .get("XGBoost", {})
+            .get("metrics_by_strategy")
+        )
+        or (artifacts.model_metadata.get("XGBoost", {}).get("profiles"))
+        or {}
+    )
 
     by_day_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
     time_block_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
+    time_block_profile_selection: dict[str, Any] = {
+        "executed": False,
+        "reason": "Skipped via --skip-protocols flag.",
+    }
     ablation_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
     xgb_cv_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
     sensitivity_res: dict[str, Any] = {"executed": False, "reason": "Skipped via flag or config."}
@@ -814,6 +834,7 @@ def run_evaluation_suite(
                 imbalance_strategy=imb_strategy,
                 keras_epochs=app_c.evaluation.by_day_keras_epochs,
                 force_synthetic=is_synth,
+                xgb_imbalance_strategy=active_xgb_profile,
             )
         if app_c.evaluation.run_time_block_comparison:
             time_block_res = evaluate_time_block_protocol(
@@ -823,6 +844,20 @@ def run_evaluation_suite(
                 imbalance_strategy=imb_strategy,
                 keras_epochs=app_c.evaluation.time_block_keras_epochs,
                 force_synthetic=is_synth,
+                xgb_imbalance_strategy=active_xgb_profile,
+                random_context=random_xgb_context,
+            )
+            time_block_profile_selection = time_block_res.get("profile_selection") or {
+                "executed": False,
+                "reason": "time_block validation selection unavailable.",
+            }
+        else:
+            time_block_profile_selection = select_xgboost_profile_time_aware(
+                app_cfg=app_c,
+                model_cfg=model_c,
+                xgb_params=selected_xgb_params,
+                random_context=random_xgb_context,
+                force_synthetic=is_synth,
             )
         if app_c.evaluation.run_feature_ablation:
             ablation_res = evaluate_feature_ablation(
@@ -830,7 +865,7 @@ def run_evaluation_suite(
                 model_cfg=model_c,
                 drop_features=app_c.evaluation.ablation_drop_features,
                 xgb_params=selected_xgb_params,
-                imbalance_strategy=imb_strategy,
+                imbalance_strategy=active_xgb_profile,
                 force_synthetic=is_synth,
                 compute_shap=not skip_shap,
             )
@@ -845,7 +880,7 @@ def run_evaluation_suite(
                     app_cfg=app_c,
                     model_cfg=model_c,
                     xgb_params=selected_xgb_params,
-                    imbalance_strategy=imb_strategy,
+                    imbalance_strategy=active_xgb_profile,
                     n_splits=app_c.evaluation.cv_n_splits,
                     force_synthetic=is_synth,
                 )
@@ -860,7 +895,7 @@ def run_evaluation_suite(
                     app_cfg=app_c,
                     model_cfg=model_c,
                     xgb_params=selected_xgb_params,
-                    imbalance_strategy=imb_strategy,
+                    imbalance_strategy=active_xgb_profile,
                     sample_sizes=app_c.evaluation.sensitivity_sample_sizes,
                     force_synthetic=False,
                 )
@@ -879,6 +914,7 @@ def run_evaluation_suite(
         "unseen_attack_protocol": unseen_res,
         "by_day_protocol": by_day_res,
         "time_block_protocol": time_block_res,
+        "time_block_profile_selection": time_block_profile_selection,
         "feature_ablation": ablation_res,
         "xgboost_cross_validation": xgb_cv_res,
         "sample_size_sensitivity": sensitivity_res,
@@ -934,6 +970,13 @@ def run_time_block_refresh(
     )
     imb_strategy = train_diag.get("imbalance_experiment", {}).get("selected_strategy", "none")
     is_synth = bool(full_summary.get("dataset_source", {}).get("is_synthetic", False))
+    random_xgb_context = (
+        train_diag.get("imbalance_experiment", {})
+        .get("per_model", {})
+        .get("XGBoost", {})
+        .get("metrics_by_strategy")
+        or {}
+    )
 
     time_block_res = evaluate_time_block_protocol(
         app_cfg=app_c,
@@ -942,8 +985,12 @@ def run_time_block_refresh(
         imbalance_strategy=imb_strategy,
         keras_epochs=app_c.evaluation.time_block_keras_epochs,
         force_synthetic=is_synth,
+        xgb_imbalance_strategy=app_c.deployment.xgboost_imbalance_profile,
+        random_context=random_xgb_context,
     )
     full_summary["time_block_protocol"] = time_block_res
+    if time_block_res.get("profile_selection"):
+        full_summary["time_block_profile_selection"] = time_block_res["profile_selection"]
     full_summary = sanitize_machine_paths(full_summary)
     with summary_path.open("w", encoding="utf-8") as fh:
         json.dump(full_summary, fh, indent=2)

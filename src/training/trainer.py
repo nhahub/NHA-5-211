@@ -10,9 +10,10 @@ from typing import Any
 
 import joblib
 import numpy as np
+from sklearn.utils.class_weight import compute_class_weight
 
 from src.config import AppConfig, AutoencoderConfig, ModelConfig, sanitize_machine_paths
-from src.data.preprocessing import PreparedDataset
+from src.data.preprocessing import PreparedDataset, run_preprocessing_pipeline
 from src.detection.anomaly_detection import (
     AnomalyFusionDetector,
     fit_and_select_anomaly_fusion,
@@ -26,6 +27,7 @@ from src.models.autoencoder import (
     calibrate_threshold,
     compute_reconstruction_error,
     extract_benign_subset,
+    find_benign_class_index,
 )
 from src.models.cnn import build_cnn1d
 from src.models.ensemble import (
@@ -35,7 +37,7 @@ from src.models.ensemble import (
     compute_multiclass_brier,
 )
 from src.models.mlp import build_mlp
-from src.models.xgboost_model import expand_xgboost_probas
+from src.models.xgboost_model import expand_xgboost_probas, fit_xgboost_safe_multiclass
 from src.training.callbacks import build_keras_callbacks, safe_save_keras_model
 from src.training.optimization import (
     ImbalanceExperimentResult,
@@ -47,7 +49,7 @@ from src.training.optimization import (
     prepare_strategy_training_data,
 )
 from src.utils.logging import get_logger
-from src.utils.model_registry import ModelRegistry
+from src.utils.model_registry import ModelRegistry, validate_xgboost_profile
 from src.utils.reproducibility import HardwareProfile, configure_hardware, set_global_seed
 
 logger = get_logger("smart_ids.training.trainer")
@@ -813,6 +815,9 @@ def train_all_models(
         },
         "XGBoost": {
             "imbalance_strategy": selected_strategies["XGBoost"],
+            "active_profile": selected_strategies["XGBoost"],
+            "profile_files": {selected_strategies["XGBoost"]: xgb_cfg.model_name},
+            "available_profiles": {selected_strategies["XGBoost"]: xgb_cfg.model_name},
             "train_samples": int(len(X_xgb_train)),
             "selected_variant": xgb_opt.selected_variant,
         },
@@ -868,3 +873,421 @@ def train_all_models(
         anomaly_fusion=anomaly_fusion,
         neural_loss_experiments=neural_loss_experiments,
     )
+
+
+def train_xgboost_only_profiles(
+    app_cfg: AppConfig,
+    model_cfg: ModelConfig,
+    profiles: list[str] | tuple[str, ...] = ("none", "class_weight"),
+    optuna_trials_override: int | None = None,
+    force_synthetic: bool = False,
+) -> dict[str, Any]:
+    """Train only XGBoost across deployment profiles on the identical split and seed.
+
+    Preserves all existing MLP, 1D-CNN, Autoencoder, VAE, anomaly baseline, and scaler artifacts.
+    """
+    seed = int(app_cfg.project.random_seed)
+    set_global_seed(seed)
+    hardware = configure_hardware(
+        use_gpu=model_cfg.hardware.use_gpu,
+        memory_growth=model_cfg.hardware.memory_growth,
+        mixed_precision=model_cfg.hardware.mixed_precision,
+    )
+
+    active_profile = validate_xgboost_profile(app_cfg.deployment.xgboost_imbalance_profile)
+    ordered_profiles: list[str] = []
+    for p in [*profiles, active_profile]:
+        clean = validate_xgboost_profile(p)
+        if clean not in ordered_profiles:
+            ordered_profiles.append(clean)
+
+    proc_dir = app_cfg.paths.resolve("processed_data_dir")
+    models_dir = app_cfg.paths.resolve("models_dir")
+    artifacts_dir = app_cfg.paths.resolve("artifacts_dir")
+    registry = ModelRegistry(models_dir=models_dir, artifacts_dir=artifacts_dir)
+
+    npz_path = proc_dir / "preprocessed_splits.npz"
+    le_path = models_dir / "label_encoder.pkl"
+    feat_path = models_dir / "feature_names.json"
+    if npz_path.exists() and le_path.exists() and not force_synthetic:
+        splits = np.load(npz_path)
+        X_train_scaled = splits["X_train_scaled"]
+        y_train = splits["y_train"]
+        X_val_scaled = splits["X_val_scaled"]
+        y_val = splits["y_val"]
+        manifest_sha = registry._load_sha256_manifest() or {}
+        registry.verify_artifact_file(le_path, manifest_payload=manifest_sha if manifest_sha else None)
+        label_encoder = joblib.load(le_path)
+        class_names = [str(c) for c in label_encoder.classes_]
+        feature_names: list[str] = []
+        if feat_path.exists():
+            with feat_path.open("r", encoding="utf-8") as fh:
+                feature_names = json.load(fh)
+        audit_path = proc_dir / "preprocessing_audit.json"
+        audit_report: dict[str, Any] = {}
+        if audit_path.exists():
+            with audit_path.open("r", encoding="utf-8") as fh:
+                audit_report = json.load(fh)
+        unique_y = np.unique(y_train).astype(np.int64)
+        weights_arr = compute_class_weight(class_weight="balanced", classes=unique_y, y=y_train)
+        class_weights = {int(cls): float(w) for cls, w in zip(unique_y, weights_arr, strict=False)}
+    else:
+        dataset = run_preprocessing_pipeline(app_cfg, force_synthetic=force_synthetic, save_outputs=True)
+        X_train_scaled = dataset.X_train_scaled
+        y_train = dataset.y_train
+        X_val_scaled = dataset.X_val_scaled
+        y_val = dataset.y_val
+        label_encoder = dataset.label_encoder
+        class_names = dataset.class_names
+        feature_names = dataset.feature_names
+        class_weights = dataset.class_weights
+        audit_report = dataset.audit_report
+
+    num_classes = len(class_names)
+    benign_idx, _ = find_benign_class_index(label_encoder)
+    xgb_cfg = model_cfg.xgboost.model_copy(deep=True)
+    if optuna_trials_override is not None:
+        xgb_cfg.optuna.n_trials = int(optuna_trials_override)
+        xgb_cfg.optuna.enabled = int(optuna_trials_override) > 0
+    else:
+        xgb_cfg.optuna.enabled = False
+        xgb_cfg.optuna.n_trials = 0
+
+    meta_path = models_dir / "model_metadata.json"
+    existing_model_metadata: dict[str, dict[str, Any]] = {}
+    if meta_path.exists():
+        with meta_path.open("r", encoding="utf-8") as fh:
+            existing_model_metadata = dict((json.load(fh).get("models", {})) or {})
+
+    profile_files: dict[str, str] = {}
+    profile_summaries: dict[str, dict[str, Any]] = {}
+    trained_models: dict[str, Any] = {}
+    total_xgb_duration = 0.0
+
+    for prof in ordered_profiles:
+        set_global_seed(seed)
+        sample_w = (
+            np.array([class_weights[int(c)] for c in y_train], dtype=np.float32)
+            if prof == "class_weight"
+            else None
+        )
+        t0 = time.perf_counter()
+        if xgb_cfg.optuna.enabled and xgb_cfg.optuna.n_trials > 0:
+            xgb_opt = optimize_xgboost_with_optuna(
+                X_train=X_train_scaled,
+                y_train=y_train,
+                X_val=X_val_scaled,
+                y_val=y_val,
+                num_classes=num_classes,
+                cfg=xgb_cfg,
+                xgb_device=hardware.xgb_device,
+                seed=seed,
+                sample_weight=sample_w,
+            )
+            clf = xgb_opt.best_model
+            present_cls = np.unique(y_train).astype(np.int64)
+            variant_used = xgb_opt.selected_variant
+        else:
+            clf, present_cls = fit_xgboost_safe_multiclass(
+                X_train=X_train_scaled,
+                y_train=y_train,
+                X_val=X_val_scaled,
+                y_val=y_val,
+                total_classes=num_classes,
+                cfg=xgb_cfg,
+                device=hardware.xgb_device,
+                seed=seed,
+                sample_weight=sample_w,
+            )
+            variant_used = "baseline"
+        elapsed_prof = float(time.perf_counter() - t0)
+        total_xgb_duration += elapsed_prof
+
+        val_probs = expand_xgboost_probas(clf.predict_proba(X_val_scaled), present_cls, num_classes)
+        val_scores = _eval_val_scores(y_val, val_probs, num_classes)
+        val_preds = np.argmax(val_probs, axis=1)
+        val_ben_mask = y_val == benign_idx
+        val_ben_fpr = float(np.mean(val_preds[val_ben_mask] != benign_idx)) if np.any(val_ben_mask) else 0.0
+
+        fname = xgb_cfg.model_name if prof == active_profile else f"xgb_model_{prof}.json"
+        out_path = models_dir / fname
+        clf.save_model(str(out_path))
+        profile_files[prof] = fname
+        trained_models[prof] = clf
+        profile_summaries[prof] = {
+            "profile": prof,
+            "artifact_file": fname,
+            "is_active": prof == active_profile,
+            "selected_variant": variant_used,
+            "train_samples": int(len(X_train_scaled)),
+            "train_duration_sec": round(elapsed_prof, 2),
+            "val_macro_f1": round(float(val_scores["val_macro_f1"]), 6),
+            "val_weighted_f1": round(float(val_scores["val_weighted_f1"]), 6),
+            "val_macro_recall": round(float(val_scores["val_macro_recall"]), 6),
+            "val_mlogloss": round(float(val_scores["val_mlogloss"]), 6),
+            "val_benign_fpr": round(val_ben_fpr, 6),
+        }
+        logger.info(
+            "Trained XGBoost profile '%s' -> %s in %.2fs | val Macro-F1=%.4f | val Benign FPR=%.4f",
+            prof,
+            out_path.name,
+            elapsed_prof,
+            val_scores["val_macro_f1"],
+            val_ben_fpr,
+        )
+
+    existing_model_metadata["XGBoost"] = {
+        "imbalance_strategy": active_profile,
+        "active_profile": active_profile,
+        "profile_files": dict(profile_files),
+        "available_profiles": dict(profile_files),
+        "train_samples": int(len(X_train_scaled)),
+        "selected_variant": profile_summaries[active_profile]["selected_variant"],
+        "profiles": profile_summaries,
+    }
+    registry.save_model_metadata(existing_model_metadata)
+    registry.save_artifact_manifest()
+
+    diag_path = artifacts_dir / "training_diagnostics.json"
+    diagnostics_payload: dict[str, Any] = {}
+    if diag_path.exists():
+        with diag_path.open("r", encoding="utf-8") as fh:
+            diagnostics_payload = json.load(fh)
+    durations_map = dict(diagnostics_payload.get("training_durations_sec", {}))
+    durations_map["XGBoost"] = float(profile_summaries[active_profile]["train_duration_sec"])
+    diagnostics_payload["training_durations_sec"] = durations_map
+    imb_map = dict(diagnostics_payload.get("imbalance_strategies_by_model", {}))
+    imb_map["XGBoost"] = active_profile
+    diagnostics_payload["imbalance_strategies_by_model"] = imb_map
+    diagnostics_payload["model_metadata"] = existing_model_metadata
+    diagnostics_payload["xgboost_profiles"] = profile_summaries
+    diagnostics_payload = sanitize_machine_paths(diagnostics_payload)
+    with diag_path.open("w", encoding="utf-8") as fh:
+        json.dump(diagnostics_payload, fh, indent=2)
+
+    return {
+        "active_profile": active_profile,
+        "profile_files": profile_files,
+        "profiles": profile_summaries,
+        "models": trained_models,
+        "class_names": class_names,
+        "feature_names": feature_names,
+        "total_duration_sec": round(total_xgb_duration, 2),
+        "audit_split": audit_report.get("split_strategy"),
+    }
+
+
+def refit_xgboost_downstream_artifacts(
+    app_cfg: AppConfig,
+    model_cfg: ModelConfig,
+    compute_shap: bool = True,
+) -> dict[str, Any]:
+    """Refit ONLY the artifacts that depend on the active XGBoost probabilities.
+
+    - ``calibrators.pkl``: only the ``XGBoost`` temperature scaler (MLP/CNN entries are kept as loaded).
+    - ``stacking_meta.pkl``: refit on validation probabilities only.
+    - ``artifacts/shap_summary.json`` + SHAP figures: XGBoost global + local entries only (MLP SHAP kept).
+
+    Calibration and stacking are fit strictly on the validation partition; the test partition is never
+    used for fitting (it is only used to pick flows that SHAP explains descriptively).
+    """
+    seed = int(app_cfg.project.random_seed)
+    set_global_seed(seed)
+    active_profile = validate_xgboost_profile(app_cfg.deployment.xgboost_imbalance_profile)
+
+    proc_dir = app_cfg.paths.resolve("processed_data_dir")
+    models_dir = app_cfg.paths.resolve("models_dir")
+    artifacts_dir = app_cfg.paths.resolve("artifacts_dir")
+    figures_dir = app_cfg.paths.resolve("figures_dir")
+    registry = ModelRegistry(models_dir=models_dir, artifacts_dir=artifacts_dir)
+    loaded = registry.load_all(load_keras=True, xgboost_profile=active_profile)
+
+    missing = [name for name in ("MLP", "CNN", "XGBoost") if name not in loaded.models]
+    if missing or loaded.label_encoder is None:
+        raise RuntimeError(
+            f"Cannot refit XGBoost downstream artifacts: missing loaded models {missing or ''} "
+            f"(Git LFS pointer stubs: {sorted(loaded.lfs_pointers)}). Run `git lfs pull` first."
+        )
+
+    npz_path = proc_dir / "preprocessed_splits.npz"
+    if not npz_path.exists():
+        raise FileNotFoundError(f"Missing {npz_path}; run scripts/train.py to create preprocessed splits.")
+    splits = np.load(npz_path)
+    X_train = splits["X_train_scaled"]
+    y_train = splits["y_train"]
+    X_val = splits["X_val_scaled"]
+    y_val = splits["y_val"]
+
+    class_names = [str(c) for c in loaded.label_encoder.classes_]
+    num_classes = len(class_names)
+    num_features = int(X_val.shape[1])
+    present_cls = np.unique(y_train).astype(np.int64)
+
+    xgb_model = loaded.models["XGBoost"]
+    val_probas = {
+        "MLP": loaded.models["MLP"].predict(X_val, batch_size=1024, verbose=0),
+        "CNN": loaded.models["CNN"].predict(X_val.reshape(-1, num_features, 1), batch_size=1024, verbose=0),
+        "XGBoost": expand_xgboost_probas(xgb_model.predict_proba(X_val), present_cls, num_classes),
+    }
+
+    # 1. Refit ONLY the XGBoost temperature calibrator (validation only); keep MLP/CNN entries untouched.
+    calibrators: dict[str, TemperatureScaler] = dict(loaded.calibrators or {})
+    untouched_before = {
+        name: float(calibrators[name].temperature) for name in ("MLP", "CNN") if name in calibrators
+    }
+    p_val = val_probas["XGBoost"]
+    ece_before = compute_ece(y_val, p_val)
+    brier_before = compute_multiclass_brier(y_val, p_val)
+    scaler_t = TemperatureScaler().fit(p_val, y_val)
+    p_cal = scaler_t.transform(p_val)
+    ece_after = compute_ece(y_val, p_cal)
+    brier_after = compute_multiclass_brier(y_val, p_cal)
+    if ece_after <= ece_before or brier_after < brier_before:
+        calibrators["XGBoost"] = scaler_t
+    else:
+        calibrators.pop("XGBoost", None)
+    if abs(scaler_t.temperature - 1.0) <= 0.12 and (ece_before - ece_after) < 5e-4:
+        cal_status = "Already well-calibrated near T=1.0"
+    else:
+        cal_status = f"Recalibrated (T={scaler_t.temperature:.4f}, ECE delta={ece_after - ece_before:+.6f})"
+    xgb_cal_report = {
+        "temperature": round(scaler_t.temperature, 4),
+        "ece_before": round(ece_before, 6),
+        "ece_after": round(ece_after, 6),
+        "ece_delta": round(ece_after - ece_before, 6),
+        "brier_before": round(brier_before, 6),
+        "brier_after": round(brier_after, 6),
+        "nll_before": round(scaler_t.nll_before, 6),
+        "nll_after": round(scaler_t.nll_after, 6),
+        "status": cal_status,
+    }
+
+    # 2. Refit the validation-only stacking meta-learner.
+    stacker = StackingMetaLearner().fit(
+        val_probas=val_probas,
+        y_val=y_val,
+        n_classes=num_classes,
+        calibrators=calibrators,
+        seed=seed,
+    )
+    best_sup_model = max(
+        stacker.val_macro_f1.keys(),
+        key=lambda k: stacker.val_macro_f1[k],
+        default="XGBoost",
+    )
+    joblib.dump(calibrators, models_dir / "calibrators.pkl")
+    joblib.dump(stacker, models_dir / model_cfg.ensemble.stacker_file)
+
+    untouched_after = {
+        name: float(calibrators[name].temperature) for name in ("MLP", "CNN") if name in calibrators
+    }
+
+    # 3. SHAP artifacts for the active XGBoost only (MLP SHAP entries are preserved).
+    shap_refreshed = False
+    shap_path = artifacts_dir / "shap_summary.json"
+    if compute_shap:
+        from src.explainability.shap_explainer import compute_xgboost_global_shap, explain_single_sample
+
+        shap_summary: dict[str, Any] = {}
+        if shap_path.exists():
+            with shap_path.open("r", encoding="utf-8") as fh:
+                shap_summary = json.load(fh)
+        X_test = splits["X_test_scaled"]
+        y_test = splits["y_test"] if "y_test" in splits.files else None
+        feature_names = list(loaded.feature_names)
+        xgb_class_names = [class_names[int(c)] for c in present_cls]
+        xgb_res, _, _ = compute_xgboost_global_shap(
+            xgb_model=xgb_model,
+            X_test=X_test,
+            feature_names=feature_names,
+            class_names=xgb_class_names,
+            max_samples=app_cfg.evaluation.shap_xgb_max_samples,
+            summary_fig_path=figures_dir / "shap_xgb_summary.png",
+        )
+        shap_summary["XGBoost"] = {
+            "profile": active_profile,
+            "explainer_type": xgb_res.explainer_type,
+            "n_samples_explained": xgb_res.n_samples_explained,
+            "elapsed_sec": xgb_res.elapsed_sec,
+            "top_features": xgb_res.feature_importance[:20],
+        }
+
+        benign_idx, _ = find_benign_class_index(loaded.label_encoder)
+        present_set = set(present_cls.tolist())
+        xgb_test_pred = np.argmax(
+            expand_xgboost_probas(xgb_model.predict_proba(X_test), present_cls, num_classes), axis=1
+        )
+        target_idx = 0
+        target_cls = benign_idx
+        if y_test is not None:
+            for a_idx in [i for i in range(num_classes) if i != benign_idx and i in present_set]:
+                matches = np.where((y_test == a_idx) & (xgb_test_pred == a_idx))[0]
+                if len(matches) > 0:
+                    target_idx, target_cls = int(matches[0]), int(a_idx)
+                    break
+            else:
+                ben = np.where(y_test == benign_idx)[0]
+                target_idx = int(ben[0]) if len(ben) else 0
+        local_cls_idx = int(np.searchsorted(present_cls, target_cls))
+        local_exp = explain_single_sample(
+            model_name="XGBoost",
+            model=xgb_model,
+            x_single=X_test[target_idx],
+            X_background=X_train,
+            feature_names=feature_names,
+            class_idx=local_cls_idx,
+            class_name=class_names[target_cls],
+            waterfall_path=figures_dir / "shap_waterfall.png",
+        )
+        shap_summary["local_example"] = {
+            "sample_test_index": target_idx,
+            "true_class": class_names[int(y_test[target_idx])] if y_test is not None else None,
+            **{k: v for k, v in local_exp.items() if k != "all_shap_values"},
+        }
+        shap_summary = sanitize_machine_paths(shap_summary)
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        with shap_path.open("w", encoding="utf-8") as fh:
+            json.dump(shap_summary, fh, indent=2)
+        shap_refreshed = True
+
+    # 4. Update diagnostics for the refit entries only, then refresh the SHA-256 manifest.
+    diag_path = artifacts_dir / "training_diagnostics.json"
+    diagnostics_payload: dict[str, Any] = {}
+    if diag_path.exists():
+        with diag_path.open("r", encoding="utf-8") as fh:
+            diagnostics_payload = json.load(fh)
+    cal_rep = dict(diagnostics_payload.get("calibration_report", {}))
+    cal_rep["XGBoost"] = xgb_cal_report
+    diagnostics_payload["calibration_report"] = cal_rep
+    diagnostics_payload["stacking_summary"] = stacker.to_summary_dict()
+    diagnostics_payload["best_supervised_model"] = best_sup_model
+    diagnostics_payload["downstream_refit"] = {
+        "active_xgboost_profile": active_profile,
+        "fit_partition": "validation",
+        "used_test_data_for_fitting": False,
+        "refit_artifacts": ["calibrators.pkl[XGBoost]", model_cfg.ensemble.stacker_file]
+        + (["shap_summary.json[XGBoost,local_example]"] if shap_refreshed else []),
+        "untouched_calibrators": untouched_after,
+    }
+    diagnostics_payload = sanitize_machine_paths(diagnostics_payload)
+    with diag_path.open("w", encoding="utf-8") as fh:
+        json.dump(diagnostics_payload, fh, indent=2)
+    registry.save_artifact_manifest()
+
+    logger.info(
+        "Refit XGBoost downstream artifacts (profile='%s'): T=%.4f, best_supervised_model=%s, shap=%s",
+        active_profile,
+        scaler_t.temperature,
+        best_sup_model,
+        shap_refreshed,
+    )
+    return {
+        "active_profile": active_profile,
+        "xgboost_temperature": float(scaler_t.temperature),
+        "untouched_calibrators_before": untouched_before,
+        "untouched_calibrators_after": untouched_after,
+        "calibration_report": xgb_cal_report,
+        "stacking_summary": stacker.to_summary_dict(),
+        "best_supervised_model": best_sup_model,
+        "shap_refreshed": shap_refreshed,
+    }

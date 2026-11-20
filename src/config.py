@@ -312,6 +312,14 @@ class ImbalanceSelectionConfig(BaseModel):
     tie_tolerance: float | None = Field(default=None, ge=0.0, le=0.2)
 
 
+class DeploymentConfig(BaseModel):
+    """Production deployment profile controls for multi-profile artifacts."""
+
+    xgboost_imbalance_profile: Literal["class_weight", "none"] = "class_weight"
+    # After `train.py --only-xgboost`, refit only the XGBoost-dependent calibrator, stacker and SHAP artifacts.
+    refit_downstream_on_xgboost_only: bool = True
+
+
 class SecurityConfig(BaseModel):
     """Model artifact integrity verification controls."""
 
@@ -346,6 +354,8 @@ class ModelsDownloadConfig(BaseModel):
             "model_metadata.json",
             "training_histories.json",
             "xgb_baseline.json",
+            "xgb_model_none.json",
+            "xgb_model_class_weight.json",
             "calibrators.pkl",
             "stacking_meta.pkl",
             "anomaly_baselines.pkl",
@@ -383,6 +393,7 @@ class AppConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     data: DataConfig = Field(default_factory=DataConfig)
     imbalance_selection: ImbalanceSelectionConfig = Field(default_factory=ImbalanceSelectionConfig)
+    deployment: DeploymentConfig = Field(default_factory=DeploymentConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     response: ResponseConfig = Field(default_factory=ResponseConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)

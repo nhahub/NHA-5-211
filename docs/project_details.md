@@ -25,7 +25,7 @@ Traditional signature-based Intrusion Detection Systems (e.g., Snort, Suricata) 
 1. **Multi-Layer Perceptron (`MLP`, Neural Baseline for Comparison)** — Deep tabular classifier (`512 → 256 → 128 → 64`) regularized with Batch Normalization, LeakyReLU (`negative_slope=0.1`), Dropout (`0.4`), L2 decay (`1e-4`), and gradient clipping (`clipnorm=1.0`).
 2. **One-Dimensional Convolutional Neural Network (`1D-CNN`, Neural Baseline for Comparison)** — Dual Conv1D blocks (`64` and `128` filters, kernel size `3`), MaxPooling1D, GlobalAveragePooling1D, and dense classification head.
 3. **Undercomplete Autoencoder (Unsupervised Zero-Day Tracker)** — Symmetric `256 → 128 → 64 → 32 → 64 → 128 → 256` reconstruction network trained **exclusively on `BENIGN` flows** under MSE loss, calibrated at benign validation reconstruction percentiles.
-4. **XGBoost Classifier (Baseline & Optuna-Tuned)** — Regularized gradient-boosted decision trees (`hist`, `multi:softprob`) with CUDA/CPU auto-detection and Optuna TPE optimization gated against 5-fold cross-validation standard deviation.
+4. **XGBoost Classifier (Baseline & Optuna-Tuned)** — Regularized gradient-boosted decision trees (`hist`, `multi:softprob`) with CUDA/CPU auto-detection and Optuna TPE optimization gated against 5-fold cross-validation standard deviation. Two imbalance profiles are persisted: `class_weight` (`models/xgb_model.json`, active default chosen on chronological `time_block` validation) and `none` (`models/xgb_model_none.json`, alternate ultra-low-FPR profile); the active one is selected by `deployment.xgboost_imbalance_profile`.
 
 See [`docs/model_configuration.md`](model_configuration.md) and [`docs/architecture.md`](architecture.md) for hyperparameters and pipeline diagrams.
 

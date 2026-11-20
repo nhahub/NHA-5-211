@@ -1,9 +1,9 @@
 # Optional CICIDS2017 Datasets (Real Timestamps & Corrected Labels)
 
-This repository runs the main benchmark against the 8 `MachineLearningCVE` CSV files in `data/raw/`. Two optional upstream extensions are configured via [`configs/config.yaml`](../configs/config.yaml) without code changes:
+This repository keeps `data/` small by default and runs the main benchmark against the 8 `MachineLearningCVE` CSV files in `data/raw/`. Two optional upstream extensions are supported via [`configs/config.yaml`](../configs/config.yaml) without code changes. **Current status:** `data/TrafficLabelling/` is present locally and was used for the committed `time_block` evaluation (`ordering = Timestamp`, `match_rate = 0.9999`), but it is intentionally untracked and never committed to git; `data/engelen2021_label_corrections.csv` remains absent and was skipped cleanly:
 
-1. **Real Capture Timestamps for `time_block` (`TrafficLabelling_.zip` / `GeneratedLabelledFlows`) — VERIFIED for `time_block` on `timestamp-eval`**
-   - **Why optional:** Standard `MachineLearningCVE` CSVs in `data/raw/` omit the `Timestamp` column. When `data/TrafficLabelling/*.csv` is present, chronological `time_block` evaluation aligns real `Timestamp` values (`2,830,471 / 2,830,743` = `99.9904%` matched via `flow_telemetry_signature`, `272` unmatched; only missing checkouts fall back to CSV row order).
+1. **Real Capture Timestamps for `time_block` (`TrafficLabelling_.zip` / `GeneratedLabelledFlows`)**
+   - **Why optional:** Standard `MachineLearningCVE` CSVs in `data/raw/` omit the `Timestamp` column. When `data/TrafficLabelling/` is absent, chronological `time_block` evaluation falls back to session order + CSV row index and warns explicitly: `time_block ordering = CSV row order (no real Timestamp)`.
    - **Where to download:** Download **`GeneratedLabelledFlows` / `TrafficLabelling_.zip`** from the UNB Canadian Institute for Cybersecurity CICIDS2017 page: <https://www.unb.ca/cic/datasets/ids-2017.html>.
    - **Where to place:** Extract all 8 daily CSVs into `data/TrafficLabelling/` (matching `data.timestamp_source_dir: "data/TrafficLabelling"`):
      - `Monday-WorkingHours.pcap_ISCX.csv`
@@ -16,7 +16,7 @@ This repository runs the main benchmark against the 8 `MachineLearningCVE` CSV f
      - `Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv`
    - **How alignment works:** [`align_real_timestamps`](../src/data/loader.py) aligns `Timestamp` onto the main flows via shared `Flow ID` + 5-tuple (`Source IP`, `Destination IP`, `Source Port`, `Destination Port` + occurrence index) or deterministic session telemetry signatures (`Source_Session_Day`, `Destination Port`, `Flow Duration`, `Total Fwd Packets`, `Total Backward Packets`, `Total Length of Fwd Packets`, `Total Length of Bwd Packets`, `Flow IAT Mean`, normalized `Label`, occurrence index), logs exact matched/unmatched counts, and excludes `Timestamp` from model features.
 
-2. **Engelen et al. (2021) Corrected Labels (`data/engelen2021_label_corrections.csv`) — NOT APPLIED (absent locally)**
+2. **Engelen et al. (2021) Corrected Labels (`data/engelen2021_label_corrections.csv`)**
    - **Why optional:** Original CICIDS2017 labels contain documented flow-construction and ground-truth errors affecting classes such as DoS/Heartbleed/Bot (Engelen et al., *IEEE S&P Workshops*, 2021).
    - **Where to download:** Distrinet Research Group (KU Leuven), CICIDS2017 Troubleshooting (`CNS2021`): <https://intrusion-detection.distrinet-research.be/CNS2021/>.
    - **Where to place:** Save the corrected CSV or Parquet file at `data/engelen2021_label_corrections.csv` (or point `data.label_correction_file` in [`configs/config.yaml`](../configs/config.yaml) to your local file).

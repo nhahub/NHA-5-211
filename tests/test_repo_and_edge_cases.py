@@ -9,6 +9,7 @@ import re
 import joblib
 import numpy as np
 import pandas as pd
+from pydantic import ValidationError
 import pytest
 from scripts.check_optional_data import check_optional_data_status, format_optional_data_report
 from scripts.check_readme_numbers import check_readme_numbers
@@ -22,6 +23,7 @@ from src.config import (
     PROJECT_ROOT,
     AppConfig,
     DataConfig,
+    DeploymentConfig,
     EvaluationConfig,
     ModelConfig,
     SecurityConfig,
@@ -44,6 +46,7 @@ from src.evaluation.protocols import evaluate_feature_ablation
 from src.models.mlp import build_mlp
 from src.models.xgboost_model import build_xgboost_classifier
 from src.response.response_engine import ActiveResponseEngine
+from src.training.trainer import train_xgboost_only_profiles
 from src.utils.model_registry import (
     ModelIntegrityError,
     ModelRegistry,
@@ -539,6 +542,7 @@ def test_model_registry_stub_mode_graceful_degradation(tmp_path: Path) -> None:
         "scaler.pkl",
         "stacking_meta.pkl",
         "xgb_model.json",
+        "xgb_model_none.json",
     ]
     for fname in lfs_files:
         stub_path = stub_dir / fname
@@ -551,7 +555,10 @@ def test_model_registry_stub_mode_graceful_degradation(tmp_path: Path) -> None:
     (stub_dir / "feature_names.json").write_text('["f1", "f2"]', encoding="utf-8")
     (stub_dir / "anomaly_threshold.json").write_text('{"threshold": 0.025}', encoding="utf-8")
     (stub_dir / "model_metadata.json").write_text(
-        '{"models": {"XGBoost": {"imbalance_strategy": "none"}}}', encoding="utf-8"
+        '{"models": {"XGBoost": {"active_profile": "class_weight", "imbalance_strategy": "class_weight", '
+        '"profile_files": {"class_weight": "xgb_model.json", "none": "xgb_model_none.json"}, '
+        '"available_profiles": ["class_weight", "none"]}}}',
+        encoding="utf-8",
     )
     (stub_dir / "MANIFEST.json").write_text('{"algorithm": "sha256", "artifacts": {}}', encoding="utf-8")
 
@@ -569,10 +576,22 @@ def test_model_registry_stub_mode_graceful_degradation(tmp_path: Path) -> None:
     assert loaded.stacker is None
     assert loaded.anomaly_baselines is None
     assert loaded.anomaly_fusion is None
-    assert set(loaded.lfs_pointers) == set(lfs_files)
+    assert set(loaded.lfs_pointers) == set(lfs_files) - {"xgb_model_none.json"}
     assert loaded.feature_names == ["f1", "f2"]
     assert loaded.anomaly_threshold == pytest.approx(0.025)
-    assert loaded.model_imbalance_strategies == {"XGBoost": "none"}
+    assert loaded.model_imbalance_strategies == {"XGBoost": "class_weight"}
+
+    reg_alt = ModelRegistry(
+        models_dir=stub_dir,
+        artifacts_dir=tmp_path,
+        verify_model_hashes=True,
+        require_manifest=True,
+        xgboost_profile="none",
+    )
+    loaded_alt = reg_alt.load_all(load_keras=False)
+    assert loaded_alt.models == {}
+    assert "xgb_model_none.json" in loaded_alt.lfs_pointers
+    assert "xgb_model.json" not in loaded_alt.lfs_pointers
 
 
 def test_no_absolute_machine_paths_in_artifacts_and_sanitizer(tmp_path: Path) -> None:
@@ -659,6 +678,82 @@ def test_readme_numbers_match_generated_reports_and_detect_drift(tmp_path: Path)
 
     # Negative check: altering an F1_Macro value in a temporary README copy must be flagged
     tampered_readme = tmp_path / "README.md"
-    tampered_readme.write_text(readme_text.replace("0.9603", "0.9999", 1), encoding="utf-8")
+    tampered_readme.write_text(readme_text.replace("0.9661", "0.9999", 1), encoding="utf-8")
     tamper_errs = check_readme_numbers(readme_path=tampered_readme)
     assert any("XGBoost random F1_Macro" in e for e in tamper_errs)
+
+
+def test_deployment_profile_config_registry_manifest_and_only_xgboost(tmp_app_config: AppConfig) -> None:
+    """Validate deployment profile config, dual XGBoost training, manifest hashes, and stub/missing errors."""
+    assert get_app_config().deployment.xgboost_imbalance_profile == "class_weight"
+    assert DeploymentConfig(xgboost_imbalance_profile="none").xgboost_imbalance_profile == "none"
+    with pytest.raises(ValidationError):
+        DeploymentConfig(xgboost_imbalance_profile="invalid_profile")  # type: ignore[arg-type]
+
+    # Pre-generate splits and untouched dummy neural sentinel artifacts
+    run_preprocessing_pipeline(tmp_app_config, force_synthetic=True, save_outputs=True)
+    models_dir = tmp_app_config.paths.resolve("models_dir")
+    artifacts_dir = tmp_app_config.paths.resolve("artifacts_dir")
+    sentinel_bytes = b"untouched-neural-checkpoint"
+    for fname in ("best_mlp.keras", "best_cnn.keras", "best_autoencoder.keras"):
+        (models_dir / fname).write_bytes(sentinel_bytes)
+
+    model_cfg = ModelConfig()
+    model_cfg.xgboost.baseline = {
+        "n_estimators": 8,
+        "max_depth": 3,
+        "learning_rate": 0.2,
+        "tree_method": "hist",
+        "objective": "multi:softprob",
+        "eval_metric": "mlogloss",
+    }
+    res = train_xgboost_only_profiles(
+        app_cfg=tmp_app_config,
+        model_cfg=model_cfg,
+        profiles=("none", "class_weight"),
+        optuna_trials_override=0,
+        force_synthetic=False,
+    )
+    assert res["active_profile"] == "class_weight"
+    assert res["profile_files"] == {"none": "xgb_model_none.json", "class_weight": "xgb_model.json"}
+    assert (models_dir / "xgb_model.json").is_file()
+    assert (models_dir / "xgb_model_none.json").is_file()
+
+    # Neural artifacts untouched
+    for fname in ("best_mlp.keras", "best_cnn.keras", "best_autoencoder.keras"):
+        assert (models_dir / fname).read_bytes() == sentinel_bytes
+
+    # MANIFEST covers both profiles with valid SHA-256 verification
+    manifest = json.loads((models_dir / "MANIFEST.json").read_text(encoding="utf-8"))
+    assert "xgb_model.json" in manifest["artifacts"]
+    assert "xgb_model_none.json" in manifest["artifacts"]
+
+    meta = json.loads((models_dir / "model_metadata.json").read_text(encoding="utf-8"))["models"]["XGBoost"]
+    assert meta["active_profile"] == "class_weight"
+    assert meta["imbalance_strategy"] == "class_weight"
+
+    # Registry loads active class_weight vs alternate none cleanly
+    reg = ModelRegistry(models_dir=models_dir, artifacts_dir=artifacts_dir, verify_model_hashes=True)
+    loaded_cw = reg.load_all(load_keras=False, xgboost_profile="class_weight")
+    assert loaded_cw.active_xgboost_profile == "class_weight"
+    assert loaded_cw.active_xgboost_artifact == "xgb_model.json"
+    assert "XGBoost" in loaded_cw.models
+
+    loaded_none = reg.load_all(load_keras=False, xgboost_profile="none")
+    assert loaded_none.active_xgboost_profile == "none"
+    assert loaded_none.active_xgboost_artifact == "xgb_model_none.json"
+    assert "XGBoost" in loaded_none.models
+
+    # Deleting alternate profile produces clear FileNotFoundError when explicitly selected
+    (models_dir / "xgb_model_none.json").unlink()
+    with pytest.raises(FileNotFoundError, match="none"):
+        reg.load_all(load_keras=False, xgboost_profile="none")
+
+    # Converting active artifact to Git LFS stub degrades gracefully
+    (models_dir / "xgb_model.json").write_text(
+        "version https://git-lfs.github.com/spec/v1\noid sha256:" + ("0" * 64) + "\nsize 123\n",
+        encoding="utf-8",
+    )
+    stub_loaded = reg.load_all(load_keras=False, xgboost_profile="class_weight")
+    assert "XGBoost" not in stub_loaded.models
+    assert "xgb_model.json" in stub_loaded.lfs_pointers
