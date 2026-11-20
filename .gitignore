@@ -32,3 +32,5 @@ data/synthetic/*.parquet
 ids_response_log.txt
 .DS_Store
 Thumbs.db
+
+reports/incident_history.json
