@@ -19,7 +19,10 @@ _MACHINE_PATH_TOKEN_RE = re.compile(
 _WINDOWS_ABS_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
 
-def to_repo_relative_path(path: Path | str | None, root: Path = PROJECT_ROOT) -> str | None:
+def to_repo_relative_path(
+    path: Path | str | None,
+    root: Path | PureWindowsPath | PurePosixPath | str = PROJECT_ROOT,
+) -> str | None:
     """Convert an absolute filesystem path into a repo-relative POSIX path or basename."""
     if path is None:
         return None
@@ -27,7 +30,19 @@ def to_repo_relative_path(path: Path | str | None, root: Path = PROJECT_ROOT) ->
     if not text:
         return None
 
-    root_posix = root.resolve().as_posix().rstrip("/")
+    root_str = str(root).strip()
+    norm_root = root_str.replace("\\", "/").rstrip("/")
+    foreign_win_root = _WINDOWS_ABS_RE.match(root_str) and os.name != "nt"
+    foreign_posix_root = norm_root.startswith("/") and os.name == "nt"
+    if isinstance(root, PureWindowsPath) and os.name != "nt":
+        foreign_win_root = True
+    if foreign_win_root or foreign_posix_root:
+        root_posix = norm_root
+        root_resolved: Path | None = None
+    else:
+        root_resolved = Path(root_str).resolve()
+        root_posix = root_resolved.as_posix().rstrip("/")
+
     norm_text = text.replace("\\", "/")
     if norm_text.lower() == root_posix.lower():
         return "."
@@ -40,15 +55,18 @@ def to_repo_relative_path(path: Path | str | None, root: Path = PROJECT_ROOT) ->
         return PurePosixPath(norm_text).name
 
     candidate = Path(text)
-    if candidate.is_absolute():
+    if candidate.is_absolute() and root_resolved is not None:
         try:
-            return candidate.resolve().relative_to(root.resolve()).as_posix()
+            return candidate.resolve().relative_to(root_resolved).as_posix()
         except ValueError:
             return candidate.name
     return norm_text[2:] if norm_text.startswith("./") else norm_text
 
 
-def sanitize_machine_paths(obj: Any, root: Path = PROJECT_ROOT) -> Any:
+def sanitize_machine_paths(
+    obj: Any,
+    root: Path | PureWindowsPath | PurePosixPath | str = PROJECT_ROOT,
+) -> Any:
     """Recursively replace absolute Windows/home paths inside serialized artifacts."""
     if isinstance(obj, Path):
         return to_repo_relative_path(obj, root=root)

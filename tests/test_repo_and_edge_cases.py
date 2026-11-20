@@ -590,9 +590,14 @@ def test_no_absolute_machine_paths_in_artifacts_and_sanitizer(tmp_path: Path) ->
         "unix": "TrafficLabelling",
         "rel": "data/engelen2021_label_corrections.csv",
     }
+    unix_cleaned = sanitize_machine_paths(
+        {"in_repo": "/home/alice/repo/data/TrafficLabelling", "outside": "/home/bob/data"},
+        root="/home/alice/repo",
+    )
+    assert unix_cleaned == {"in_repo": "data/TrafficLabelling", "outside": "data"}
     assert to_repo_relative_path(tmp_path / "custom_dir") == "custom_dir"
 
-    leak_pattern = re.compile(r"(?:[A-Za-z]:\\\\|[A-Za-z]:/|/home/)")
+    leak_pattern = re.compile(r"(?<![A-Za-z0-9])(?:[A-Za-z]:\\\\|[A-Za-z]:/|/home/)")
     scan_targets = [
         *sorted((PROJECT_ROOT / "reports").glob("*.json")),
         *sorted((PROJECT_ROOT / "reports").glob("*.md")),
