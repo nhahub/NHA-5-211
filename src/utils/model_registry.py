@@ -19,6 +19,15 @@ logger = get_logger("smart_ids.registry")
 _LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
 _MANIFEST_TRACKED_SUFFIXES = {".pkl", ".keras", ".json", ".h5", ".onnx"}
 VALID_XGBOOST_PROFILES: tuple[str, ...] = ("class_weight", "none")
+# Every model artifact the registry can load; used as the "Models Online" denominator.
+EXPECTED_MODEL_NAMES: tuple[str, ...] = (
+    "XGBoost",
+    "MLP",
+    "CNN",
+    "Autoencoder",
+    "Autoencoder (Deep Reg)",
+    "VAE",
+)
 
 
 def validate_xgboost_profile(profile: str) -> str:

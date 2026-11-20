@@ -67,6 +67,8 @@ def test_streamlit_apptest_smoke_with_existing_artifacts() -> None:
     md = _rendered_markdown(at)
     assert "XGBoost Deployment Profiles" in md
     assert "class_weight" in md
+    assert "6 / 6" in md
+    assert "Hybrid Ensemble Ready" in md
     assert "Focus_Mean_Recall" in _dataframe_columns(at)
 
 
@@ -108,6 +110,8 @@ def test_streamlit_apptest_graceful_degradation_without_models(tmp_path: Path, m
         md = _rendered_markdown(at)
         assert "XGBoost Deployment Profiles" in md
         assert "class_weight" in md
+        assert "0 / 6" in md
+        assert "Not Trained" in md
         assert "Focus_Mean_Recall" in _dataframe_columns(at)
     finally:
         load_cached_artifacts.clear()

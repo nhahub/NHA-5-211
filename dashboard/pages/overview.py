@@ -24,6 +24,7 @@ from dashboard.data_access import (
     load_cached_artifacts,
 )
 from src.data.feature_engineering import SchemaValidationError
+from src.utils.model_registry import EXPECTED_MODEL_NAMES
 
 
 def render_overview_page(sidebar_state: dict[str, Any]) -> pd.DataFrame:
@@ -95,6 +96,13 @@ def render_overview_page(sidebar_state: dict[str, Any]) -> pd.DataFrame:
     anomaly_count = int(df_logs["is_anomaly"].sum()) if "is_anomaly" in df_logs.columns else 0
     det_rate = (attack_count / max(1, total_flows)) * 100.0
     artifacts = load_cached_artifacts()
+    online_model_count = sum(1 for name in EXPECTED_MODEL_NAMES if name in artifacts.models)
+    if online_model_count == len(EXPECTED_MODEL_NAMES):
+        model_caption = "Hybrid Ensemble Ready"
+    elif online_model_count:
+        model_caption = "Partial ensemble"
+    else:
+        model_caption = "Not Trained"
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     with c1:
@@ -112,8 +120,8 @@ def render_overview_page(sidebar_state: dict[str, Any]) -> pd.DataFrame:
     with c6:
         render_metric_card(
             "Models Online",
-            f"{len(artifacts.models)} / 4",
-            "Hybrid Ensemble Ready" if artifacts.models else "Not Trained",
+            f"{online_model_count} / {len(EXPECTED_MODEL_NAMES)}",
+            model_caption,
         )
 
     st.markdown("---")
