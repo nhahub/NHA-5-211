@@ -10,7 +10,7 @@
 ## Results Overview (`200k` CICIDS2017 Sample: `2,830,743` Raw → `191,268` Clean Flows, 77 Features, 13 Classes)
 
 | Model | Imbalance | `random` `F1_Macro` (95% CI) | `time_block` `F1_Macro` (95% CI) | `by_day` Closed-Set `F1_Macro` |
-|---|---|---|---:|---:|---:|---:|
+|---|---|---:|---:|---:|
 | **XGBoost (Rec.)** | `class_weight` | **0.9661** `[0.9310, 0.9829]` | **0.8646** `[0.8460, 0.8763]` | **0.0716** |
 | **1D-CNN (Baseline)** | `smote` | 0.8447 `[0.7649, 0.8819]` | 0.3073 `[0.3019, 0.3359]` | 0.0696 |
 | **MLP (Baseline)** | `smote` | 0.7934 `[0.7544, 0.8176]` | 0.2770 `[0.2756, 0.3011]` | 0.0716 |
