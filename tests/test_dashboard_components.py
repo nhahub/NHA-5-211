@@ -56,6 +56,25 @@ def _dataframe_columns(at) -> set[str]:
     return cols
 
 
+def test_model_artifact_summary_counts_and_hybrid_readiness() -> None:
+    from dashboard.pages.overview import model_artifact_summary
+    from src.utils.model_registry import EXPECTED_MODEL_NAMES
+
+    full = {name: object() for name in EXPECTED_MODEL_NAMES}
+    assert model_artifact_summary(full) == ("6 / 6", "Hybrid Ensemble Ready")
+    # One supervised model plus the autoencoder is enough for hybrid inference.
+    assert model_artifact_summary({"XGBoost": object(), "Autoencoder": object()}) == (
+        "2 / 6",
+        "Hybrid Ensemble Ready",
+    )
+    # Anomaly-only variants do not make the hybrid ensemble usable.
+    assert model_artifact_summary({"VAE": object(), "Autoencoder (Deep Reg)": object()}) == (
+        "2 / 6",
+        "Partial ensemble",
+    )
+    assert model_artifact_summary({}) == ("0 / 6", "Not Trained")
+
+
 def test_streamlit_apptest_smoke_with_existing_artifacts() -> None:
     from streamlit.testing.v1 import AppTest
 
@@ -68,6 +87,7 @@ def test_streamlit_apptest_smoke_with_existing_artifacts() -> None:
     assert "XGBoost Deployment Profiles" in md
     assert "class_weight" in md
     assert "6 / 6" in md
+    assert "Model Artifacts Online" in md
     assert "Hybrid Ensemble Ready" in md
     assert "Focus_Mean_Recall" in _dataframe_columns(at)
 
@@ -111,6 +131,7 @@ def test_streamlit_apptest_graceful_degradation_without_models(tmp_path: Path, m
         assert "XGBoost Deployment Profiles" in md
         assert "class_weight" in md
         assert "0 / 6" in md
+        assert "Model Artifacts Online" in md
         assert "Not Trained" in md
         assert "Focus_Mean_Recall" in _dataframe_columns(at)
     finally:

@@ -11,6 +11,7 @@ import streamlit as st
 from dashboard.components.cards import threat_badge_html
 from dashboard.data_access import get_response_engine, load_cached_artifacts
 from src.config import get_app_config
+from src.utils.model_registry import SELECTABLE_MODEL_NAMES
 
 
 def _render_command_preview(decision: dict[str, Any]) -> None:
@@ -75,7 +76,7 @@ def render_active_response_page(sidebar_state: dict[str, Any], overview_logs: pd
             with r2:
                 conf_input = st.slider("Detection Confidence", 0.0, 1.0, 0.96, 0.01)
                 model_input = st.selectbox(
-                    "Detecting Model", options=["Hybrid Ensemble", "XGBoost", "MLP", "CNN", "Autoencoder"]
+                    "Detecting Model", options=["Hybrid Ensemble", *SELECTABLE_MODEL_NAMES]
                 )
             anom_flag = st.checkbox("Autoencoder Zero-Day Anomaly Flag", value=False)
             submitted = st.form_submit_button("Execute Simulated Response", type="primary")

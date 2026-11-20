@@ -19,15 +19,14 @@ logger = get_logger("smart_ids.registry")
 _LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
 _MANIFEST_TRACKED_SUFFIXES = {".pkl", ".keras", ".json", ".h5", ".onnx"}
 VALID_XGBOOST_PROFILES: tuple[str, ...] = ("class_weight", "none")
-# Every model artifact the registry can load; used as the "Models Online" denominator.
-EXPECTED_MODEL_NAMES: tuple[str, ...] = (
-    "XGBoost",
-    "MLP",
-    "CNN",
-    "Autoencoder",
-    "Autoencoder (Deep Reg)",
-    "VAE",
-)
+# Supervised classifiers offered as the primary detection model.
+SUPERVISED_MODEL_NAMES: tuple[str, ...] = ("XGBoost", "MLP", "CNN")
+# Benign-only artifact variants used for anomaly signals, not selectable as primary classifiers.
+ANOMALY_VARIANT_NAMES: tuple[str, ...] = ("Autoencoder (Deep Reg)", "VAE")
+# Models a user can pick in the dashboard's "Active Detection Model" selector.
+SELECTABLE_MODEL_NAMES: tuple[str, ...] = ("XGBoost", "MLP", "CNN", "Autoencoder")
+# Every model artifact the registry can load; used as the "Model Artifacts Online" denominator.
+EXPECTED_MODEL_NAMES: tuple[str, ...] = (*SELECTABLE_MODEL_NAMES, *ANOMALY_VARIANT_NAMES)
 
 
 def validate_xgboost_profile(profile: str) -> str:

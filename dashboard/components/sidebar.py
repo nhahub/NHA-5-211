@@ -9,6 +9,7 @@ import streamlit as st
 
 from dashboard.data_access import load_cached_artifacts
 from src.config import get_app_config
+from src.utils.model_registry import SELECTABLE_MODEL_NAMES
 
 
 def render_sidebar() -> dict[str, Any]:
@@ -28,9 +29,7 @@ def render_sidebar() -> dict[str, Any]:
             help="Academic safety lock: simulates iptables DROP commands without altering OS firewall rules.",
         )
 
-        available_models = ["Hybrid Ensemble"] + [
-            m for m in ("XGBoost", "MLP", "CNN", "Autoencoder") if m in artifacts.models
-        ]
+        available_models = ["Hybrid Ensemble"] + [m for m in SELECTABLE_MODEL_NAMES if m in artifacts.models]
         active_model = st.selectbox(
             "Active Detection Model",
             options=available_models,

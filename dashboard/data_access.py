@@ -16,7 +16,12 @@ from src.data.loader import CICIDS2017_FEATURES
 from src.detection.inference import UnifiedDetectionEngine
 from src.detection.threat_scoring import get_threat_level
 from src.response.response_engine import ActiveResponseEngine
-from src.utils.model_registry import LoadedArtifacts, ModelRegistry
+from src.utils.model_registry import (
+    SELECTABLE_MODEL_NAMES,
+    SUPERVISED_MODEL_NAMES,
+    LoadedArtifacts,
+    ModelRegistry,
+)
 from src.utils.reproducibility import HardwareProfile, configure_hardware
 
 
@@ -167,7 +172,7 @@ def build_test_detection_logs(
 
     # Invert scaling to obtain realistic unscaled DataFrame or score directly from scaled features
     anom_res = engine.anomaly_detector.score(X_test)
-    sup_avail = [m for m in ("XGBoost", "MLP", "CNN") if m in artifacts.models]
+    sup_avail = [m for m in SUPERVISED_MODEL_NAMES if m in artifacts.models]
     if model_choice in sup_avail:
         probas = engine._predict_supervised_proba(X_test, model_choice)
         pred_idx = np.argmax(probas, axis=1)
@@ -264,7 +269,7 @@ def generate_demo_logs(n_rows: int = 250, seed: int = 42) -> pd.DataFrame:
         "Web Attack",
     ]
     probs = [0.65, 0.10, 0.08, 0.06, 0.03, 0.03, 0.03, 0.02]
-    models = ["Hybrid Ensemble", "XGBoost", "MLP", "1D-CNN", "Autoencoder"]
+    models = ["Hybrid Ensemble", *SELECTABLE_MODEL_NAMES]
     now = datetime.now(UTC)
 
     rows = []

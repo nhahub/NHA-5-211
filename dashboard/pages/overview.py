@@ -24,7 +24,20 @@ from dashboard.data_access import (
     load_cached_artifacts,
 )
 from src.data.feature_engineering import SchemaValidationError
-from src.utils.model_registry import EXPECTED_MODEL_NAMES
+from src.utils.model_registry import EXPECTED_MODEL_NAMES, SUPERVISED_MODEL_NAMES
+
+
+def model_artifact_summary(models: dict[str, Any]) -> tuple[str, str]:
+    """Return KPI value/caption for loaded model artifacts and hybrid-ensemble readiness."""
+    online = sum(1 for name in EXPECTED_MODEL_NAMES if name in models)
+    hybrid_ready = "Autoencoder" in models and any(name in models for name in SUPERVISED_MODEL_NAMES)
+    if hybrid_ready:
+        caption = "Hybrid Ensemble Ready"
+    elif online:
+        caption = "Partial ensemble"
+    else:
+        caption = "Not Trained"
+    return f"{online} / {len(EXPECTED_MODEL_NAMES)}", caption
 
 
 def render_overview_page(sidebar_state: dict[str, Any]) -> pd.DataFrame:
@@ -96,13 +109,7 @@ def render_overview_page(sidebar_state: dict[str, Any]) -> pd.DataFrame:
     anomaly_count = int(df_logs["is_anomaly"].sum()) if "is_anomaly" in df_logs.columns else 0
     det_rate = (attack_count / max(1, total_flows)) * 100.0
     artifacts = load_cached_artifacts()
-    online_model_count = sum(1 for name in EXPECTED_MODEL_NAMES if name in artifacts.models)
-    if online_model_count == len(EXPECTED_MODEL_NAMES):
-        model_caption = "Hybrid Ensemble Ready"
-    elif online_model_count:
-        model_caption = "Partial ensemble"
-    else:
-        model_caption = "Not Trained"
+    model_value, model_caption = model_artifact_summary(artifacts.models)
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     with c1:
@@ -119,8 +126,8 @@ def render_overview_page(sidebar_state: dict[str, Any]) -> pd.DataFrame:
         render_metric_card("Zero-Day Anomalies", f"{anomaly_count:,}", f"MSE > {anom_thresh:.2f}")
     with c6:
         render_metric_card(
-            "Models Online",
-            f"{online_model_count} / {len(EXPECTED_MODEL_NAMES)}",
+            "Model Artifacts Online",
+            model_value,
             model_caption,
         )
 
