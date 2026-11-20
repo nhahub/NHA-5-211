@@ -316,6 +316,8 @@ class DeploymentConfig(BaseModel):
     """Production deployment profile controls for multi-profile artifacts."""
 
     xgboost_imbalance_profile: Literal["class_weight", "none"] = "class_weight"
+    # After `train.py --only-xgboost`, refit only the XGBoost-dependent calibrator, stacker and SHAP artifacts.
+    refit_downstream_on_xgboost_only: bool = True
 
 
 class SecurityConfig(BaseModel):

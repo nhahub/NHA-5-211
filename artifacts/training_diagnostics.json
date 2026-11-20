@@ -361,14 +361,14 @@
       "status": "Recalibrated (T=0.8749, ECE delta=-0.001259)"
     },
     "XGBoost": {
-      "temperature": 0.9095,
-      "ece_before": 0.000522,
-      "ece_after": 0.000269,
-      "ece_delta": -0.000253,
-      "brier_before": 0.001663,
-      "brier_after": 0.001661,
-      "nll_before": 0.00417,
-      "nll_after": 0.004091,
+      "temperature": 0.9702,
+      "ece_before": 0.000517,
+      "ece_after": 0.000589,
+      "ece_delta": 7.2e-05,
+      "brier_before": 0.002537,
+      "brier_after": 0.002531,
+      "nll_before": 0.006635,
+      "nll_after": 0.00662,
       "status": "Already well-calibrated near T=1.0"
     }
   },
@@ -379,19 +379,19 @@
       "XGBoost"
     ],
     "val_weights": {
-      "CNN": 0.335819,
-      "MLP": 0.310086,
-      "XGBoost": 0.354094
+      "CNN": 0.33672,
+      "MLP": 0.310918,
+      "XGBoost": 0.352361
     },
     "val_logloss": {
       "CNN": 0.021755,
       "MLP": 0.048329,
-      "XGBoost": 0.004091
+      "XGBoost": 0.00662
     },
     "val_macro_f1": {
       "CNN": 0.870063,
       "MLP": 0.813398,
-      "XGBoost": 0.95043
+      "XGBoost": 0.950115
     },
     "meta_learner": "LogisticRegression(log_probs)"
   },
@@ -541,6 +541,20 @@
       "val_macro_recall": 0.958452,
       "val_mlogloss": 0.006635,
       "val_benign_fpr": 0.001321
+    }
+  },
+  "downstream_refit": {
+    "active_xgboost_profile": "class_weight",
+    "fit_partition": "validation",
+    "used_test_data_for_fitting": false,
+    "refit_artifacts": [
+      "calibrators.pkl[XGBoost]",
+      "stacking_meta.pkl",
+      "shap_summary.json[XGBoost,local_example]"
+    ],
+    "untouched_calibrators": {
+      "MLP": 0.794797759494851,
+      "CNN": 0.8749092827748589
     }
   }
 }

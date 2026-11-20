@@ -14,7 +14,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.config import get_app_config, get_model_config
 from src.data.preprocessing import run_preprocessing_pipeline
 from src.evaluation.visualizations import plot_class_distributions, plot_training_histories
-from src.training.trainer import train_all_models, train_xgboost_only_profiles
+from src.training.trainer import (
+    refit_xgboost_downstream_artifacts,
+    train_all_models,
+    train_xgboost_only_profiles,
+)
 from src.utils.logging import get_logger
 from src.utils.model_registry import ModelRegistry
 
@@ -51,6 +55,16 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated XGBoost profiles to train when --only-xgboost is set (e.g. none,class_weight).",
     )
     parser.add_argument(
+        "--no-refit-downstream",
+        action="store_true",
+        help="With --only-xgboost, skip refitting the XGBoost calibrator, stacker and SHAP artifacts.",
+    )
+    parser.add_argument(
+        "--skip-shap",
+        action="store_true",
+        help="With --only-xgboost, skip regenerating XGBoost SHAP summary artifacts.",
+    )
+    parser.add_argument(
         "--run-eval",
         action="store_true",
         help="Immediately run full evaluation, latency benchmarking, and SHAP reports after training.",
@@ -84,6 +98,18 @@ def main() -> None:
             xgb_res["active_profile"],
             xgb_res["profile_files"],
         )
+        if app_cfg.deployment.refit_downstream_on_xgboost_only and not args.no_refit_downstream:
+            refit_res = refit_xgboost_downstream_artifacts(
+                app_cfg=app_cfg,
+                model_cfg=model_cfg,
+                compute_shap=not args.skip_shap,
+            )
+            logger.info(
+                "Downstream refit completed (T_xgb=%.4f, best_supervised_model=%s, shap_refreshed=%s).",
+                refit_res["xgboost_temperature"],
+                refit_res["best_supervised_model"],
+                refit_res["shap_refreshed"],
+            )
         if args.run_eval:
             from scripts.evaluate import run_evaluation_suite
 
