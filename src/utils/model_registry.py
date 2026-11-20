@@ -18,6 +18,36 @@ logger = get_logger("smart_ids.registry")
 
 _LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
 _MANIFEST_TRACKED_SUFFIXES = {".pkl", ".keras", ".json", ".h5", ".onnx"}
+VALID_XGBOOST_PROFILES: tuple[str, ...] = ("class_weight", "none")
+
+
+def validate_xgboost_profile(profile: str) -> str:
+    """Validate an XGBoost deployment imbalance profile name."""
+    clean = str(profile).strip()
+    if clean not in VALID_XGBOOST_PROFILES:
+        raise ValueError(
+            f"Unsupported XGBoost deployment profile '{profile}'. Expected one of {VALID_XGBOOST_PROFILES}."
+        )
+    return clean
+
+
+def resolve_xgboost_artifact_name(
+    profile: str,
+    model_metadata: dict[str, dict[str, Any]] | None = None,
+) -> str:
+    """Resolve the XGBoost JSON filename corresponding to ``profile``."""
+    clean = validate_xgboost_profile(profile)
+    xgb_meta = (model_metadata or {}).get("XGBoost", {})
+    if isinstance(xgb_meta, dict):
+        profile_files = xgb_meta.get("profile_files") or xgb_meta.get("available_profiles")
+        if isinstance(profile_files, dict) and clean in profile_files:
+            return str(profile_files[clean])
+        recorded_active = str(
+            xgb_meta.get("active_profile") or xgb_meta.get("imbalance_strategy") or ""
+        ).strip()
+        if recorded_active:
+            return "xgb_model.json" if clean == recorded_active else f"xgb_model_{clean}.json"
+    return "xgb_model.json"
 
 
 class ModelIntegrityError(RuntimeError):
@@ -71,6 +101,9 @@ class LoadedArtifacts:
     missing_artifacts: list[str] = field(default_factory=list)
     manifest_sha256: dict[str, Any] = field(default_factory=dict)
     integrity_warnings: list[str] = field(default_factory=list)
+    active_xgboost_profile: str = "class_weight"
+    active_xgboost_artifact: str = "xgb_model.json"
+    available_xgboost_profiles: dict[str, str] = field(default_factory=dict)
 
 
 class ModelRegistry:
@@ -83,6 +116,7 @@ class ModelRegistry:
         verify_model_hashes: bool | None = None,
         require_manifest: bool | None = None,
         manifest_filename: str | None = None,
+        xgboost_profile: str | None = None,
     ) -> None:
         self.models_dir = Path(models_dir)
         self.artifacts_dir = Path(artifacts_dir) if artifacts_dir else self.models_dir
@@ -92,20 +126,31 @@ class ModelRegistry:
         cfg_verify = True
         cfg_require_manifest = False
         cfg_manifest_name = "MANIFEST.json"
-        if verify_model_hashes is None or require_manifest is None or manifest_filename is None:
+        cfg_xgb_profile = "class_weight"
+        if (
+            verify_model_hashes is None
+            or require_manifest is None
+            or manifest_filename is None
+            or xgboost_profile is None
+        ):
             try:
                 from src.config import get_app_config
 
-                sec = get_app_config().security
+                app_cfg = get_app_config()
+                sec = app_cfg.security
                 cfg_verify = bool(sec.verify_model_hashes)
                 cfg_require_manifest = bool(sec.require_manifest)
                 cfg_manifest_name = str(sec.manifest_file or "MANIFEST.json")
+                cfg_xgb_profile = str(app_cfg.deployment.xgboost_imbalance_profile)
             except Exception:
                 pass
 
         self.verify_model_hashes = cfg_verify if verify_model_hashes is None else bool(verify_model_hashes)
         self.require_manifest = cfg_require_manifest if require_manifest is None else bool(require_manifest)
         self.manifest_filename = cfg_manifest_name if manifest_filename is None else str(manifest_filename)
+        self.xgboost_profile = validate_xgboost_profile(
+            cfg_xgb_profile if xgboost_profile is None else xgboost_profile
+        )
 
     def save_preprocessing_artifacts(
         self,
@@ -264,13 +309,41 @@ class ModelRegistry:
             logger.error(msg)
             raise ModelIntegrityError(msg)
 
-    def load_all(self, load_keras: bool = True) -> LoadedArtifacts:
+    def load_all(self, load_keras: bool = True, xgboost_profile: str | None = None) -> LoadedArtifacts:
         """Load all available model and preprocessing artifacts defensively."""
         models: dict[str, Any] = {}
         lfs_pointers: list[str] = []
         missing_artifacts: list[str] = []
         integrity_warnings: list[str] = []
         manifest_sha256 = self._load_sha256_manifest() or {}
+        requested_xgb_profile = validate_xgboost_profile(
+            self.xgboost_profile if xgboost_profile is None else xgboost_profile
+        )
+
+        manifest_path = self.artifacts_dir / "run_manifest.json"
+        manifest: dict[str, Any] = {}
+        if manifest_path.exists():
+            with manifest_path.open("r", encoding="utf-8") as fh:
+                manifest = json.load(fh)
+
+        model_metadata: dict[str, dict[str, Any]] = {}
+        meta_path = self.models_dir / "model_metadata.json"
+        if meta_path.exists():
+            with meta_path.open("r", encoding="utf-8") as fh:
+                raw_meta = json.load(fh)
+            model_metadata = dict(raw_meta.get("models", {}) or {})
+        elif isinstance(manifest.get("model_metadata"), dict):
+            model_metadata = dict(manifest["model_metadata"])
+
+        xgb_filename = resolve_xgboost_artifact_name(requested_xgb_profile, model_metadata)
+        xgb_meta = model_metadata.get("XGBoost", {}) if isinstance(model_metadata, dict) else {}
+        available_xgb_profiles: dict[str, str] = {}
+        if isinstance(xgb_meta, dict):
+            raw_profiles = xgb_meta.get("profile_files") or xgb_meta.get("available_profiles") or {}
+            if isinstance(raw_profiles, dict):
+                available_xgb_profiles = {str(k): str(v) for k, v in raw_profiles.items()}
+            elif xgb_meta.get("imbalance_strategy"):
+                available_xgb_profiles = {str(xgb_meta["imbalance_strategy"]): "xgb_model.json"}
 
         keras_targets = {
             "MLP": self.models_dir / "best_mlp.keras",
@@ -316,12 +389,18 @@ class ModelRegistry:
             except Exception as exc:
                 logger.warning("Failed initializing TensorFlow for Keras model loading: %s", exc)
 
-        xgb_path = self.models_dir / "xgb_model.json"
-        if not xgb_path.exists():
-            missing_artifacts.append(xgb_path.name)
-        elif is_git_lfs_pointer(xgb_path):
-            lfs_pointers.append(xgb_path.name)
-            logger.warning("xgb_model.json is a Git LFS pointer stub; run 'git lfs pull' or train locally.")
+        xgb_path = self.models_dir / xgb_filename
+        if is_git_lfs_pointer(xgb_path):
+            lfs_pointers.append(xgb_filename)
+            logger.warning("%s is a Git LFS pointer stub; run 'git lfs pull' or train locally.", xgb_filename)
+        elif not xgb_path.exists():
+            if xgb_meta:
+                raise FileNotFoundError(
+                    f"Configured XGBoost profile '{requested_xgb_profile}' artifact '{xgb_filename}' "
+                    f"was not found in '{self.models_dir}'. Generate profiles with "
+                    "`python scripts/train.py --only-xgboost --profiles none,class_weight`."
+                )
+            missing_artifacts.append(xgb_filename)
         else:
             self.verify_artifact_file(
                 xgb_path,
@@ -337,7 +416,7 @@ class ModelRegistry:
             except ModelIntegrityError:
                 raise
             except Exception as exc:
-                logger.warning("Failed loading XGBoost model: %s", exc)
+                logger.warning("Failed loading XGBoost model '%s': %s", xgb_filename, exc)
 
         def _maybe_joblib(fname: str, optional: bool = False) -> Any | None:
             p = self.models_dir / fname
@@ -383,21 +462,6 @@ class ModelRegistry:
                 anomaly_threshold_meta = json.load(fh)
                 anomaly_threshold = float(anomaly_threshold_meta.get("threshold", 1.0))
 
-        manifest_path = self.artifacts_dir / "run_manifest.json"
-        manifest: dict[str, Any] = {}
-        if manifest_path.exists():
-            with manifest_path.open("r", encoding="utf-8") as fh:
-                manifest = json.load(fh)
-
-        model_metadata: dict[str, dict[str, Any]] = {}
-        meta_path = self.models_dir / "model_metadata.json"
-        if meta_path.exists():
-            with meta_path.open("r", encoding="utf-8") as fh:
-                raw_meta = json.load(fh)
-            model_metadata = dict(raw_meta.get("models", {}) or {})
-        elif isinstance(manifest.get("model_metadata"), dict):
-            model_metadata = dict(manifest["model_metadata"])
-
         model_imbalance_strategies: dict[str, str] = {}
         if isinstance(manifest.get("imbalance_strategies_by_model"), dict):
             model_imbalance_strategies.update(
@@ -406,6 +470,8 @@ class ModelRegistry:
         for m_key, m_info in model_metadata.items():
             if isinstance(m_info, dict) and "imbalance_strategy" in m_info:
                 model_imbalance_strategies.setdefault(str(m_key), str(m_info["imbalance_strategy"]))
+        if "XGBoost" in models or xgb_meta:
+            model_imbalance_strategies["XGBoost"] = requested_xgb_profile
 
         return LoadedArtifacts(
             models=models,
@@ -427,4 +493,7 @@ class ModelRegistry:
             missing_artifacts=sorted(set(missing_artifacts)),
             manifest_sha256=manifest_sha256,
             integrity_warnings=integrity_warnings,
+            active_xgboost_profile=requested_xgb_profile,
+            active_xgboost_artifact=xgb_filename,
+            available_xgboost_profiles=available_xgb_profiles,
         )

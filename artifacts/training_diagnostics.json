@@ -8,7 +8,7 @@
     "LOF": 0.4940686000009009,
     "Autoencoder (Deep Reg)": 53.45700869999928,
     "VAE": 33.46365119999973,
-    "XGBoost": 320.3317233000016
+    "XGBoost": 10.66
   },
   "overfitting_analysis": {
     "MLP": {
@@ -165,7 +165,7 @@
   "imbalance_strategies_by_model": {
     "MLP": "smote",
     "CNN": "smote",
-    "XGBoost": "none"
+    "XGBoost": "class_weight"
   },
   "neural_loss_experiments": {
     "MLP": {
@@ -258,9 +258,46 @@
       "train_samples": 145714
     },
     "XGBoost": {
-      "imbalance_strategy": "none",
+      "imbalance_strategy": "class_weight",
+      "active_profile": "class_weight",
+      "profile_files": {
+        "none": "xgb_model_none.json",
+        "class_weight": "xgb_model.json"
+      },
+      "available_profiles": {
+        "none": "xgb_model_none.json",
+        "class_weight": "xgb_model.json"
+      },
       "train_samples": 138190,
-      "selected_variant": "baseline"
+      "selected_variant": "baseline",
+      "profiles": {
+        "none": {
+          "profile": "none",
+          "artifact_file": "xgb_model_none.json",
+          "is_active": false,
+          "selected_variant": "baseline",
+          "train_samples": 138190,
+          "train_duration_sec": 8.31,
+          "val_macro_f1": 0.95043,
+          "val_weighted_f1": 0.998816,
+          "val_macro_recall": 0.933064,
+          "val_mlogloss": 0.00417,
+          "val_benign_fpr": 0.000762
+        },
+        "class_weight": {
+          "profile": "class_weight",
+          "artifact_file": "xgb_model.json",
+          "is_active": true,
+          "selected_variant": "baseline",
+          "train_samples": 138190,
+          "train_duration_sec": 10.66,
+          "val_macro_f1": 0.950115,
+          "val_weighted_f1": 0.99873,
+          "val_macro_recall": 0.958452,
+          "val_mlogloss": 0.006635,
+          "val_benign_fpr": 0.001321
+        }
+      }
     },
     "Autoencoder": {
       "imbalance_strategy": "benign_only",
@@ -477,5 +514,33 @@
     "xgb_device": "cuda",
     "cuda_driver_detected": true,
     "notes": "TensorFlow GPU not available on native Windows (>=2.11 CPU-only) or no CUDA runtime; using CPU. XGBoost CUDA acceleration verified and enabled."
+  },
+  "xgboost_profiles": {
+    "none": {
+      "profile": "none",
+      "artifact_file": "xgb_model_none.json",
+      "is_active": false,
+      "selected_variant": "baseline",
+      "train_samples": 138190,
+      "train_duration_sec": 8.31,
+      "val_macro_f1": 0.95043,
+      "val_weighted_f1": 0.998816,
+      "val_macro_recall": 0.933064,
+      "val_mlogloss": 0.00417,
+      "val_benign_fpr": 0.000762
+    },
+    "class_weight": {
+      "profile": "class_weight",
+      "artifact_file": "xgb_model.json",
+      "is_active": true,
+      "selected_variant": "baseline",
+      "train_samples": 138190,
+      "train_duration_sec": 10.66,
+      "val_macro_f1": 0.950115,
+      "val_weighted_f1": 0.99873,
+      "val_macro_recall": 0.958452,
+      "val_mlogloss": 0.006635,
+      "val_benign_fpr": 0.001321
+    }
   }
 }

@@ -93,6 +93,9 @@ imbalance_selection:
   per_model: true # Evaluate {none, class_weight, smote} on each model's own val Macro-F1 (MLP, 1D-CNN, XGBoost)
   neural_epochs_cap: 10 # Epoch cap for MLP and 1D-CNN candidate runs during strategy selection
 
+deployment:
+  xgboost_imbalance_profile: "class_weight" # Validated: class_weight | none (active XGBoost deployment profile)
+
 evaluation:
   latency_warmup_calls: 50 # Discard first N warm-up calls before recording single-flow latency
   latency_timed_runs: 100

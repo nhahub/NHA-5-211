@@ -102,7 +102,11 @@ def run_evaluation_suite(
         with diag_path.open("r", encoding="utf-8") as fh:
             train_diag = json.load(fh)
 
-    registry = ModelRegistry(models_dir=models_dir, artifacts_dir=artifacts_dir)
+    registry = ModelRegistry(
+        models_dir=models_dir,
+        artifacts_dir=artifacts_dir,
+        xgboost_profile=app_c.deployment.xgboost_imbalance_profile,
+    )
     artifacts = registry.load_all(load_keras=True)
     class_names = [str(c) for c in artifacts.label_encoder.classes_]
     benign_idx, _ = find_benign_class_index(artifacts.label_encoder)

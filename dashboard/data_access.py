@@ -34,6 +34,7 @@ def load_cached_artifacts() -> LoadedArtifacts:
     registry = ModelRegistry(
         models_dir=app_cfg.paths.resolve("models_dir"),
         artifacts_dir=app_cfg.paths.resolve("artifacts_dir"),
+        xgboost_profile=app_cfg.deployment.xgboost_imbalance_profile,
     )
     return registry.load_all(load_keras=True)
 

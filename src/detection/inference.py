@@ -50,6 +50,8 @@ class UnifiedDetectionEngine:
         self.artifacts = artifacts
         self.ensemble_cfg = ensemble_cfg or EnsembleConfig()
         self.response_engine = response_engine or ActiveResponseEngine(dry_run=True)
+        self.active_xgboost_profile = artifacts.active_xgboost_profile
+        self.active_xgboost_artifact = artifacts.active_xgboost_artifact
 
         if artifacts.label_encoder is not None:
             self.class_names = [str(c) for c in artifacts.label_encoder.classes_]
