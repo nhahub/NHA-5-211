@@ -32,7 +32,7 @@
 Both profiles were trained on the same `random` split with the same seed and are selected **only on validation data** (`used_test_data = False`).
 
 | Profile | Artifact | Selection Basis | `time_block` Test `F1_Macro` | Benign FPR | Attack Recall | Focus Mean Recall |
-|---|---|---:|---:|---:|---:|
+|---|---|---|---:|---:|---:|---:|
 | **`class_weight` (default active)** | `models/xgb_model.json` | `time_block` val `0.8754` vs `0.8534` | **0.8646** `[0.8460, 0.8763]` | `0.0144` | `0.9796` | `0.7968` |
 | `none` (alternate ultra-low-FPR) | `models/xgb_model_none.json` | random-split val `0.9518` vs `0.9446` | 0.7571 | `0.0002` | `0.9607` | `0.4547` |
 
