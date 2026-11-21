@@ -49,6 +49,11 @@ addopts = "-v --tb=short"
 filterwarnings = [
     "ignore::DeprecationWarning:tensorboard.*",
     "ignore::FutureWarning:sklearn.*",
+    # Upstream-only deprecations: Keras 3 <-> NumPy 2 array-copy protocol and TF autograph's gast shim.
+    "ignore::DeprecationWarning:keras.src.backend.tensorflow.core",
+    "ignore::DeprecationWarning:gast.astn",
+    # Environment-specific advisory (GPU-trained booster scored on CPU NumPy arrays); fallback is correct here.
+    "ignore:.*Falling back to prediction using DMatrix due to mismatched devices.*:UserWarning",
 ]
 
 [tool.ruff]
